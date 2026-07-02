@@ -44,7 +44,7 @@ This is the biggest open decision. Recommendation up front:
 
 ### CLI integration mechanics (Claude Code as reference)
 
-- Spawn `claude` in headless streaming mode (`-p --output-format stream-json --input-format stream-json --include-partial-messages`) as a **persistent subprocess per chat session**; multi-turn via the stream-json input, session resume via `--resume` if the process must be restarted. `--include-partial-messages` gives token-level text deltas, so the dock streams exactly like the terminal does. Process spawn latency (~1–3s) is masked by **pre-warming on first keystroke** in the composer — the dock sitting idle still spawns nothing.
+- Spawn `claude` in headless streaming mode (`-p --output-format stream-json --input-format stream-json --include-partial-messages`) as a **persistent subprocess per chat session**; multi-turn via the stream-json input, session resume via `--resume` if the process must be restarted. `--include-partial-messages` gives token-level text deltas, so the dock streams exactly like the terminal does. Process spawn latency (~1–3s) is masked by **pre-warming when the chat gains focus** (e.g. via `Cmd+J`) — an idle process waiting for input costs nothing, it happens once per chat session rather than per review, and a hidden/unfocused dock still spawns nothing.
 - Maintenance surface: the stream-json event schema is the *only* CLI format we parse (transcripts persist our own normalized events; the session id is opaque). It is the documented headless/SDK interface and evolves mostly additively, but drift is a standing cost: one thin per-CLI adapter maps raw events → our event schema, the doctor panel checks pinned minimum CLI versions, and a workbench smoke test runs against the real installed CLI to catch breakage in CI rather than in users' reviews.
 - System prompt injection via `--append-system-prompt` (card context, collection overview, conventions).
 - Tools via `--mcp-config` pointing at the add-on's MCP endpoint, `--allowedTools` / permission flags mapped from the add-on's permission mode. Restrict the CLI's own file/bash tools by default — the agent should live in collection-land, not the user's filesystem, unless the user opts in.
@@ -122,7 +122,8 @@ Read (default-allowed):
 
 Write (proposal-gated):
 - `propose_note(note_type, deck, tags, fields, rationale)` — never writes directly; creates a proposal card in the UI (see §8).
-- (later) `propose_note_edit(...)`, `propose_tag_change(...)` — same pattern.
+- `propose_note_edit(note_id, field_changes, add_tags, remove_tags, rationale)` — same gate; `field_changes` maps field name → new value. Validation includes a **staleness guard**: the proposal carries the field values the agent last read, and if the note changed underneath (user edited mid-chat, sync), the proposal is flagged for re-review instead of applying blind.
+- (later) `propose_tag_change(...)`, `propose_deck_move(...)` — same pattern.
 
 Permission modes (per-profile setting + per-session override in the dock header):
 - **Default**: reads always allowed, writes via proposals.
@@ -148,9 +149,18 @@ Two tiers, both stored per-profile in `user_files/skills/note-conventions/`:
 
 The existing `ai-enhanced-learning` skill (`skills/anki-card-authoring/`) is the first real-world test fixture.
 
-## 8. Note proposals
+## 8. Proposals: note creation and note editing
 
 Flow: agent calls `propose_note` → ProposalManager validates (note type exists, deck exists or is creatable, required fields present, duplicate check via Anki's dupe detection) → proposal card renders in the chat stream with editable fields, deck picker, tag editor, Accept / Edit / Reject.
+
+**Editing proposals — the review UX is a flagship surface.** The bar is "Cursor-grade amazing", but the right interface differs because the artifact is a flashcard, not code:
+
+- **Field-level diffs on rendered text**: word-level inline highlights (deletions struck through, insertions marked) per field — not line-based code diffs. Unchanged fields collapsed.
+- **Live card preview, before/after**: the proposal renders the note through its *actual card templates* — a toggle (or side-by-side, width permitting) between current card and card-as-it-would-become. Seeing the real card is the flashcard equivalent of Cursor showing the real file, and it's the detail most likely to make the UX feel magical.
+- **Granular acceptance**: per-field accept/reject plus accept-all, like Cursor's per-hunk controls.
+- **Keyboard-first**: when a proposal has focus — `Cmd+Enter` accept, `Cmd+Backspace` reject, `Tab`/arrows move between fields/proposals. Multiple pending proposals form a queue navigable without the mouse.
+- **Reversible**: the session ledger stores each edit's prior field values; one-click revert per edit and "revert session".
+- **Auto-accept scope**: auto-accept mode applies to *creations only* by default. Edits mutate existing user content and stay proposal-gated unless a separate, explicit auto-accept-edits toggle is enabled (same cap + ledger safeguards).
 
 **Pinning**: a dock panel lets the user pin deck, tags, note type, and prefilled field values. Pins persist (per-profile config) until changed. Pins are injected into context as *constraints*: pinned deck/tags are applied to every proposal (agent told not to fight them); pinned note type restricts `propose_note`; prefilled fields are defaults the agent should keep unless it has strong reason (and must flag when it overrides).
 
@@ -170,9 +180,11 @@ Flow: agent calls `propose_note` → ProposalManager validates (note type exists
   - **`Esc`** (in chat input) — context-aware, mirroring Claude Code: while a response is streaming it stops generation; otherwise it returns focus to the reviewer/deck browser without hiding the dock.
   - **`Shift+Tab`** (in chat input) — cycle permission modes, exactly as in Claude Code.
   - **`Enter`** sends, **`Shift+Enter`** newline.
+  - **`Tab`** (in empty composer) — accept the suggested question (below).
+- **Suggested questions (ghost text)**: when the composer is empty and focused, a context-aware suggestion renders as gray ghost text; `Tab` accepts it into the composer, typing anything dismisses it. Start with **static templates** chosen by context — reviewer: "Explain this card to me — I forgot", "Why is this the answer?", "Find cards related to this one"; deck browser: "What should I study today?", "Which decks are getting rusty?" — rotating between visits. Static first because it's instant, free, and predictable; **generated** suggestions (cheap model, cached per card) are a later experiment behind a flag, since per-card generation adds latency, cost, and distraction risk to every review. Configurable off.
   - Fallback chords if `J` clashes with another add-on: `Cmd+;` (home row, essentially never taken) or `Cmd+K` (familiar from launcher/chat UIs, but collides with "insert link" muscle memory in many editors).
   - Config UI warns on known conflicts with reviewer keys (space, 1–4, `u`, `e`, `*`, `-`, `!`, etc.) and stock main-window shortcuts (`a`, `b`, `y`, `t`, `s`, `d`).
-- **States**: the chat itself always starts empty — **no assistant preamble, no auto-greeting**; the conversation begins when the user sends the first message. Context (card block or collection overview) is assembled lazily at first send; the CLI process pre-warms on the first keystroke in the composer so spawn latency is hidden behind typing (an idle dock spawns nothing). The only pre-chat chrome is a subtle context chip showing *what the agent will see* ("Context: card 'define limits' in Math::Analysis" / "Context: collection overview") — trust through transparency, not a message in the transcript. The chip updates as the user moves between reviewer, deck browser, and overview.
+- **States**: the chat itself always starts empty — **no assistant preamble, no auto-greeting**; the conversation begins when the user sends the first message. Context (card block or collection overview) is assembled lazily at first send; the CLI process pre-warms when the chat gains focus, so spawn latency is hidden well before the first send (a hidden/unfocused dock spawns nothing). The only pre-chat chrome is a subtle context chip showing *what the agent will see* ("Context: card 'define limits' in Math::Analysis" / "Context: collection overview") — trust through transparency, not a message in the transcript. The chip updates as the user moves between reviewer, deck browser, and overview.
 - **Chat history**: sessions persisted per-profile as **our own event-sourced JSON transcripts** in `user_files/` — every rendered event (user/assistant messages, tool calls + results, proposal cards and their outcomes, permission decisions, context-chip state) is the source of truth for display and history. Each transcript stores the backend's session id, so "continue this chat" maps to the backend's native resume (`claude --resume <id>`) while pixels come from our file. CLI session files are deliberately *not* parsed: their formats are internal and version-unstable, the BYOK backend has none, and they lack our UI-level events.
 
 ## 10. Packaging & compatibility
@@ -194,8 +206,8 @@ Flow: agent calls `propose_note` → ProposalManager validates (note type exists
 
 - **M0 — Scaffold**: add-on skeleton, dock with webview, pycmd bridge, workbench smoke green, ScriptedBackend streaming fake chats. *Design iteration starts here.*
 - **M1 — Claude Code MVP**: CLIBackend (Claude Code), MCP server + bridge, read tools, card context + clues, stats cache + overview, toggle/new-chat shortcuts, permission modes (default + read-only).
-- **M2 — Notes**: propose_note, proposal cards, pins, conventions skill (prompt tier), session ledger + undo, auto-accept with safeguards.
-- **M3 — Breadth**: Codex adapter, full-skill tier, ask-each-read mode, chat history/resume, config dialog polish, doctor panel.
+- **M2 — Notes**: propose_note + propose_note_edit, proposal cards with field diffs + before/after card preview + keyboard-first review, pins, conventions skill (prompt tier), session ledger + undo/revert, auto-accept (creations) with safeguards.
+- **M3 — Breadth**: Codex adapter, full-skill tier, ask-each-read mode, chat history/resume, suggested questions (static ghost text), config dialog polish, doctor panel.
 - **M4 — BYOK**: APIBackend (Anthropic first) over the same tool registry, key storage, cost display. Decide then whether AnkiWeb publication leads with it.
 
 ## 13. Known issues, flaws, open questions
@@ -212,5 +224,5 @@ Flow: agent calls `propose_note` → ProposalManager validates (note type exists
 10. **Auto-accept remains dangerous** even with safeguards; consider requiring the user to type the mode name to enable it, and auto-disabling it each new Anki session (sticky opt-in is a footgun).
 11. **Cost/usage visibility (BYOK)**: deferred to M4 but must-have there — per-session token/cost meter.
 12. **Workspace-decision tension**: the 2026-06-24 note prefers Claude Code-only workflows over bespoke software. This project is bespoke, but the CLI-first backend is aligned in spirit — it *wraps* Claude Code rather than replacing it. Recorded so the contradiction is conscious.
-13. **Resolved 2026-07-02**: chats lead with nothing — no preamble; context assembly is lazy at first message, CLI process pre-warms on first keystroke. Chords **user-confirmed**: `Cmd+J` context-aware toggle (returns focus when in dock), `Cmd+Shift+J` new chat keeping focus in composer, `Esc` stop-or-leave. Chat UX copies Claude Code / ChatGPT conventions verbatim (§9). Transcripts: own event-sourced JSON with embedded backend session id for native resume (§9) — CLI session files never parsed, so the only CLI-format maintenance surface is the documented stream-json interface (§2).
-14. **Display name — direction decided 2026-07-02: boring-but-descriptive beats a cute brand.** Rationale: AnkiWeb search is primitive substring matching, and an add-on has no marketing muscle — the title *is* the marketing, and a descriptive one transmits the value proposition in a single utterance ("install Chat With Your Cards"). Leading candidate from the user: **"Chat With Your Cards"**; variant to weigh: **"Chat With Your Collection"** (broader — covers deck-browser chats and note creation — but less vivid). Keep "AI" in the AnkiWeb subtitle for search. Avoid "Copilot" (trademark) and model-vendor names (backend-plural by design). Repo stays `anki-chat-dock`. Earlier brand-style candidates (Deskmate, Marginalia, Sidekick, Socratic) kept for the record but deprioritized. SVG icon designed later; it need not derive from the name.
+13. **Resolved 2026-07-02**: chats lead with nothing — no preamble; context assembly is lazy at first message, CLI process pre-warms when the chat gains focus (once per session, not per review). Chords **user-confirmed**: `Cmd+J` context-aware toggle (returns focus when in dock), `Cmd+Shift+J` new chat keeping focus in composer, `Esc` stop-or-leave. Chat UX copies Claude Code / ChatGPT conventions verbatim (§9). Transcripts: own event-sourced JSON with embedded backend session id for native resume (§9) — CLI session files never parsed, so the only CLI-format maintenance surface is the documented stream-json interface (§2).
+14. **Display name — resolved 2026-07-02: "Chat With Your Cards".** Rationale: AnkiWeb search is primitive substring matching, and an add-on has no marketing muscle — the title *is* the marketing, and a descriptive one transmits the value proposition in a single utterance. Keep "AI" in the AnkiWeb subtitle for search. Avoid "Copilot" (trademark) and model-vendor names (backend-plural by design). Repo renamed to `chat-with-your-cards`. Earlier brand-style candidates (Deskmate, Marginalia, Sidekick, Socratic) and the "Chat With Your Collection" variant kept for the record but rejected. SVG icon designed later; it need not derive from the name.

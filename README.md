@@ -1,6 +1,6 @@
-# anki-chat-dock
+# Chat With Your Cards
 
-An Anki add-on that adds a collapsible, modern chat dock/sidebar for talking to an AI agent while studying.
+An Anki add-on that adds a collapsible, modern chat dock/sidebar for talking to an AI agent while studying. (Repo: `chat-with-your-cards`.)
 
 - The current card under review is prominently in context — discussing the card is the flagship use case, but any question works.
 - The agent has tools to query the collection (Anki search syntax, note/card lookup, deck/tag/stat overviews), allowed by default with configurable permission modes.

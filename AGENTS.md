@@ -2,7 +2,7 @@
 
 ## Scope
 
-These instructions apply to the `anki-chat-dock` repository: an Anki add-on providing a collapsible AI chat dock/sidebar.
+These instructions apply to the `chat-with-your-cards` repository: "Chat With Your Cards", an Anki add-on providing a collapsible AI chat dock/sidebar.
 
 ## Source of truth
 
