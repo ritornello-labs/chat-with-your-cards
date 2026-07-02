@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+dist/
+build/
+*.ankiaddon
+.DS_Store
+.env
+user_files/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
