@@ -52,7 +52,18 @@ This is the biggest open decision. Recommendation up front:
 
 ### MCP transport
 
+MCP here is **only the wire protocol** between the CLI subprocess and the add-on's own in-process tools — it is how Claude Code / Codex are told "these tools exist, call them here". It is not a product feature and not a general-purpose Anki API.
+
 The add-on runs a **minimal MCP server over localhost HTTP** inside Anki's process (background thread, random port, per-session bearer token). Hand-rolled JSON-RPC — no heavy dependencies, AnkiWeb-friendly. For CLIs that only speak stdio MCP, ship a tiny stdio↔HTTP bridge script inside the add-on package and register that as the MCP server command. Tool execution marshals onto Anki's main thread (`mw.taskman.run_on_main`) because collection access is not thread-safe.
+
+**Prior art — existing Anki MCP servers (not reused).** Several exist (e.g. `ankimcp/anki-mcp-server`, `nailuoGG/anki-mcp-server`, `CamdenClark/anki-mcp-server`); all are standalone processes that proxy to the AnkiConnect add-on. We do not reuse them because:
+
+1. They add two install dependencies (AnkiConnect + a Node/Python server) — breaks off-the-shelf simplicity.
+2. Our write path must route through the ProposalManager (proposal cards, pins, ledger, auto-accept caps), not AnkiConnect's direct `addNote`.
+3. Permission modes must be enforced server-side in our layer, per chat session; a generic proxy has no notion of them.
+4. Our tools are opinionated (clue-based `find_related`, budgeted annotated trees, cached stats), not raw CRUD.
+
+What we do take from them: tool naming/schema conventions where they exist, so agents' priors transfer.
 
 ## 3. Architecture
 
@@ -89,7 +100,12 @@ Every session (and on relevant changes mid-session) the agent receives:
 4. **User conventions skill** (see §7).
 5. **Standing instructions**: what tools exist, permission mode in force, how to propose notes, how to use Anki search syntax effectively.
 
-**Size control (known flaw of "full hierarchy"):** collections can have thousands of decks/tags. The overview serializer enforces a budget (~4k tokens default, configurable): collapse subtrees smaller than N notes into `… (+k subdecks, m notes)`, always keep the current card's deck lineage expanded, and tell the agent to call `deck_tree` / `tag_tree` tools for drill-down. Never silently truncate — annotate what was folded.
+**Size control — measure, then decide.** Most users' deck/tag hierarchies are small; don't degrade them preemptively. The serializer renders the full annotated trees, estimates token count (chars/4 heuristic is fine for a threshold decision; exact tokenizers aren't available offline), and:
+
+- **Fits the budget** (default ~8k tokens, configurable): include both trees in full. Expected common case.
+- **Over budget**: fall back to card-local context — the current card's deck lineage (ancestors + siblings), its tags, and a top-level skeleton of both trees with fold annotations (`… +k subdecks, m notes`) — and rely on tools for everything else. Config override: `auto` (default) / `always-full` / `minimal`.
+
+Either way, `deck_tree` / `tag_tree` tools always return complete trees on demand. For choosing relevant tags/decks from a large list, the standing instructions recommend the **subagent pattern**: a CLI-backend agent spawns a subagent to read the full tree and pick relevant nodes, keeping the main context clean. An LLM reading the actual list beats keyword or embedding search at this scale — no embedding infrastructure is planned. (BYOK equivalent later: a one-shot cheap-model "tree picker" call behind the same tool.)
 
 ## 5. Tools
 
@@ -147,11 +163,14 @@ Flow: agent calls `propose_note` → ProposalManager validates (note type exists
 
 - **Dock**: right-side `QDockWidget`, collapsible, floatable, width persisted. Header: backend/model indicator, permission mode chip, new-chat button, overflow menu.
 - **Look**: modern chat vernacular — bubbles, streaming text, markdown with code blocks, collapsible tool-call chips showing query + result count, proposal cards as rich inline forms. CSS custom properties keyed to Anki's palette; obeys Anki light/dark and night-mode hooks. Design pass via workbench screenshots (see §11).
-- **Shortcuts** (all configurable in config UI, registered as `QShortcut` on the main window):
-  - Toggle chord (default `Ctrl+J` / `Cmd+J`): if dock hidden → show + focus input; if focus in dock → return focus to reviewer/deck browser; if focus elsewhere and dock visible → focus input. One key, three context-aware behaviors. The webview forwards the chord back to Python when the input has focus (Qt shortcuts don't fire inside webviews reliably — known sharp edge).
-  - New chat (default `Ctrl+Shift+J`), also a header button. Fresh context, previous session listed in history.
-  - Must not collide with reviewer keys (space, 1–4, etc.); config UI warns on known conflicts.
-- **States**: reviewer (card context banner at top of chat, updates as cards change), deck browser (no card; overview-led), overview screen. A subtle banner shows *what the agent currently sees* ("Context: card 'define limits' in Math::Analysis") — trust through transparency.
+- **Shortcuts** (all configurable in config UI, registered as `QShortcut` on the main window). Proposed defaults:
+  - **`Cmd+J` / `Ctrl+J` — toggle chat focus**: if dock hidden → show + focus input; if focus in dock → return focus to reviewer/deck browser; if focus elsewhere and dock visible → focus input. One chord, three context-aware behaviors. Home-row, one-handed, unused by stock Anki (reviewer, deck browser, or editor). The webview forwards the chord back to Python when the input has focus (Qt shortcuts don't fire inside webviews reliably — known sharp edge).
+  - **`Cmd+Shift+J` / `Ctrl+Shift+J` — new chat** with fresh context; also a header button. Previous session goes to history.
+  - **`Esc`** (in chat input) — return focus to the reviewer/deck browser without hiding the dock.
+  - **`Enter`** sends, **`Shift+Enter`** newline.
+  - Fallback chords if `J` clashes with another add-on: `Cmd+;` (home row, essentially never taken) or `Cmd+K` (familiar from launcher/chat UIs, but collides with "insert link" muscle memory in many editors).
+  - Config UI warns on known conflicts with reviewer keys (space, 1–4, `u`, `e`, `*`, `-`, `!`, etc.) and stock main-window shortcuts (`a`, `b`, `y`, `t`, `s`, `d`).
+- **States**: the chat itself always starts empty — **no assistant preamble, no auto-greeting**; the conversation begins when the user sends the first message. Context (card block or collection overview) is assembled lazily at first send, which also defers CLI process spawn to when it's actually needed. The only pre-chat chrome is a subtle context chip showing *what the agent will see* ("Context: card 'define limits' in Math::Analysis" / "Context: collection overview") — trust through transparency, not a message in the transcript. The chip updates as the user moves between reviewer, deck browser, and overview.
 - **Chat history**: sessions persisted per-profile (JSON transcripts in `user_files/`), searchable list, resumable where the backend supports it.
 
 ## 10. Packaging & compatibility
@@ -185,10 +204,11 @@ Flow: agent calls `propose_note` → ProposalManager validates (note type exists
 4. **Local security**: localhost MCP server must require the per-session bearer token, bind 127.0.0.1, and die with the session — otherwise any local process can read the collection.
 5. **Threading**: collection access strictly main-thread; tool calls arriving on the MCP thread must queue onto it without deadlocking Anki if a tool is slow. Needs a timeout + cancellation story.
 6. **Mid-review context drift**: user answers a card while the agent is mid-response about the previous one. Policy: responses are tagged with the card they were about; context updates are explicit events; the UI labels stale answers rather than pretending continuity.
-7. **Full hierarchies don't scale** in context — solved by budgeted serialization + drill-down tools (§4), but the budget heuristics need tuning on a real large collection.
+7. **Full hierarchies usually fit; measure instead of guessing** — full trees included when under the token budget, card-local fallback + full-tree tools + subagent picking otherwise (§4). The budget default and the chars/4 estimate need validation on a real large collection.
 8. **Shortcut capture inside webviews** is fiddly (Qt vs. JS focus); the toggle chord needs both a QShortcut and a JS keydown path. Known sharp edge to test early on all three OSes.
 9. **CLI environment discovery** (PATH in GUI apps on macOS, login state, version drift) — needs the doctor panel and pinned-flag compatibility testing per CLI release. This is standing maintenance cost.
 10. **Auto-accept remains dangerous** even with safeguards; consider requiring the user to type the mode name to enable it, and auto-disabling it each new Anki session (sticky opt-in is a footgun).
 11. **Cost/usage visibility (BYOK)**: deferred to M4 but must-have there — per-session token/cost meter.
 12. **Workspace-decision tension**: the 2026-06-24 note prefers Claude Code-only workflows over bespoke software. This project is bespoke, but the CLI-first backend is aligned in spirit — it *wraps* Claude Code rather than replacing it. Recorded so the contradiction is conscious.
-13. **Open**: exact default chord (`Ctrl+J` clashes with nothing in stock Anki reviewer, but add-ons vary); session transcript format (own JSON vs. reusing CLI session files); whether deck-browser chats should get a *different* default overview emphasis (stats-led vs. card-led); name of the add-on as shown in Anki ("Chat Dock"? "Study Chat"?).
+13. **Resolved 2026-07-02**: chats lead with nothing — no preamble; session and context assembly start lazily at the user's first message, in both reviewer and deck browser. Default chords proposed in §9 (`Cmd+J` toggle, `Cmd+Shift+J` new chat, `Esc` to leave) pending user sign-off.
+14. **Open**: session transcript format (own JSON vs. reusing CLI session files); name of the add-on as shown in Anki ("Chat Dock"? "Study Chat"?).
