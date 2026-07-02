@@ -1,0 +1,53 @@
+[project]
+name = "chat-with-your-cards"
+version = "0.1.0"
+description = "Anki add-on: a collapsible AI chat dock for talking to your collection."
+requires-python = ">=3.10"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "anki-addon-workbench[gui]>=0.4.0",
+    "mypy>=1.13.0",
+    "ruff>=0.6.0",
+]
+
+[tool.uv]
+package = false
+exclude-newer = "7 days"
+
+[tool.uv.pip]
+exclude-newer = "7 days"
+
+[tool.anki-addon-workbench]
+project_name = "Chat With Your Cards"
+addon_package = "chat_with_your_cards"
+source_root = "chat_with_your_cards"
+include = [
+    "__init__.py",
+    "manifest.json",
+    "config.json",
+    "config.md",
+    "dock.py",
+    "bridge.py",
+    "controller.py",
+    "shortcuts.py",
+    "backends",
+    "web",
+]
+exclude = ["__pycache__", "user_files"]
+probe_addon = "tests/gui_smoke/probe_addon"
+probe_package = "zz_chat_with_your_cards_probe"
+anki_version = "25.09"
+profile = "User 1"
+docker_image = "chat-with-your-cards-anki-gui"
+
+[tool.ruff]
+line-length = 100
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+follow_imports = "skip"
+check_untyped_defs = false
+explicit_package_bases = true

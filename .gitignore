@@ -11,3 +11,6 @@ user_files/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.uv-cache/
+.tmp-gui-workbench/
+.tmp-gui-smoke/

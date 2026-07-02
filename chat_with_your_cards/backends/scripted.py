@@ -1,0 +1,125 @@
+"""ScriptedBackend: replays canned scripts as streamed chat events.
+
+Exists so the chat UI can be designed, demoed, and smoke-tested with no
+real AI behind it. Emits the exact same event union a real backend will.
+
+No aqt imports: the scheduler is injected. Production passes a QTimer
+adapter; unit tests pass an immediate executor.
+"""
+
+from __future__ import annotations
+
+import functools
+import random
+from typing import Any, Callable
+
+from .base import (
+    ChatEvent,
+    Done,
+    EventCallback,
+    TextDelta,
+    ToolCallFinished,
+    ToolCallStarted,
+)
+from .fixtures import Step, select_script
+
+# schedule(delay_ms, callback) -> None
+Scheduler = Callable[[int, Callable[[], None]], None]
+
+_DELTA_MIN_WORDS = 2
+_DELTA_MAX_WORDS = 5
+_DELTA_MIN_MS = 25
+_DELTA_MAX_MS = 60
+
+
+def compile_script(steps: list[Step], rng: random.Random) -> list[tuple[int, ChatEvent]]:
+    """Flatten fixture steps into (delay_ms, event) pairs ending with Done."""
+    timeline: list[tuple[int, ChatEvent]] = []
+    call_counter = 0
+    for step in steps:
+        if step["kind"] == "text":
+            for delta in _chop_markdown(step["markdown"], rng):
+                timeline.append((rng.randint(_DELTA_MIN_MS, _DELTA_MAX_MS), TextDelta(delta)))
+        elif step["kind"] == "tool":
+            call_counter += 1
+            call_id = f"call-{call_counter}"
+            timeline.append(
+                (
+                    rng.randint(_DELTA_MIN_MS, _DELTA_MAX_MS),
+                    ToolCallStarted(call_id, step["tool"], step["summary"]),
+                )
+            )
+            timeline.append(
+                (
+                    int(step["duration_ms"]),
+                    ToolCallFinished(call_id, bool(step["ok"]), step["result"]),
+                )
+            )
+        else:
+            raise ValueError(f"unknown fixture step kind: {step['kind']!r}")
+    timeline.append((_DELTA_MAX_MS, Done()))
+    return timeline
+
+
+def _chop_markdown(markdown: str, rng: random.Random) -> list[str]:
+    """Split markdown into small word-group deltas that reassemble verbatim."""
+    deltas: list[str] = []
+    words = markdown.split(" ")
+    index = 0
+    while index < len(words):
+        take = rng.randint(_DELTA_MIN_WORDS, _DELTA_MAX_WORDS)
+        chunk = " ".join(words[index : index + take])
+        if index + take < len(words):
+            chunk += " "
+        deltas.append(chunk)
+        index += take
+    return deltas
+
+
+class ScriptedSession:
+    def __init__(self, schedule: Scheduler, rng: random.Random) -> None:
+        self._schedule = schedule
+        self._rng = rng
+        # Bumping the generation invalidates all pending timer callbacks.
+        self._generation = 0
+        self._streaming = False
+
+    @property
+    def streaming(self) -> bool:
+        return self._streaming
+
+    def send(self, text: str, on_event: EventCallback) -> None:
+        if self._streaming:
+            raise RuntimeError("send() while a response is still streaming")
+        timeline = compile_script(select_script(text), self._rng)
+        self._streaming = True
+        generation = self._generation
+        elapsed = 0
+
+        def deliver(event: ChatEvent, gen: int) -> None:
+            if gen != self._generation:
+                return
+            if isinstance(event, Done):
+                self._streaming = False
+            on_event(event)
+
+        for delay, event in timeline:
+            elapsed += delay
+            self._schedule(elapsed, functools.partial(deliver, event, generation))
+
+    def cancel(self) -> None:
+        self._generation += 1
+        self._streaming = False
+
+    def close(self) -> None:
+        self.cancel()
+
+
+class ScriptedBackend:
+    def __init__(self, schedule: Scheduler, seed: int | None = None) -> None:
+        self._schedule = schedule
+        self._seed = seed
+
+    def start_session(self, context: dict[str, Any]) -> ScriptedSession:
+        rng = random.Random(self._seed)
+        return ScriptedSession(self._schedule, rng)
