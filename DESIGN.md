@@ -196,11 +196,13 @@ Flow: agent calls `propose_note` → ProposalManager validates (note type exists
 
 ## 11. Development workflow
 
-- Use `anki-addon-workbench` (install from PyPI via `uv`, e.g. `uv tool install anki-addon-workbench[gui]` or as a dev dependency) from the very first milestone:
-  - disposable-profile smoke tests: add-on loads, dock registers, menu/shortcut present, MCP server starts/stops cleanly;
-  - Docker/Xvfb for repeatable headless CI checks;
-  - `anki-workbench launch` + `screenshot`/`click`/`type` for visual design iteration — take screenshots, inspect them with vision, refine CSS, repeat. Treat screenshots as design evidence (text fits, controls discoverable, dock legible in both themes).
+(Revised during M0 — the original plan assumed host GUI iteration via `anki-workbench launch`; that proved both broken and intrusive on macOS.)
+
+- **Fast UI loop, no Anki**: `dev/preview.html` served from the repo — loads the real web assets, replicates Anki's `webview.css` quirks (`* { box-sizing: content-box }`, 15px root font, global button styles, `body { margin: 2em }`), stubs `pycmd` with a scripted stream. Iterate CSS/JS here in seconds, invisibly.
+- **Real-Anki verification, headless**: `make test-gui-smoke-docker` (workbench Docker/Xvfb). The probe drives the real send path end-to-end and captures light+dark screenshots itself via `mw.grab()` — no OS screenshot permissions, no visible windows. Treat screenshots as design evidence (text fits, controls discoverable, dock legible in both themes).
+- **Never launch visible Anki GUIs on the user's machine during normal work** (user feedback 2026-07-02: focus stealing disrupts their other work). Host `make test-gui-smoke` only with explicit per-session OK. `anki-workbench launch` is additionally broken on macOS (xdotool window-wait; upstream fix flagged) — `scripts/dev_launch.py` monkeypatches around it if ever needed.
 - A fake backend (`ScriptedBackend` replaying canned event streams) so UI/UX iteration never needs a live CLI or API key, and so smoke tests are deterministic.
+- M0 sharp edges hit (for future reference): pycmd is not wired the instant page JS runs (ready ping must retry until acked); QtWebEngine leaves stale tiles after a pure CSS-class theme flip (force a reflow before `mw.grab()`); `resizeDocks` only sticks on visible docks (apply width in `showEvent`); Anki's global `content-box` broke the composer (scoped `border-box` reset).
 
 ## 12. Milestones
 

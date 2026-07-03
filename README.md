@@ -11,8 +11,21 @@ An Anki add-on that adds a collapsible, modern chat dock/sidebar for talking to 
 
 ## Status
 
-Design phase. No implementation yet. The full architecture, milestones, and known issues live in [DESIGN.md](DESIGN.md).
+M0 scaffold complete: installable add-on with the chat dock, streaming chat UI
+driven by a scripted fake backend (`ScriptedBackend`), context-aware `Ctrl+J` /
+`Ctrl+Shift+J` shortcuts, light/dark theming, and green GUI smoke tests (macOS
+host and Docker/Xvfb). No real AI backend yet — that is milestone M1. The full
+architecture, milestones, and known issues live in [DESIGN.md](DESIGN.md).
 
-## Development (planned)
+## Development
 
-Development uses [`anki-addon-workbench`](https://pypi.org/project/anki-addon-workbench/) (installed from PyPI via `uv`) for disposable-profile smoke tests, Docker/Xvfb CI checks, and screenshot-driven visual design iteration.
+- `make check` — lint (ruff), types (mypy), unit tests (no Anki needed).
+- `make test-gui-smoke-docker` — headless real-Anki smoke in Docker/Xvfb via
+  [`anki-addon-workbench`](https://pypi.org/project/anki-addon-workbench/);
+  the probe captures light/dark screenshots itself with `mw.grab()`.
+- `dev/preview.html` (serve the repo, open in a browser, `?night` for dark) —
+  fast chat-UI iteration with a stubbed `pycmd`, no Anki involved.
+- The add-on proper lives in `chat_with_your_cards/`; a future `.ankiaddon`
+  is that directory zipped.
+
+See `tests/gui_smoke/README.md` for details and platform caveats.
