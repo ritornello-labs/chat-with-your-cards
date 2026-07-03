@@ -268,6 +268,10 @@ class ClaudeCliSession:
         self._generation = 0
         self._streaming = False
         self._on_event: EventCallback | None = None
+        # Model/effort the live process was spawned with; a mismatch means
+        # the user switched mid-chat and the next send must respawn.
+        self._spawned_model = model
+        self._spawned_effort = effort
 
     @property
     def streaming(self) -> bool:
@@ -281,9 +285,33 @@ class ClaudeCliSession:
         """Spawn the CLI ahead of the first send (hides startup latency)."""
         self._ensure_process()
 
+    def set_model_effort(self, model: str, effort: str) -> None:
+        """Switch model/effort mid-conversation. The change takes effect on
+        the next send: the process respawns with --resume so the same
+        conversation continues under the new model (matching the CLI apps).
+        Applied lazily so an in-flight response is never interrupted."""
+        self._model = model
+        self._effort = effort
+
     def _ensure_process(self) -> None:
         if self._process is not None and self._process.poll() is None:
-            return
+            if (self._spawned_model, self._spawned_effort) == (
+                self._model,
+                self._effort,
+            ):
+                return
+            # Model/effort changed since this process spawned: tear it down
+            # and respawn below with --resume to keep the conversation.
+            # Bump the generation first so the dying process's reader thread
+            # (which will see SIGTERM as a nonzero exit) is fenced off and
+            # does not emit a spurious error/Done into the new turn.
+            self._log.write(
+                f"model switch {self._spawned_model or '-'}/{self._spawned_effort or '-'}"
+                f" -> {self._model or '-'}/{self._effort or '-'} pid={self._process.pid}"
+            )
+            self._generation += 1
+            self._process.terminate()
+            self._process = None
         args = build_cli_args(
             cli_path=self._cli_path,
             system_prompt=self._system_prompt,
@@ -303,9 +331,11 @@ class ClaudeCliSession:
             stderr=subprocess.PIPE,
             text=True,
         )
+        self._spawned_model = self._model
+        self._spawned_effort = self._effort
         self._log.write(
             f"spawn pid={self._process.pid} resume={self._state.session_id or '-'} "
-            f"cli={self._cli_path}"
+            f"model={self._model or '-'} effort={self._effort or '-'} cli={self._cli_path}"
         )
         generation = self._generation
         self._reader = threading.Thread(

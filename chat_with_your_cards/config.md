@@ -17,7 +17,9 @@
   model id. Also selectable live from the dock header (Model chip).
 - `effort` (default empty = the CLI's own default): reasoning effort level, one of
   `low`, `medium`, `high`, `xhigh`, `max`. Also selectable from the header.
-  Model and effort are session-level; changing either starts a fresh chat.
+  Switching model or effort mid-chat keeps the current conversation - the CLI is
+  re-invoked with `--resume` on your next message. Your choice is remembered
+  across chats and restarts; the CLI default only applies until you first pick.
 - `permission_mode` (default `default`): `default` allows collection reads without
   asking and gates note creation/editing behind proposal cards; `read-only`
   removes the write tools entirely; `auto-accept` applies the assistant's note

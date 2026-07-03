@@ -148,8 +148,10 @@ class ChatController:
         self._push({"type": "reset"})
 
     def set_agent_config(self, model: str, effort: str) -> None:
-        """Change model/effort. These are session-level CLI flags, so the
-        change starts a fresh chat (matching how the CLI scopes them)."""
+        """Change model/effort. Applied to the live session mid-conversation:
+        the CLI process respawns with --resume on the next message, so the
+        same chat continues under the new model (matching the CLI apps). The
+        choice is the caller's to persist (see __init__ _set_agent)."""
         from .backends.claude_cli import VALID_EFFORTS
 
         model = (model or "").strip()
@@ -162,8 +164,31 @@ class ChatController:
         self._config["model"] = model
         self._config["effort"] = effort
         if changed and self._session is not None:
-            self.new_chat()
+            apply = getattr(self._session, "set_model_effort", None)
+            if apply is not None:
+                apply(model, effort)
+                suffix = (
+                    " It applies from your next message."
+                    if self.streaming
+                    else " Continuing this chat under the new model."
+                )
+                self._push(
+                    {"type": "notice", "text": f"Switched to {self._agent_label()}.{suffix}"}
+                )
         self.push_agent_state()
+
+    def _agent_label(self) -> str:
+        names = {
+            "": "the default model",
+            "fable": "Fable",
+            "opus": "Opus",
+            "sonnet": "Sonnet",
+            "haiku": "Haiku",
+        }
+        model = str(self._config.get("model", ""))
+        effort = str(self._config.get("effort", ""))
+        label = names.get(model, model)
+        return f"{label} · {effort} effort" if effort else label
 
     def push_agent_state(self) -> None:
         self._push(
