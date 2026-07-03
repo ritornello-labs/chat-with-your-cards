@@ -63,15 +63,27 @@ class ParseStreamLineTest(unittest.TestCase):
         first = parse_stream_line(line, self.state)
         second = parse_stream_line(line, self.state)  # full message repeats
 
-        self.assertEqual(1, len(first))
-        started = first[0]
+        # No deltas preceded this message, so its text is surfaced too.
+        self.assertEqual(2, len(first))
+        self.assertEqual(TextDelta("Looking..."), first[0])
+        started = first[1]
         assert isinstance(started, ToolCallStarted)
         self.assertEqual("toolu_1", started.call_id)
         self.assertEqual("mcp__anki__search_notes", started.tool)
         self.assertIn("limit", started.summary)
         self.assertEqual([], second, "duplicate tool_use must not re-start the chip")
 
-    def test_assistant_text_blocks_do_not_duplicate_deltas(self) -> None:
+    def test_streamed_text_not_duplicated_by_full_message(self) -> None:
+        parse_stream_line(
+            {
+                "type": "stream_event",
+                "event": {
+                    "type": "content_block_delta",
+                    "delta": {"type": "text_delta", "text": "full text"},
+                },
+            },
+            self.state,
+        )
         events = parse_stream_line(
             {
                 "type": "assistant",
@@ -80,6 +92,45 @@ class ParseStreamLineTest(unittest.TestCase):
             self.state,
         )
         self.assertEqual([], events)
+
+    def test_unstreamed_assistant_text_is_surfaced(self) -> None:
+        # Synthetic CLI messages (e.g. "You've hit your session limit ·
+        # resets 1pm") arrive as full assistant messages with no partial
+        # deltas; dropping them left the chat silently hanging (2026-07-03).
+        events = parse_stream_line(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {"type": "text", "text": "You've hit your session limit"}
+                    ]
+                },
+            },
+            self.state,
+        )
+        self.assertEqual([TextDelta("You've hit your session limit")], events)
+
+    def test_unstreamed_text_counter_resets_per_message(self) -> None:
+        streamed = {
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "delta": {"type": "text_delta", "text": "part one"},
+            },
+        }
+        full_1 = {
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": "part one"}]},
+        }
+        full_2 = {
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": "synthetic follow-up"}]},
+        }
+        parse_stream_line(streamed, self.state)
+        self.assertEqual([], parse_stream_line(full_1, self.state))
+        self.assertEqual(
+            [TextDelta("synthetic follow-up")], parse_stream_line(full_2, self.state)
+        )
 
     def test_user_tool_result(self) -> None:
         events = parse_stream_line(

@@ -16,6 +16,8 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -32,8 +34,38 @@ from .base import (
 
 SUMMARY_CHARS = 90
 RESULT_CHARS = 120
+LOG_ROTATE_BYTES = 512 * 1024
 
 RunOnUi = Callable[[Callable[[], None]], None]
+
+
+class BackendLog:
+    """Append-only debug log (user_files/logs/backend.log), thread-safe.
+
+    Exists so 'the chat hung' is diagnosable after the fact: spawn/exit,
+    send, result subtypes, and the CLI's stderr all land here.
+    """
+
+    def __init__(self, path: Path | None) -> None:
+        self._path = path
+        self._lock = threading.Lock()
+        if path is not None:
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                if path.exists() and path.stat().st_size > LOG_ROTATE_BYTES:
+                    path.replace(path.with_suffix(".log.1"))
+            except OSError:
+                self._path = None
+
+    def write(self, message: str) -> None:
+        if self._path is None:
+            return
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            with self._lock, self._path.open("a", encoding="utf-8") as handle:
+                handle.write(f"{stamp} {message}\n")
+        except OSError:
+            pass
 
 
 def find_claude_cli(configured: str = "") -> str | None:
@@ -66,6 +98,12 @@ def _compact(value: Any, limit: int) -> str:
 class ParserState:
     session_id: str | None = None
     started_calls: set[str] = field(default_factory=set)
+    # Chars streamed via partial deltas since the last full assistant
+    # message. Synthetic CLI messages (usage-limit notices, some errors)
+    # skip the partial-delta path entirely; when a full assistant message
+    # arrives with text nobody streamed, surface it as one TextDelta.
+    streamed_chars: int = 0
+    surfaced_texts: set[str] = field(default_factory=set)
 
 
 def parse_stream_line(obj: dict[str, Any], state: ParserState) -> list[ChatEvent]:
@@ -87,16 +125,21 @@ def parse_stream_line(obj: dict[str, Any], state: ParserState) -> list[ChatEvent
         if event.get("type") == "content_block_delta":
             delta = event.get("delta") or {}
             if delta.get("type") == "text_delta" and delta.get("text"):
+                state.streamed_chars += len(delta["text"])
                 return [TextDelta(delta["text"])]
         return []
 
     if kind == "assistant":
         events: list[ChatEvent] = []
         message = obj.get("message") or {}
+        unstreamed_text: list[str] = []
         for block in message.get("content") or []:
-            if (
-                isinstance(block, dict)
-                and block.get("type") == "tool_use"
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "text" and block.get("text"):
+                unstreamed_text.append(block["text"])
+            elif (
+                block.get("type") == "tool_use"
                 and block.get("id") not in state.started_calls
             ):
                 state.started_calls.add(block["id"])
@@ -107,6 +150,11 @@ def parse_stream_line(obj: dict[str, Any], state: ParserState) -> list[ChatEvent
                         summary=_compact(block.get("input", {}), SUMMARY_CHARS),
                     )
                 )
+        joined = "\n\n".join(unstreamed_text)
+        if joined and state.streamed_chars == 0 and joined not in state.surfaced_texts:
+            state.surfaced_texts.add(joined)
+            events.insert(0, TextDelta(joined))
+        state.streamed_chars = 0
         return events
 
     if kind == "user":
@@ -190,6 +238,7 @@ class ClaudeCliSession:
         mcp_token: str,
         run_on_ui: RunOnUi,
         workdir: Path,
+        log: BackendLog | None = None,
     ) -> None:
         self._cli_path = cli_path
         self._system_prompt = system_prompt
@@ -198,6 +247,8 @@ class ClaudeCliSession:
         self._tmpdir = Path(tempfile.mkdtemp(prefix="cwyc-claude-"))
         self._mcp_config = write_mcp_config(self._tmpdir, mcp_url, mcp_token)
         self._run_on_ui = run_on_ui
+        self._log = log or BackendLog(None)
+        self._stderr_tail: deque[str] = deque(maxlen=40)
         self._process: subprocess.Popen[str] | None = None
         self._reader: threading.Thread | None = None
         self._state = ParserState()
@@ -237,6 +288,10 @@ class ClaudeCliSession:
             stderr=subprocess.PIPE,
             text=True,
         )
+        self._log.write(
+            f"spawn pid={self._process.pid} resume={self._state.session_id or '-'} "
+            f"cli={self._cli_path}"
+        )
         generation = self._generation
         self._reader = threading.Thread(
             target=self._read_loop,
@@ -245,6 +300,23 @@ class ClaudeCliSession:
             daemon=True,
         )
         self._reader.start()
+        threading.Thread(
+            target=self._stderr_loop,
+            args=(self._process,),
+            name="cwyc-claude-stderr",
+            daemon=True,
+        ).start()
+
+    def _stderr_loop(self, process: subprocess.Popen[str]) -> None:
+        # Drain continuously: an undrained 16KB pipe would eventually block
+        # the CLI mid-response. Everything goes to the backend log.
+        if process.stderr is None:
+            return
+        for line in process.stderr:
+            line = line.rstrip()
+            if line:
+                self._stderr_tail.append(line)
+                self._log.write(f"[stderr pid={process.pid}] {line}")
 
     def send(self, text: str, on_event: EventCallback) -> None:
         if self._streaming:
@@ -260,8 +332,10 @@ class ClaudeCliSession:
         try:
             self._process.stdin.write(json.dumps(payload) + "\n")
             self._process.stdin.flush()
+            self._log.write(f"send chars={len(text)} pid={self._process.pid}")
         except (BrokenPipeError, OSError) as exc:
             self._streaming = False
+            self._log.write(f"send failed: {exc}")
             self._deliver_now(ErrorEvent(f"could not talk to claude CLI: {exc}"))
             self._deliver_now(Done())
 
@@ -274,17 +348,22 @@ class ClaudeCliSession:
             try:
                 obj = json.loads(line)
             except json.JSONDecodeError:
+                self._log.write(f"unparseable stdout line: {line[:200]}")
                 continue
+            if obj.get("type") == "result":
+                self._log.write(
+                    "result subtype={} is_error={} text={}".format(
+                        obj.get("subtype"),
+                        obj.get("is_error"),
+                        _compact(obj.get("result") or "", 200),
+                    )
+                )
             events = parse_stream_line(obj, self._state)
             for event in events:
                 self._dispatch(event, generation)
         if process.poll() not in (0, None) and generation == self._generation:
-            stderr_tail = ""
-            if process.stderr is not None:
-                try:
-                    stderr_tail = process.stderr.read()[-400:]
-                except (ValueError, OSError):
-                    pass
+            stderr_tail = " | ".join(list(self._stderr_tail)[-5:])[-400:]
+            self._log.write(f"cli exited code={process.returncode}")
             self._dispatch(
                 ErrorEvent(
                     f"claude CLI exited with code {process.returncode}: {stderr_tail}"
@@ -329,6 +408,7 @@ class ClaudeCliBackend:
         mcp_token: str,
         run_on_ui: RunOnUi,
         workdir: Path,
+        log_path: Path | None = None,
     ) -> None:
         self._cli_path = cli_path
         self._system_prompt_builder = system_prompt_builder
@@ -336,6 +416,7 @@ class ClaudeCliBackend:
         self._mcp_token = mcp_token
         self._run_on_ui = run_on_ui
         self._workdir = workdir
+        self._log = BackendLog(log_path)
 
     def start_session(self, context: dict[str, Any]) -> ClaudeCliSession:
         return ClaudeCliSession(
@@ -345,4 +426,5 @@ class ClaudeCliBackend:
             mcp_token=self._mcp_token,
             run_on_ui=self._run_on_ui,
             workdir=self._workdir,
+            log=self._log,
         )

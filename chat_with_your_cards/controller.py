@@ -89,6 +89,7 @@ class ChatController:
             mcp_token=token,
             run_on_ui=_run_on_ui,
             workdir=self._workdir,
+            log_path=self._workdir.parent / "logs" / "backend.log",
         )
 
     def ensure_ready(self) -> None:

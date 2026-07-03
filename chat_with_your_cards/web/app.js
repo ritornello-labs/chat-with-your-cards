@@ -124,6 +124,13 @@
             if (stopped) {
                 var note = el("div", "cwyc-stopped-note", "Stopped");
                 currentAssistant.element.appendChild(note);
+            } else if (!currentAssistant.markdown.trim()) {
+                var empty = el(
+                    "div",
+                    "cwyc-stopped-note",
+                    "No response received - see user_files/logs/backend.log."
+                );
+                currentAssistant.element.appendChild(empty);
             }
         }
         currentAssistant = null;
