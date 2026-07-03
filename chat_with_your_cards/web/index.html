@@ -8,6 +8,14 @@
             New chat
         </button>
         <span id="cwyc-header-spacer"></span>
+        <button id="cwyc-agent-toggle" type="button"
+                title="Choose the model and effort level">
+            <span id="cwyc-agent-label">Model</span>
+            <svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true">
+                <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6"
+                      stroke-linecap="round" fill="none"/>
+            </svg>
+        </button>
         <button id="cwyc-pins-toggle" type="button"
                 title="Pin deck, note type, tags, and field defaults for proposed notes">
             <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
@@ -17,6 +25,32 @@
             <span id="cwyc-pins-label">Pins</span>
         </button>
     </header>
+    <section id="cwyc-agent-panel" hidden>
+        <div class="cwyc-agent-row">
+            <label for="cwyc-agent-model">Model</label>
+            <select id="cwyc-agent-model">
+                <option value="">CLI default</option>
+                <option value="fable">Fable (most capable)</option>
+                <option value="opus">Opus</option>
+                <option value="sonnet">Sonnet</option>
+                <option value="haiku">Haiku (fastest)</option>
+            </select>
+        </div>
+        <div class="cwyc-agent-row">
+            <label for="cwyc-agent-effort">Effort</label>
+            <select id="cwyc-agent-effort">
+                <option value="">CLI default</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="xhigh">Extra high</option>
+                <option value="max">Max</option>
+            </select>
+        </div>
+        <div class="cwyc-agent-hint">
+            Model and effort apply to a chat session; changing them starts a new chat.
+        </div>
+    </section>
     <section id="cwyc-pins-panel" hidden>
         <div class="cwyc-pins-row">
             <label for="cwyc-pin-deck">Deck</label>

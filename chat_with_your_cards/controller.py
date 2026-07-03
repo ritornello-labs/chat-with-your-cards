@@ -90,6 +90,10 @@ class ChatController:
             run_on_ui=_run_on_ui,
             workdir=self._workdir,
             log_path=self._workdir.parent / "logs" / "backend.log",
+            model_effort=lambda: (
+                str(self._config.get("model", "")),
+                str(self._config.get("effort", "")),
+            ),
         )
 
     def ensure_ready(self) -> None:
@@ -142,6 +146,34 @@ class ChatController:
         if self._proposals is not None:
             self._proposals.new_session()
         self._push({"type": "reset"})
+
+    def set_agent_config(self, model: str, effort: str) -> None:
+        """Change model/effort. These are session-level CLI flags, so the
+        change starts a fresh chat (matching how the CLI scopes them)."""
+        from .backends.claude_cli import VALID_EFFORTS
+
+        model = (model or "").strip()
+        effort = (effort or "").strip().lower()
+        if effort and effort not in VALID_EFFORTS:
+            effort = ""
+        changed = model != str(self._config.get("model", "")) or effort != str(
+            self._config.get("effort", "")
+        )
+        self._config["model"] = model
+        self._config["effort"] = effort
+        if changed and self._session is not None:
+            self.new_chat()
+        self.push_agent_state()
+
+    def push_agent_state(self) -> None:
+        self._push(
+            {
+                "type": "agent",
+                "backend": str(self._config.get("backend", "auto")),
+                "model": str(self._config.get("model", "")),
+                "effort": str(self._config.get("effort", "")),
+            }
+        )
 
     def shutdown(self) -> None:
         if self._session is not None:

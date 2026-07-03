@@ -12,6 +12,12 @@
   forces the demo backend.
 - `claude_cli_path` (default empty): explicit path to the `claude` binary when it
   is not on the standard lookup paths.
+- `model` (default empty = the CLI's own default): which model the Claude Code
+  backend uses. Accepts an alias (`fable`, `opus`, `sonnet`, `haiku`) or a full
+  model id. Also selectable live from the dock header (Model chip).
+- `effort` (default empty = the CLI's own default): reasoning effort level, one of
+  `low`, `medium`, `high`, `xhigh`, `max`. Also selectable from the header.
+  Model and effort are session-level; changing either starts a fresh chat.
 - `permission_mode` (default `default`): `default` allows collection reads without
   asking and gates note creation/editing behind proposal cards; `read-only`
   removes the write tools entirely; `auto-accept` applies the assistant's note

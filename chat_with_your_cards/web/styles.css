@@ -768,3 +768,72 @@ body {
 #cwyc-ledger button:hover {
     background: var(--cwyc-bubble-user);
 }
+
+/* ---------- header agent (model / effort) ---------- */
+
+#cwyc-agent-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--fg);
+    font-size: 12px;
+    padding: 4px 8px;
+    margin-right: 6px;
+    cursor: pointer;
+}
+
+#cwyc-agent-toggle:hover {
+    background: var(--cwyc-bubble-user);
+}
+
+#cwyc-agent-panel[hidden],
+#cwyc-pins-panel[hidden] {
+    display: none;
+}
+
+#cwyc-agent-panel {
+    flex: 0 0 auto;
+    border-bottom: 1px solid var(--border-subtle, var(--border));
+    background: var(--canvas-elevated, var(--canvas));
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    font-size: 12px;
+}
+
+.cwyc-agent-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.cwyc-agent-row label {
+    flex: 0 0 62px;
+    color: var(--fg-subtle, var(--fg));
+}
+
+.cwyc-agent-row select {
+    flex: 1 1 auto;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--canvas);
+    color: var(--fg);
+    font-family: var(--cwyc-font);
+    font-size: 12px;
+    padding: 4px 8px;
+    outline: none;
+    cursor: pointer;
+}
+
+.cwyc-agent-row select:focus {
+    border-color: var(--cwyc-accent);
+}
+
+.cwyc-agent-hint {
+    color: var(--fg-subtle, var(--fg));
+    font-size: 11px;
+}

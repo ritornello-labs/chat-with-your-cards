@@ -71,6 +71,27 @@ class McpServerTest(unittest.TestCase):
         status, _ = self._post({"jsonrpc": "2.0", "id": 1, "method": "ping"}, token="nope")
         self.assertEqual(401, status)
 
+    def test_abrupt_connection_reset_is_swallowed(self) -> None:
+        # The CLI's HTTP client resets idle connections; the server must not
+        # dump a ConnectionResetError traceback (Anki error report 2026-07-03).
+        # Connect, send a partial request line, then reset via SO_LINGER=0.
+        import socket
+        import struct
+        import urllib.parse
+
+        parsed = urllib.parse.urlparse(self.server.url)
+        sock = socket.create_connection((parsed.hostname, parsed.port), timeout=5)
+        sock.sendall(b"POST /mcp HTTP/1.1\r\n")
+        sock.setsockopt(
+            socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0)
+        )
+        sock.close()
+        # The server must still serve subsequent requests normally.
+        status, body = self._post({"jsonrpc": "2.0", "id": 99, "method": "ping"})
+        self.assertEqual(200, status)
+        assert body is not None
+        self.assertEqual({}, body["result"])
+
     def test_initialize_echoes_protocol_version(self) -> None:
         status, body = self._post(
             {

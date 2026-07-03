@@ -182,12 +182,17 @@ def parse_stream_line(obj: dict[str, Any], state: ParserState) -> list[ChatEvent
     return []
 
 
+VALID_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+
+
 def build_cli_args(
     *,
     cli_path: str,
     system_prompt: str,
     mcp_config_path: str,
     resume_session_id: str | None = None,
+    model: str = "",
+    effort: str = "",
 ) -> list[str]:
     args = [
         cli_path,
@@ -208,6 +213,10 @@ def build_cli_args(
         "--disallowedTools",
         "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch",
     ]
+    if model.strip():
+        args += ["--model", model.strip()]
+    if effort.strip() in VALID_EFFORTS:
+        args += ["--effort", effort.strip()]
     if resume_session_id:
         args += ["--resume", resume_session_id]
     return args
@@ -239,9 +248,13 @@ class ClaudeCliSession:
         run_on_ui: RunOnUi,
         workdir: Path,
         log: BackendLog | None = None,
+        model: str = "",
+        effort: str = "",
     ) -> None:
         self._cli_path = cli_path
         self._system_prompt = system_prompt
+        self._model = model
+        self._effort = effort
         self._workdir = workdir
         self._workdir.mkdir(parents=True, exist_ok=True)
         self._tmpdir = Path(tempfile.mkdtemp(prefix="cwyc-claude-"))
@@ -276,6 +289,8 @@ class ClaudeCliSession:
             system_prompt=self._system_prompt,
             mcp_config_path=str(self._mcp_config),
             resume_session_id=self._state.session_id,
+            model=self._model,
+            effort=self._effort,
         )
         env = os.environ.copy()
         env.setdefault("PYTHONUNBUFFERED", "1")
@@ -409,6 +424,7 @@ class ClaudeCliBackend:
         run_on_ui: RunOnUi,
         workdir: Path,
         log_path: Path | None = None,
+        model_effort: Callable[[], tuple[str, str]] | None = None,
     ) -> None:
         self._cli_path = cli_path
         self._system_prompt_builder = system_prompt_builder
@@ -417,8 +433,10 @@ class ClaudeCliBackend:
         self._run_on_ui = run_on_ui
         self._workdir = workdir
         self._log = BackendLog(log_path)
+        self._model_effort = model_effort or (lambda: ("", ""))
 
     def start_session(self, context: dict[str, Any]) -> ClaudeCliSession:
+        model, effort = self._model_effort()
         return ClaudeCliSession(
             cli_path=self._cli_path,
             system_prompt=self._system_prompt_builder(),
@@ -427,4 +445,6 @@ class ClaudeCliBackend:
             run_on_ui=self._run_on_ui,
             workdir=self._workdir,
             log=self._log,
+            model=model,
+            effort=effort,
         )

@@ -4,6 +4,8 @@
     "dock_width": 420,
     "backend": "auto",
     "claude_cli_path": "",
+    "model": "",
+    "effort": "",
     "permission_mode": "default",
     "stats_refresh_minutes": 30,
     "context_token_budget": 8000,

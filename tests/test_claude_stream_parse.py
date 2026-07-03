@@ -227,6 +227,28 @@ class BuildCliArgsTest(unittest.TestCase):
         )
         self.assertEqual(["--resume", "sess-9"], args[-2:])
 
+    def test_model_and_effort_flags(self) -> None:
+        args = build_cli_args(
+            cli_path="claude",
+            system_prompt="SYS",
+            mcp_config_path="cfg",
+            model="opus",
+            effort="high",
+        )
+        self.assertEqual("opus", args[args.index("--model") + 1])
+        self.assertEqual("high", args[args.index("--effort") + 1])
+
+    def test_blank_model_effort_and_invalid_effort_omitted(self) -> None:
+        args = build_cli_args(
+            cli_path="claude",
+            system_prompt="SYS",
+            mcp_config_path="cfg",
+            model="  ",
+            effort="turbo",  # not a valid level
+        )
+        self.assertNotIn("--model", args)
+        self.assertNotIn("--effort", args)
+
 
 if __name__ == "__main__":
     unittest.main()

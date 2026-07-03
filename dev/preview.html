@@ -176,6 +176,9 @@
             if (msg.type === "ready") {
                 window.chatUI.ackReady();
                 window.chatUI.dispatch({ type: "pins", pins: { deck: "", note_type: "", tags: [], fields: {} } });
+                window.chatUI.dispatch({ type: "agent", backend: "claude", model: "", effort: "" });
+            } else if (msg.type === "set_agent") {
+                window.chatUI.dispatch({ type: "agent", backend: "claude", model: msg.model, effort: msg.effort });
             } else if (msg.type === "send") {
                 var text = (msg.text || "").toLowerCase();
                 if (text.indexOf("edit") !== -1) { proposeEdit(); }

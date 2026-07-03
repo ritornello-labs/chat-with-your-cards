@@ -91,7 +91,21 @@ class McpServer:
                 else:
                     self._send(200, response)
 
-        self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        class Server(ThreadingHTTPServer):
+            def handle_error(self, request: Any, client_address: Any) -> None:
+                # The CLI's streamable-HTTP client resets idle connections
+                # instead of closing them cleanly; that surfaces here as a
+                # ConnectionResetError/BrokenPipeError per socket. It is
+                # benign - swallow it rather than dumping a traceback into
+                # Anki's error log. Anything else still propagates.
+                import sys
+
+                exc = sys.exc_info()[1]
+                if isinstance(exc, (ConnectionResetError, BrokenPipeError)):
+                    return
+                super().handle_error(request, client_address)
+
+        self._httpd = Server(("127.0.0.1", 0), Handler)
         self._thread = threading.Thread(
             target=self._httpd.serve_forever, name="cwyc-mcp", daemon=True
         )

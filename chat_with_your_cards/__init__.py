@@ -24,6 +24,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "dock_width": 420,
     "backend": "auto",
     "claude_cli_path": "",
+    "model": "",
+    "effort": "",
     "permission_mode": "default",
     "stats_refresh_minutes": 30,
     "context_token_budget": 8000,
@@ -198,6 +200,7 @@ def _wire_bridge() -> None:
     bridge.on("undo_session", lambda _msg: proposals.undo_session())
     bridge.on("set_pins", lambda msg: proposals.set_pins(msg.get("pins") or {}))
     bridge.on("open_session_browser", lambda _msg: _open_session_browser())
+    bridge.on("set_agent", _set_agent)
 
 
 def _mark_web_ready() -> None:
@@ -206,6 +209,20 @@ def _mark_web_ready() -> None:
         state.dock.web.eval("window.chatUI && window.chatUI.ackReady();")
     if state.proposals is not None:
         state.proposals.push_ui_state()
+    if state.controller is not None:
+        state.controller.push_agent_state()
+
+
+def _set_agent(msg: dict[str, Any]) -> None:
+    if state.controller is None:
+        return
+    model = str(msg.get("model", ""))
+    effort = str(msg.get("effort", ""))
+    state.controller.set_agent_config(model, effort)
+    config = mw.addonManager.getConfig(__name__) or {}
+    config["model"] = state.config.get("model", "")
+    config["effort"] = state.config.get("effort", "")
+    mw.addonManager.writeConfig(__name__, config)
 
 
 def _save_pins(pins: dict[str, Any]) -> None:

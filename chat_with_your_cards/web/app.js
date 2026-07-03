@@ -632,6 +632,34 @@
             .join("\n");
     }
 
+    /* ---- agent (model / effort) ---- */
+
+    var MODEL_LABELS = {
+        "": "Default",
+        fable: "Fable",
+        opus: "Opus",
+        sonnet: "Sonnet",
+        haiku: "Haiku",
+    };
+
+    function renderAgent(data) {
+        var model = data.model || "";
+        var effort = data.effort || "";
+        var modelLabel = MODEL_LABELS[model] || model || "Default";
+        var label = document.getElementById("cwyc-agent-label");
+        label.textContent = effort ? modelLabel + " · " + effort : modelLabel;
+        document.getElementById("cwyc-agent-model").value = model;
+        document.getElementById("cwyc-agent-effort").value = effort;
+    }
+
+    function sendAgent() {
+        post({
+            type: "set_agent",
+            model: document.getElementById("cwyc-agent-model").value,
+            effort: document.getElementById("cwyc-agent-effort").value,
+        });
+    }
+
     function collectPins() {
         var fieldLines = document.getElementById("cwyc-pin-fields").value.split("\n");
         var fields = {};
@@ -691,6 +719,9 @@
                 break;
             case "pins":
                 renderPins(payload.pins);
+                break;
+            case "agent":
+                renderAgent(payload);
                 break;
             case "done":
                 finalizeStream(false);
@@ -805,9 +836,17 @@
         document.addEventListener("keydown", onKeydownCapture, true);
 
         var pinsPanel = document.getElementById("cwyc-pins-panel");
+        var agentPanel = document.getElementById("cwyc-agent-panel");
         document.getElementById("cwyc-pins-toggle").addEventListener("click", function () {
             pinsPanel.hidden = !pinsPanel.hidden;
+            agentPanel.hidden = true;
         });
+        document.getElementById("cwyc-agent-toggle").addEventListener("click", function () {
+            agentPanel.hidden = !agentPanel.hidden;
+            pinsPanel.hidden = true;
+        });
+        document.getElementById("cwyc-agent-model").addEventListener("change", sendAgent);
+        document.getElementById("cwyc-agent-effort").addEventListener("change", sendAgent);
         document.getElementById("cwyc-pins-save").addEventListener("click", function () {
             post({ type: "set_pins", pins: collectPins() });
             pinsPanel.hidden = true;
