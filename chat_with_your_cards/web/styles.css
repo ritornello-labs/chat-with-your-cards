@@ -1,0 +1,316 @@
+/* Chat With Your Cards - chat dock styles.
+ *
+ * Builds on Anki's standard webview CSS custom properties (--canvas, --fg,
+ * --border, ...) injected by stdHtml; .night-mode variants come with them.
+ * Our own knobs live in --cwyc-* properties.
+ */
+
+:root {
+    --cwyc-bubble-user: var(--canvas-inset, rgba(0, 0, 0, 0.05));
+    --cwyc-chip-bg: var(--canvas-elevated, #fff);
+    --cwyc-accent: #4a7dff;
+    --cwyc-radius: 14px;
+    --cwyc-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+:root.night-mode {
+    --cwyc-bubble-user: rgba(255, 255, 255, 0.08);
+    --cwyc-chip-bg: rgba(255, 255, 255, 0.05);
+    --cwyc-accent: #6f95ff;
+}
+
+html,
+body {
+    height: 100%;
+    margin: 0 !important;
+    padding: 0;
+    overflow: hidden;
+}
+
+/* Anki's webview.css sets `* { box-sizing: content-box }` globally and
+   styles all buttons; scope our layout back to sane defaults. */
+#cwyc-root,
+#cwyc-root * {
+    box-sizing: border-box;
+}
+
+#cwyc-root button {
+    margin: 0;
+    font-weight: 500;
+    -webkit-appearance: none;
+    box-shadow: none;
+}
+
+#cwyc-root {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    font-family: var(--cwyc-font);
+    font-size: 13.5px;
+    color: var(--fg);
+    background: var(--canvas);
+}
+
+/* ---------- header ---------- */
+
+#cwyc-header {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border-subtle, var(--border));
+    flex: 0 0 auto;
+}
+
+#cwyc-new-chat {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--fg);
+    font-size: 12px;
+    padding: 4px 10px;
+    cursor: pointer;
+}
+
+#cwyc-new-chat:hover {
+    background: var(--cwyc-bubble-user);
+}
+
+/* ---------- transcript ---------- */
+
+#cwyc-transcript {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 14px 14px 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.cwyc-row {
+    display: flex;
+}
+
+.cwyc-row-user {
+    justify-content: flex-end;
+}
+
+.cwyc-msg-user {
+    max-width: 85%;
+    background: var(--cwyc-bubble-user);
+    border-radius: var(--cwyc-radius);
+    border-bottom-right-radius: 4px;
+    padding: 8px 12px;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+}
+
+.cwyc-msg-assistant {
+    max-width: 100%;
+    line-height: 1.55;
+    overflow-wrap: break-word;
+}
+
+.cwyc-msg-assistant > *:first-child {
+    margin-top: 0;
+}
+
+.cwyc-msg-assistant > *:last-child {
+    margin-bottom: 0;
+}
+
+.cwyc-msg-assistant pre {
+    background: var(--cwyc-bubble-user);
+    border: 1px solid var(--border-subtle, var(--border));
+    border-radius: 8px;
+    padding: 8px 10px;
+    overflow-x: auto;
+    font-size: 12px;
+}
+
+.cwyc-msg-assistant code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.92em;
+}
+
+.cwyc-msg-assistant h1,
+.cwyc-msg-assistant h2,
+.cwyc-msg-assistant h3 {
+    font-size: 1.05em;
+    margin: 0.9em 0 0.35em;
+}
+
+.cwyc-streaming::after {
+    content: "";
+    display: inline-block;
+    width: 7px;
+    height: 14px;
+    margin-left: 3px;
+    vertical-align: text-bottom;
+    background: var(--cwyc-accent);
+    border-radius: 2px;
+    animation: cwyc-blink 1s steps(2, start) infinite;
+}
+
+@keyframes cwyc-blink {
+    to {
+        visibility: hidden;
+    }
+}
+
+.cwyc-stopped-note {
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--fg-subtle, var(--fg));
+    font-style: italic;
+}
+
+/* ---------- tool chips ---------- */
+
+.cwyc-row-tool {
+    max-width: 100%;
+    min-width: 0;
+}
+
+.cwyc-tool-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    border: 1px solid var(--border-subtle, var(--border));
+    background: var(--cwyc-chip-bg);
+    border-radius: 10px;
+    padding: 5px 10px;
+    font-size: 12px;
+    color: var(--fg-subtle, var(--fg));
+}
+
+.cwyc-tool-name {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-weight: 600;
+}
+
+.cwyc-tool-summary {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    opacity: 0.85;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.cwyc-tool-result {
+    white-space: nowrap;
+    flex: 0 0 auto;
+}
+
+.cwyc-tool-ok .cwyc-tool-result::before {
+    content: "\2713\00a0";
+    color: #34a853;
+}
+
+.cwyc-tool-failed .cwyc-tool-result::before {
+    content: "\2717\00a0";
+    color: #ea4335;
+}
+
+.cwyc-tool-spinner {
+    width: 10px;
+    height: 10px;
+    border: 2px solid var(--border);
+    border-top-color: var(--cwyc-accent);
+    border-radius: 50%;
+    animation: cwyc-spin 0.8s linear infinite;
+    display: none;
+}
+
+.cwyc-tool-running .cwyc-tool-spinner {
+    display: inline-block;
+}
+
+@keyframes cwyc-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* ---------- footer / composer ---------- */
+
+#cwyc-footer {
+    flex: 0 0 auto;
+    padding: 6px 12px 12px;
+}
+
+#cwyc-context-chip {
+    display: inline-block;
+    font-size: 11px;
+    color: var(--fg-subtle, var(--fg));
+    border: 1px solid var(--border-subtle, var(--border));
+    border-radius: 999px;
+    padding: 2px 9px;
+    margin-bottom: 7px;
+    opacity: 0.85;
+}
+
+#cwyc-composer {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--canvas-elevated, var(--canvas));
+    padding: 8px 8px 8px 12px;
+}
+
+#cwyc-composer:focus-within {
+    border-color: var(--cwyc-accent);
+}
+
+#cwyc-input {
+    flex: 1 1 auto;
+    border: none;
+    outline: none;
+    resize: none;
+    background: transparent;
+    color: var(--fg);
+    font-family: var(--cwyc-font);
+    font-size: 13.5px;
+    line-height: 1.4;
+    max-height: 160px;
+}
+
+#cwyc-send {
+    flex: 0 0 auto;
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 50%;
+    background: var(--cwyc-accent);
+    color: #fff;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#cwyc-send:hover {
+    filter: brightness(1.1);
+}
+
+#cwyc-send .cwyc-icon-stop {
+    display: none;
+}
+
+#cwyc-send.cwyc-streaming-btn .cwyc-icon-send {
+    display: none;
+}
+
+#cwyc-send.cwyc-streaming-btn .cwyc-icon-stop {
+    display: inline;
+}

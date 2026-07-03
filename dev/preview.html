@@ -1,0 +1,132 @@
+<!doctype html>
+<!-- Browser preview harness for the chat dock web UI.
+
+     Loads the real web assets with a stubbed pycmd that replays a canned
+     event stream, so CSS/JS can be iterated in a plain browser without a
+     disposable Anki. Serve the repo root (e.g. python3 -m http.server) and
+     open /dev/preview.html; add ?night for dark mode. -->
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Chat With Your Cards - preview</title>
+    <link rel="stylesheet" href="../chat_with_your_cards/web/styles.css">
+    <style>
+        /* stand-ins for Anki's standard_css / css/webview.css variables */
+        :root {
+            --canvas: #f5f5f5;
+            --canvas-elevated: #ffffff;
+            --canvas-inset: #ebebeb;
+            --fg: #020202;
+            --fg-subtle: #737373;
+            --border: #c4c4c4;
+            --border-subtle: #e0e0e0;
+        }
+        :root.night-mode {
+            --canvas: #2c2c2c;
+            --canvas-elevated: #363636;
+            --canvas-inset: #202020;
+            --fg: #fcfcfc;
+            --fg-subtle: #b0b0b0;
+            --border: #4a4a4a;
+            --border-subtle: #3a3a3a;
+        }
+        /* Anki webview.css global quirks that our styles must survive */
+        * { box-sizing: content-box; }
+        html { font-size: 15px; }
+        body { background: var(--canvas); margin: 2em; color: var(--fg); }
+        button {
+            outline: none !important;
+            border-radius: 5px;
+            border: 1px solid var(--border-subtle);
+            font-weight: 500;
+            padding: 8px 10px;
+            margin: 0 4px;
+            -webkit-appearance: none;
+            cursor: pointer;
+            background: #fcfcfc;
+            color: var(--fg);
+        }
+        #preview-frame {
+            width: 420px;
+            height: 100vh;
+            margin: 0 auto;
+            border-left: 1px solid var(--border);
+            border-right: 1px solid var(--border);
+        }
+    </style>
+</head>
+<body>
+    <div id="preview-frame"></div>
+    <script>
+        if (location.search.indexOf("night") !== -1) {
+            document.documentElement.classList.add("night-mode");
+        }
+
+        // ---- pycmd stub: replays a scripted stream like the ScriptedBackend
+        var pendingTimers = [];
+        function dispatchLater(delay, payload) {
+            pendingTimers.push(setTimeout(function () {
+                window.chatUI.dispatch(payload);
+            }, delay));
+        }
+        function replyStream() {
+            var t = 0;
+            var step = function (ms) { t += ms; return t; };
+            var prelude = "Let me look for related cards in your collection first.\n\n";
+            prelude.split(" ").forEach(function (word) {
+                dispatchLater(step(35), { type: "text_delta", text: word + " " });
+            });
+            dispatchLater(step(60), {
+                type: "tool_call_started",
+                call_id: "call-1",
+                tool: "search_notes",
+                summary: 'deck:current "limit"',
+            });
+            dispatchLater(step(900), {
+                type: "tool_call_finished",
+                call_id: "call-1",
+                ok: true,
+                summary: "12 notes",
+            });
+            var body = "Found **12 notes** touching on limits. The closest ones:\n\n" +
+                "- *Analysis: define continuity* - continuity is a limit statement in disguise\n" +
+                "- *Analysis: limit laws* - the algebra you use once limits exist\n\n" +
+                "The continuity card is probably the best follow-up:\n\n" +
+                "```text\nfor every epsilon > 0 there is a delta > 0 ...\n```\n\n" +
+                "Want me to pull it up?";
+            body.split(" ").forEach(function (word) {
+                dispatchLater(step(25), { type: "text_delta", text: word + " " });
+            });
+            dispatchLater(step(50), { type: "done" });
+        }
+        window.pycmd = function (raw) {
+            if (raw.indexOf("cwyc:") !== 0) { return; }
+            var msg = JSON.parse(raw.slice(5));
+            if (msg.type === "ready") {
+                window.chatUI.ackReady();
+            } else if (msg.type === "send") {
+                replyStream();
+            } else if (msg.type === "cancel") {
+                pendingTimers.forEach(clearTimeout);
+                pendingTimers = [];
+                window.chatUI.dispatch({ type: "cancelled" });
+            } else if (msg.type === "new_chat") {
+                pendingTimers.forEach(clearTimeout);
+                pendingTimers = [];
+                window.chatUI.dispatch({ type: "reset" });
+            }
+        };
+    </script>
+    <script src="../chat_with_your_cards/web/vendor/marked.min.js"></script>
+    <script>
+        fetch("../chat_with_your_cards/web/index.html")
+            .then(function (r) { return r.text(); })
+            .then(function (html) {
+                document.getElementById("preview-frame").innerHTML = html;
+                var s = document.createElement("script");
+                s.src = "../chat_with_your_cards/web/app.js";
+                document.body.appendChild(s);
+            });
+    </script>
+</body>
+</html>

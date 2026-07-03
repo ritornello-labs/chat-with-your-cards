@@ -1,0 +1,32 @@
+<div id="cwyc-root">
+    <header id="cwyc-header">
+        <button id="cwyc-new-chat" type="button" title="New chat (Ctrl+Shift+J)">
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                <path d="M8 2v12M2 8h12" stroke="currentColor" stroke-width="1.8"
+                      stroke-linecap="round" fill="none"/>
+            </svg>
+            New chat
+        </button>
+    </header>
+    <main id="cwyc-transcript" aria-live="polite"></main>
+    <footer id="cwyc-footer">
+        <div id="cwyc-context-chip" title="What the assistant will see">
+            Context: collection overview
+        </div>
+        <div id="cwyc-composer">
+            <textarea id="cwyc-input" rows="1" placeholder="Ask about this card&hellip;"
+                      autocomplete="off"></textarea>
+            <button id="cwyc-send" type="button" title="Send (Enter)" aria-label="Send">
+                <svg class="cwyc-icon-send" viewBox="0 0 16 16" width="16" height="16"
+                     aria-hidden="true">
+                    <path d="M8 13V3M4 7l4-4 4 4" stroke="currentColor" stroke-width="1.8"
+                          stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                </svg>
+                <svg class="cwyc-icon-stop" viewBox="0 0 16 16" width="16" height="16"
+                     aria-hidden="true">
+                    <rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor"/>
+                </svg>
+            </button>
+        </div>
+    </footer>
+</div>
