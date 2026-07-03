@@ -9,19 +9,22 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-06-25T21:21:08.174961Z"
+exclude-newer = "2026-06-26T06:04:42.771086Z"
 exclude-newer-span = "P7D"
+
+[options.exclude-newer-package]
+anki-addon-workbench = "2026-07-05T03:00:00Z"
 
 [[package]]
 name = "anki-addon-workbench"
-version = "0.4.0"
+version = "0.4.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "tomli", marker = "python_full_version < '3.11'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5f/37/6e2a2beedcde0b25961763be3211d7efa342476fc1368e0c7ba7e48af6ba/anki_addon_workbench-0.4.0.tar.gz", hash = "sha256:f1e2b7f2beda0fe880eb3575be89cd75f9ccd12c929117d8d5180ff1bd2637bb", size = 72883, upload-time = "2026-06-25T16:48:17.519Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5a/88/5942403166a7c7b4960fa54aa8eda00ff01e81569706344cf1dc27529732/anki_addon_workbench-0.4.2.tar.gz", hash = "sha256:235029a89999014df3be8ebcbc850c2e02b9b3e59b16a7beca64d2f4bc95d21c", size = 76080, upload-time = "2026-07-03T01:58:12.867Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/15/f4/1fe0f0ffcd243e3265e6070b5d9c72b3f7261861caea22646979c6f0e5bf/anki_addon_workbench-0.4.0-py3-none-any.whl", hash = "sha256:8d86971d2c3181b33ffdd4c7005165d05913a93c6de7681538fad5dff8c6fbb2", size = 35139, upload-time = "2026-06-25T16:48:16.345Z" },
+    { url = "https://files.pythonhosted.org/packages/1f/65/6833a820d1eec10675fb9a9e8702c7ec4cde6331a10ed70c0d2ae78a8fec/anki_addon_workbench-0.4.2-py3-none-any.whl", hash = "sha256:1bbcc1cbc68ebb0d757aa1ab7e5eb0af440a5f2e2097ff17ee7db05bf190d3fb", size = 37557, upload-time = "2026-07-03T01:58:11.603Z" },
 ]
 
 [package.optional-dependencies]
@@ -86,7 +89,7 @@ dev = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "anki-addon-workbench", extras = ["gui"], specifier = ">=0.4.0" },
+    { name = "anki-addon-workbench", extras = ["gui"], specifier = ">=0.4.2" },
     { name = "mypy", specifier = ">=1.13.0" },
     { name = "ruff", specifier = ">=0.6.0" },
 ]

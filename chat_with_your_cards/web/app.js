@@ -175,6 +175,21 @@
             case "reset":
                 resetTranscript();
                 break;
+            case "notice": {
+                var note = document.createElement("div");
+                note.className = "cwyc-notice";
+                note.textContent = payload.text;
+                transcript.appendChild(note);
+                scrollToBottomIfPinned();
+                break;
+            }
+            case "context": {
+                var chip = document.getElementById("cwyc-context-chip");
+                if (chip) {
+                    chip.textContent = "Context: " + payload.label;
+                }
+                break;
+            }
             default:
                 // Unknown event types are ignored on purpose.
                 break;

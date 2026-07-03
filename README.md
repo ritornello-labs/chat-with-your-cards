@@ -11,11 +11,17 @@ An Anki add-on that adds a collapsible, modern chat dock/sidebar for talking to 
 
 ## Status
 
-M0 scaffold complete: installable add-on with the chat dock, streaming chat UI
-driven by a scripted fake backend (`ScriptedBackend`), context-aware `Ctrl+J` /
-`Ctrl+Shift+J` shortcuts, light/dark theming, and green GUI smoke tests (macOS
-host and Docker/Xvfb). No real AI backend yet — that is milestone M1. The full
-architecture, milestones, and known issues live in [DESIGN.md](DESIGN.md).
+M1 complete: the dock talks to a real agent. The Claude Code CLI backend runs
+as a persistent headless subprocess with token-level streaming, connected to
+an in-process localhost MCP server exposing nine collection read tools
+(search, note/card fetch, annotated deck/tag trees, stats, clue-based
+find_related). The current card under review is injected into context per
+message, the collection overview comes from a background stats cache, and
+everything falls back to a scripted demo backend when the CLI is absent (so
+smoke tests stay deterministic). Verified by a live headless CLI check plus
+green GUI smokes on macOS host (stealth) and Docker/Xvfb. Next: M2 — note
+proposals. Architecture, milestones, and known issues live in
+[DESIGN.md](DESIGN.md).
 
 ## Development
 

@@ -18,6 +18,10 @@ import traceback
 from pathlib import Path
 from typing import Any, Callable
 
+# Force the deterministic demo backend before the add-on builds one: the
+# smoke must not depend on (or spend money through) a real claude CLI.
+os.environ["CWYC_BACKEND"] = "scripted"
+
 from aqt import mw
 from aqt.qt import QDockWidget, QKeySequence, QShortcut, QTimer
 

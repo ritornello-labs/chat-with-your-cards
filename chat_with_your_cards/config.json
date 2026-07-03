@@ -1,5 +1,10 @@
 {
     "toggle_shortcut": "Ctrl+J",
     "new_chat_shortcut": "Ctrl+Shift+J",
-    "dock_width": 420
+    "dock_width": 420,
+    "backend": "auto",
+    "claude_cli_path": "",
+    "permission_mode": "default",
+    "stats_refresh_minutes": 30,
+    "context_token_budget": 8000
 }

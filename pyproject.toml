@@ -7,7 +7,7 @@ dependencies = []
 
 [dependency-groups]
 dev = [
-    "anki-addon-workbench[gui]>=0.4.0",
+    "anki-addon-workbench[gui]>=0.4.2",
     "mypy>=1.13.0",
     "ruff>=0.6.0",
 ]
@@ -15,6 +15,8 @@ dev = [
 [tool.uv]
 package = false
 exclude-newer = "7 days"
+# First-party package: allow fresh releases despite the 7-day age gate.
+exclude-newer-package = { anki-addon-workbench = "2026-07-04" }
 
 [tool.uv.pip]
 exclude-newer = "7 days"
@@ -32,7 +34,11 @@ include = [
     "bridge.py",
     "controller.py",
     "shortcuts.py",
+    "context.py",
+    "stats.py",
+    "mcp_server.py",
     "backends",
+    "tools",
     "web",
 ]
 exclude = ["__pycache__", "user_files"]

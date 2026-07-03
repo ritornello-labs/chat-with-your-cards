@@ -17,13 +17,22 @@ def toggle_chat_focus(state: AddonState) -> None:
     if dock is None:
         return
     if not dock.isVisible():
-        dock.focus_composer()
+        _focus_chat(state)
         return
     focused = mw.app.focusWidget()
     if focused is not None and dock.isAncestorOf(focused):
         focus_main_window()
     else:
-        dock.focus_composer()
+        _focus_chat(state)
+
+
+def _focus_chat(state: AddonState) -> None:
+    assert state.dock is not None
+    state.dock.focus_composer()
+    # Pre-warm on focus: spawn the CLI backend while the user types, so the
+    # first send has no startup latency (DESIGN.md section 9).
+    if state.controller is not None:
+        state.controller.ensure_ready()
 
 
 def focus_main_window() -> None:
