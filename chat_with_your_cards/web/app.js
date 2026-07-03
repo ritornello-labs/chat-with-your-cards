@@ -182,6 +182,9 @@
     }
 
     function focusComposer() {
+        // The page is first laid out while the dock is hidden (degenerate
+        // viewport), which can leave a stale autosized height behind.
+        autosizeInput();
         input.focus();
     }
 
@@ -225,6 +228,7 @@
             }
         });
         input.addEventListener("input", autosizeInput);
+        window.addEventListener("resize", autosizeInput);
         transcript.addEventListener("scroll", function () {
             var distance =
                 transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight;

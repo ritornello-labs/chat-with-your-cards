@@ -174,11 +174,21 @@ def _run_checks() -> dict[str, Any]:
             "  assistant: document.querySelectorAll('.msg-assistant').length,"
             "  chips: document.querySelectorAll('.tool-chip').length,"
             "  chips_ok: document.querySelectorAll('.cwyc-tool-ok').length,"
-            "  streaming: document.querySelectorAll('.cwyc-streaming').length"
+            "  streaming: document.querySelectorAll('.cwyc-streaming').length,"
+            "  input_style_height: document.getElementById('cwyc-input').style.height,"
+            "  input_rect: document.getElementById('cwyc-input')"
+            "    .getBoundingClientRect().height,"
+            "  input_scroll: document.getElementById('cwyc-input').scrollHeight,"
+            "  input_box_sizing: getComputedStyle("
+            "    document.getElementById('cwyc-input')).boxSizing,"
+            "  composer_rect: document.getElementById('cwyc-composer')"
+            "    .getBoundingClientRect().height"
             "}; })();",
             DOM_TIMEOUT_MS,
             "DOM state query",
         )
+        if dom.get("composer_rect", 0) > 120:
+            raise AssertionError(f"composer blew up: {dom}")
         if dom["user"] < 1 or dom["assistant"] < 1 or dom["chips"] < 1:
             raise AssertionError(f"transcript DOM incomplete: {dom}")
         if dom["chips_ok"] != dom["chips"]:
