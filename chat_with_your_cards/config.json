@@ -6,5 +6,8 @@
     "claude_cli_path": "",
     "permission_mode": "default",
     "stats_refresh_minutes": 30,
-    "context_token_budget": 8000
+    "context_token_budget": 8000,
+    "auto_accept_cap": 20,
+    "conventions_prompt": "",
+    "pins": {}
 }

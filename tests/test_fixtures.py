@@ -17,7 +17,7 @@ from chat_with_your_cards.backends.scripted import compile_script  # noqa: E402
 
 class FixtureScriptsTest(unittest.TestCase):
     def test_expected_scripts_exist(self) -> None:
-        self.assertEqual({"default", "tool", "long"}, set(SCRIPTS))
+        self.assertEqual({"default", "tool", "long", "propose"}, set(SCRIPTS))
 
     def test_every_script_compiles_to_valid_timeline(self) -> None:
         for name, steps in SCRIPTS.items():
@@ -50,7 +50,22 @@ class FixtureScriptsTest(unittest.TestCase):
     def test_selection_by_keyword(self) -> None:
         self.assertIs(SCRIPTS["tool"], select_script("please run a TOOL demo"))
         self.assertIs(SCRIPTS["long"], select_script("give me the long version"))
+        self.assertIs(SCRIPTS["propose"], select_script("PROPOSE a note for this"))
         self.assertIs(SCRIPTS["default"], select_script("explain this card"))
+
+    def test_propose_script_requests_a_valid_creation(self) -> None:
+        from chat_with_your_cards.backends import ProposalRequest
+
+        steps = SCRIPTS["propose"]
+        timeline = compile_script(steps, random.Random(0))
+        requests = [e for _, e in timeline if isinstance(e, ProposalRequest)]
+        self.assertEqual(1, len(requests))
+        request = requests[0]
+        self.assertEqual("create", request.kind)
+        # Must reference stock objects so it validates in a fresh profile.
+        self.assertEqual("Basic", request.payload["note_type"])
+        self.assertEqual("Default", request.payload["deck"])
+        self.assertTrue(request.payload["fields"]["Front"].strip())
 
 
 if __name__ == "__main__":

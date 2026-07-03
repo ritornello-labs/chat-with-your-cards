@@ -9,7 +9,7 @@ from typing import Any, Callable
 from aqt import mw
 from aqt.qt import QTimer
 
-from .backends import ChatEvent, ScriptedBackend, event_to_dict
+from .backends import ChatEvent, ProposalRequest, ScriptedBackend, event_to_dict
 from .backends.claude_cli import ClaudeCliBackend, find_claude_cli
 from .context import build_card_block, extract_card_info, wrap_user_message
 
@@ -40,12 +40,14 @@ class ChatController:
         system_prompt_builder: Callable[[], str],
         ensure_mcp: Callable[[], tuple[str, str]],
         workdir: Path,
+        proposals: Any = None,
     ) -> None:
         self._push = push
         self._config = config
         self._system_prompt_builder = system_prompt_builder
         self._ensure_mcp = ensure_mcp
         self._workdir = workdir
+        self._proposals = proposals
         self._backend: Any = None
         self._backend_notice_sent = False
         self._session: Any = None
@@ -136,6 +138,8 @@ class ChatController:
             self._session = None
         self._last_card_id_sent = None
         self.event_log.clear()
+        if self._proposals is not None:
+            self._proposals.new_session()
         self._push({"type": "reset"})
 
     def shutdown(self) -> None:
@@ -145,7 +149,25 @@ class ChatController:
 
     def _on_event(self, event: ChatEvent) -> None:
         self.event_log.append(event)
+        if isinstance(event, ProposalRequest):
+            # Demo/scripted backends request proposals as events; route them
+            # through the real ProposalManager (which pushes the proposal
+            # card itself). Real backends propose via the MCP tools instead.
+            self._handle_proposal_request(event)
+            return
         self._push(event_to_dict(event))
+
+    def _handle_proposal_request(self, event: ProposalRequest) -> None:
+        if self._proposals is None:
+            self._push({"type": "notice", "text": "Proposals are not available."})
+            return
+        try:
+            if event.kind == "edit":
+                self._proposals.submit_edit(event.payload)
+            else:
+                self._proposals.submit_create(event.payload)
+        except Exception as exc:  # ProposalError or collection trouble
+            self._push({"type": "notice", "text": f"Proposal failed: {exc}"})
 
 
 def current_card_info() -> dict[str, Any] | None:

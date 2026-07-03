@@ -20,6 +20,9 @@ class ToolContext(Protocol):
     @property
     def stats(self) -> dict[str, Any] | None: ...  # cached stats or None
 
+    @property
+    def proposals(self) -> Any: ...  # proposals.ProposalManager
+
 
 ToolFunc = Callable[[ToolContext, dict[str, Any]], Any]
 

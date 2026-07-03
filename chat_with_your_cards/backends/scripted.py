@@ -17,6 +17,7 @@ from .base import (
     ChatEvent,
     Done,
     EventCallback,
+    ProposalRequest,
     TextDelta,
     ToolCallFinished,
     ToolCallStarted,
@@ -53,6 +54,13 @@ def compile_script(steps: list[Step], rng: random.Random) -> list[tuple[int, Cha
                 (
                     int(step["duration_ms"]),
                     ToolCallFinished(call_id, bool(step["ok"]), step["result"]),
+                )
+            )
+        elif step["kind"] == "propose":
+            timeline.append(
+                (
+                    rng.randint(_DELTA_MIN_MS, _DELTA_MAX_MS),
+                    ProposalRequest(step["proposal_kind"], dict(step["payload"])),
                 )
             )
         else:

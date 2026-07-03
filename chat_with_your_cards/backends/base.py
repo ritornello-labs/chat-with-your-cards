@@ -31,6 +31,20 @@ class ToolCallFinished:
 
 
 @dataclass(frozen=True)
+class ProposalRequest:
+    """A scripted/demo backend asking the add-on to submit a note proposal.
+
+    Real backends never emit this - their proposals arrive through the
+    MCP propose_note tools. The controller intercepts this event and
+    routes it into the same ProposalManager, so demos and smoke tests
+    exercise the genuine proposal path.
+    """
+
+    kind: str  # "create" | "edit"
+    payload: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class Done:
     pass
 
@@ -40,7 +54,9 @@ class ErrorEvent:
     message: str
 
 
-ChatEvent = Union[TextDelta, ToolCallStarted, ToolCallFinished, Done, ErrorEvent]
+ChatEvent = Union[
+    TextDelta, ToolCallStarted, ToolCallFinished, ProposalRequest, Done, ErrorEvent
+]
 
 EventCallback = Callable[[ChatEvent], None]
 
@@ -63,6 +79,8 @@ def event_to_dict(event: ChatEvent) -> dict[str, Any]:
             "ok": event.ok,
             "summary": event.summary,
         }
+    if isinstance(event, ProposalRequest):
+        return {"type": "proposal_request", "kind": event.kind, "payload": event.payload}
     if isinstance(event, Done):
         return {"type": "done"}
     if isinstance(event, ErrorEvent):

@@ -6,6 +6,9 @@ without touching backend logic. Each script is a list of steps:
 - {"kind": "text", "markdown": str} - streamed to the UI as small deltas
 - {"kind": "tool", "tool": str, "summary": str, "result": str,
    "ok": bool, "duration_ms": int} - rendered as a tool-call chip
+- {"kind": "propose", "proposal_kind": "create", "payload": {...}} -
+  routed through the real ProposalManager (validation, proposal card,
+  accept path), so demos and smoke tests cover the genuine write flow
 """
 
 from __future__ import annotations
@@ -94,16 +97,54 @@ LONG_SCRIPT: list[Step] = [
     },
 ]
 
+PROPOSE_SCRIPT: list[Step] = [
+    {
+        "kind": "text",
+        "markdown": (
+            "That gap is worth its own card - the quantifier order is exactly what "
+            "trips people up. Here is a proposal:\n\n"
+        ),
+    },
+    {
+        "kind": "propose",
+        "proposal_kind": "create",
+        "payload": {
+            "note_type": "Basic",
+            "deck": "Default",
+            "tags": ["analysis"],
+            "fields": {
+                "Front": "Analysis: why does the quantifier order in the "
+                "epsilon-delta definition matter?",
+                "Back": "Because <i>for every &epsilon; there exists &delta;</i> lets "
+                "&delta; depend on &epsilon;. Swapping them demands one &delta; for "
+                "all &epsilon;, which would force f to be locally constant.",
+            },
+            "rationale": "You said the quantifier order was the confusing part; "
+            "this isolates it as a single recall step.",
+        },
+    },
+    {
+        "kind": "text",
+        "markdown": (
+            "I kept the front in your usual `Analysis:` prefix style. "
+            "Accept it as-is, edit the fields first, or reject it."
+        ),
+    },
+]
+
 SCRIPTS: dict[str, list[Step]] = {
     "default": DEFAULT_SCRIPT,
     "tool": TOOL_SCRIPT,
     "long": LONG_SCRIPT,
+    "propose": PROPOSE_SCRIPT,
 }
 
 
 def select_script(user_text: str) -> list[Step]:
     """Pick a canned script from keywords in the user message (deterministic)."""
     lowered = user_text.lower()
+    if "propose" in lowered or "create a note" in lowered or "make a card" in lowered:
+        return PROPOSE_SCRIPT
     if "tool" in lowered:
         return TOOL_SCRIPT
     if "long" in lowered:

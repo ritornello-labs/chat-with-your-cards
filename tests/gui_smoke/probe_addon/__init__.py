@@ -39,6 +39,7 @@ STREAM_TIMEOUT_MS = 15_000
 DOM_TIMEOUT_MS = 5_000
 
 DEMO_MESSAGE = "please run a tool demo"
+PROPOSE_MESSAGE = "propose a note about this"
 
 
 def _wait_until(predicate: Callable[[], bool], timeout_ms: int, description: str) -> None:
@@ -214,11 +215,97 @@ def _run_checks() -> dict[str, Any]:
 
     check("second toggle returns focus", _focus_toggle_returns)
 
+    def _proposal_round_trip() -> dict[str, Any]:
+        """Scripted propose -> proposal card -> accept -> real note + ledger."""
+        script = (
+            "(function() {"
+            "  var input = document.getElementById('cwyc-input');"
+            f"  input.value = {json.dumps(PROPOSE_MESSAGE)};"
+            "  document.getElementById('cwyc-send').click();"
+            "  return true;"
+            "})();"
+        )
+        if _eval_js(dock.web, script, DOM_TIMEOUT_MS, "propose send click") is not True:
+            raise AssertionError("propose send click failed")
+
+        def _card_rendered() -> bool:
+            return bool(
+                _eval_js(
+                    dock.web,
+                    "document.querySelectorAll('.cwyc-proposal').length",
+                    DOM_TIMEOUT_MS,
+                    "proposal card count",
+                )
+            )
+
+        _wait_until(_card_rendered, STREAM_TIMEOUT_MS, "proposal card to render")
+        card = _eval_js(
+            dock.web,
+            "(function() {"
+            "  var p = document.querySelector('.cwyc-proposal');"
+            "  return {"
+            "    kind: p.querySelector('.cwyc-proposal-kind').textContent,"
+            "    status: p.querySelector('.cwyc-proposal-status').textContent,"
+            "    fields: p.querySelectorAll('.cwyc-field').length,"
+            "    accept: p.querySelectorAll('.cwyc-btn-accept').length,"
+            "    preview_tabs: p.querySelectorAll('.cwyc-preview-tab').length"
+            "  };"
+            "})();",
+            DOM_TIMEOUT_MS,
+            "proposal card state",
+        )
+        if card["kind"] != "New note" or card["fields"] < 2 or card["accept"] != 1:
+            raise AssertionError(f"proposal card malformed: {card}")
+        if card["preview_tabs"] != 2:
+            raise AssertionError(f"expected Front/Back preview tabs: {card}")
+
+        before_ids = set(mw.col.find_notes('tag:"ai-created"'))
+        _eval_js(
+            dock.web,
+            "(function() { document.querySelector('.cwyc-btn-accept').click(); "
+            "return true; })();",
+            DOM_TIMEOUT_MS,
+            "proposal accept click",
+        )
+
+        def _note_created() -> bool:
+            return len(set(mw.col.find_notes('tag:"ai-created"')) - before_ids) == 1
+
+        _wait_until(_note_created, DOM_TIMEOUT_MS, "accepted note to appear")
+        (note_id,) = set(mw.col.find_notes('tag:"ai-created"')) - before_ids
+        note = mw.col.get_note(note_id)
+        session_tag = state.proposals.session_tag
+        if session_tag not in note.tags:
+            raise AssertionError(f"session tag missing: {note.tags}")
+
+        QTest.qWait(300)
+        resolved = _eval_js(
+            dock.web,
+            "(function() {"
+            "  var p = document.querySelector('.cwyc-proposal');"
+            "  var ledger = document.getElementById('cwyc-ledger');"
+            "  return {"
+            "    status: p.querySelector('.cwyc-proposal-status').textContent,"
+            "    revert: p.querySelectorAll('.cwyc-btn-revert').length,"
+            "    ledger_visible: !ledger.hidden,"
+            "    ledger_text: document.getElementById('cwyc-ledger-label').textContent"
+            "  };"
+            "})();",
+            DOM_TIMEOUT_MS,
+            "resolved proposal state",
+        )
+        if resolved["status"] != "Accepted" or not resolved["ledger_visible"]:
+            raise AssertionError(f"proposal did not resolve in the UI: {resolved}")
+        return {"note_id": note_id, "card": card, "resolved": resolved}
+
+    proposal_info = check("proposal accept round-trip", _proposal_round_trip)
+
     return {
         "ok": True,
         "checks": checks,
         "stream": stream_info,
         "dom": dom_info,
+        "proposal": proposal_info,
         "anki_version": getattr(mw, "appVersion", None),
     }
 

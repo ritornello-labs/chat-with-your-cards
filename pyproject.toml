@@ -35,6 +35,8 @@ include = [
     "controller.py",
     "shortcuts.py",
     "context.py",
+    "proposals.py",
+    "skills.py",
     "stats.py",
     "mcp_server.py",
     "backends",

@@ -3,7 +3,8 @@
  * Renders the chat transcript and forwards user intent to Python via
  * pycmd("cwyc:" + JSON). Python pushes events through chatUI.dispatch().
  * Event vocabulary mirrors backends/base.py plus UI-directed messages
- * ("reset", "cancelled"). Unknown types are ignored (forward-compatible).
+ * ("reset", "cancelled", "proposal", "ledger", "pins", ...). Unknown
+ * types are ignored (forward-compatible).
  */
 (function () {
     "use strict";
@@ -16,6 +17,11 @@
     var currentAssistant = null; // {element, markdown}
     var toolChips = {}; // call_id -> element
     var pinnedToBottom = true;
+
+    var proposals = {}; // id -> {data, root, fieldInputs, included, order}
+    var proposalOrder = [];
+    var activeProposalId = null;
+    var pins = { deck: "", note_type: "", tags: [], fields: {} };
 
     function post(msg) {
         if (typeof pycmd === "function") {
@@ -38,22 +44,28 @@
         }
     }
 
+    function el(tag, className, text) {
+        var node = document.createElement(tag);
+        if (className) {
+            node.className = className;
+        }
+        if (text !== undefined) {
+            node.textContent = text;
+        }
+        return node;
+    }
+
     function addUserMessage(text) {
-        var row = document.createElement("div");
-        row.className = "cwyc-row cwyc-row-user";
-        var bubble = document.createElement("div");
-        bubble.className = "cwyc-msg cwyc-msg-user msg-user";
-        bubble.textContent = text;
+        var row = el("div", "cwyc-row cwyc-row-user");
+        var bubble = el("div", "cwyc-msg cwyc-msg-user msg-user", text);
         row.appendChild(bubble);
         transcript.appendChild(row);
         scrollToBottomIfPinned();
     }
 
     function startAssistantMessage() {
-        var row = document.createElement("div");
-        row.className = "cwyc-row cwyc-row-assistant";
-        var body = document.createElement("div");
-        body.className = "cwyc-msg cwyc-msg-assistant msg-assistant cwyc-streaming";
+        var row = el("div", "cwyc-row cwyc-row-assistant");
+        var body = el("div", "cwyc-msg cwyc-msg-assistant msg-assistant cwyc-streaming");
         row.appendChild(body);
         transcript.appendChild(row);
         currentAssistant = { element: body, markdown: "" };
@@ -69,9 +81,17 @@
         scrollToBottomIfPinned();
     }
 
+    function breakAssistantBlock() {
+        // The next text deltas belong to a fresh assistant block; the block
+        // before this row is finished, so stop its cursor.
+        if (currentAssistant) {
+            currentAssistant.element.classList.remove("cwyc-streaming");
+        }
+        currentAssistant = null;
+    }
+
     function addToolChip(callId, tool, summary) {
-        var chip = document.createElement("div");
-        chip.className = "cwyc-tool-chip tool-chip cwyc-tool-running";
+        var chip = el("div", "cwyc-tool-chip tool-chip cwyc-tool-running");
         chip.innerHTML =
             '<span class="cwyc-tool-spinner"></span>' +
             '<span class="cwyc-tool-name"></span>' +
@@ -79,17 +99,11 @@
             '<span class="cwyc-tool-result"></span>';
         chip.querySelector(".cwyc-tool-name").textContent = tool;
         chip.querySelector(".cwyc-tool-summary").textContent = summary;
-        var row = document.createElement("div");
-        row.className = "cwyc-row cwyc-row-tool";
+        var row = el("div", "cwyc-row cwyc-row-tool");
         row.appendChild(chip);
         transcript.appendChild(row);
         toolChips[callId] = chip;
-        // The next text deltas belong to a fresh assistant block after the
-        // chip; the block before it is finished, so stop its cursor.
-        if (currentAssistant) {
-            currentAssistant.element.classList.remove("cwyc-streaming");
-        }
-        currentAssistant = null;
+        breakAssistantBlock();
         scrollToBottomIfPinned();
     }
 
@@ -108,9 +122,7 @@
         if (currentAssistant) {
             currentAssistant.element.classList.remove("cwyc-streaming");
             if (stopped) {
-                var note = document.createElement("div");
-                note.className = "cwyc-stopped-note";
-                note.textContent = "Stopped";
+                var note = el("div", "cwyc-stopped-note", "Stopped");
                 currentAssistant.element.appendChild(note);
             }
         }
@@ -141,8 +153,12 @@
     function resetTranscript() {
         transcript.innerHTML = "";
         toolChips = {};
+        proposals = {};
+        proposalOrder = [];
+        activeProposalId = null;
         currentAssistant = null;
         pinnedToBottom = true;
+        renderLedger({ entries: [] });
         setStreaming(false);
     }
 
@@ -150,6 +166,493 @@
         input.style.height = "auto";
         input.style.height = Math.min(input.scrollHeight, 160) + "px";
     }
+
+    /* ---- word-level diff (LCS on word tokens) ---- */
+
+    function diffTokens(text) {
+        return text.match(/\S+\s*/g) || [];
+    }
+
+    function wordDiff(oldText, newText) {
+        var a = diffTokens(oldText);
+        var b = diffTokens(newText);
+        if (a.length * b.length > 250000) {
+            // Fields long enough to blow the DP table get a block diff.
+            return [{ op: "del", text: oldText }, { op: "ins", text: newText }];
+        }
+        var rows = a.length + 1;
+        var cols = b.length + 1;
+        var lcs = new Array(rows * cols).fill(0);
+        for (var i = a.length - 1; i >= 0; i--) {
+            for (var j = b.length - 1; j >= 0; j--) {
+                lcs[i * cols + j] = a[i].trim() === b[j].trim()
+                    ? lcs[(i + 1) * cols + j + 1] + 1
+                    : Math.max(lcs[(i + 1) * cols + j], lcs[i * cols + j + 1]);
+            }
+        }
+        var ops = [];
+        var x = 0;
+        var y = 0;
+        function pushOp(op, text) {
+            var last = ops[ops.length - 1];
+            if (last && last.op === op) {
+                last.text += text;
+            } else {
+                ops.push({ op: op, text: text });
+            }
+        }
+        while (x < a.length && y < b.length) {
+            if (a[x].trim() === b[y].trim()) {
+                pushOp("eq", b[y]);
+                x++;
+                y++;
+            } else if (lcs[(x + 1) * cols + y] >= lcs[x * cols + y + 1]) {
+                pushOp("del", a[x]);
+                x++;
+            } else {
+                pushOp("ins", b[y]);
+                y++;
+            }
+        }
+        while (x < a.length) {
+            pushOp("del", a[x++]);
+        }
+        while (y < b.length) {
+            pushOp("ins", b[y++]);
+        }
+        return ops;
+    }
+
+    function renderDiff(container, oldText, newText) {
+        container.innerHTML = "";
+        wordDiff(oldText, newText).forEach(function (part) {
+            var span = el(
+                "span",
+                part.op === "ins" ? "cwyc-diff-ins" : part.op === "del" ? "cwyc-diff-del" : "",
+                part.text
+            );
+            container.appendChild(span);
+        });
+    }
+
+    /* ---- card preview (real templates, rendered in a sandboxed iframe) ---- */
+
+    function previewSrcdoc(side, css) {
+        var night = document.documentElement.classList.contains("night-mode") ||
+            document.body.classList.contains("nightMode");
+        return "<!doctype html><html><head><meta charset='utf-8'><style>" +
+            (css || "") +
+            "\nhtml{overflow:auto;}body{margin:10px;}" +
+            "</style></head><body class=\"card" +
+            (night ? " nightMode night_mode" : "") +
+            "\">" + side + "</body></html>";
+    }
+
+    function buildPreviewTabs(previews) {
+        // Tabs: for edits Before/After (answer side); for creations Front/Back.
+        var wrap = el("div", "cwyc-preview");
+        var tabs = el("div", "cwyc-preview-tabs");
+        var frame = document.createElement("iframe");
+        frame.className = "cwyc-preview-frame";
+        frame.setAttribute("sandbox", "");
+        var options = [];
+        if (previews.before && previews.after) {
+            options = [
+                { label: "Before", html: previews.before.answer, css: previews.before.css },
+                { label: "After", html: previews.after.answer, css: previews.after.css },
+            ];
+        } else if (previews.after) {
+            options = [
+                { label: "Front", html: previews.after.question, css: previews.after.css },
+                { label: "Back", html: previews.after.answer, css: previews.after.css },
+            ];
+        }
+        if (!options.length) {
+            return null;
+        }
+        var buttons = options.map(function (option, index) {
+            var button = el("button", "cwyc-preview-tab", option.label);
+            button.type = "button";
+            button.addEventListener("click", function () {
+                buttons.forEach(function (b) { b.classList.remove("cwyc-active"); });
+                button.classList.add("cwyc-active");
+                frame.srcdoc = previewSrcdoc(option.html, option.css);
+            });
+            tabs.appendChild(button);
+            return button;
+        });
+        // Default to the interesting side: After for edits, Back for creations.
+        var start = 1;
+        buttons[start].classList.add("cwyc-active");
+        frame.srcdoc = previewSrcdoc(options[start].html, options[start].css);
+        wrap.appendChild(tabs);
+        wrap.appendChild(frame);
+        return wrap;
+    }
+
+    /* ---- proposal cards ---- */
+
+    function proposalStatusLabel(status) {
+        return {
+            "pending": "Pending review",
+            "accepted": "Accepted",
+            "auto-accepted": "Auto-accepted",
+            "rejected": "Rejected",
+            "undone": "Undone",
+        }[status] || status;
+    }
+
+    function autosizeArea(area) {
+        area.style.height = "auto";
+        area.style.height = Math.min(area.scrollHeight, 200) + "px";
+    }
+
+    function renderProposal(data) {
+        breakAssistantBlock();
+        var existing = proposals[data.id];
+        var record = existing || {
+            data: data,
+            root: null,
+            fieldInputs: {},
+            included: {},
+        };
+        record.data = data;
+        record.fieldInputs = {};
+
+        var root = el("div", "cwyc-proposal");
+        root.tabIndex = 0;
+        root.dataset.proposalId = data.id;
+
+        // header: kind badge, note type -> deck, status pill
+        var head = el("div", "cwyc-proposal-head");
+        head.appendChild(
+            el("span", "cwyc-proposal-kind", data.kind === "edit" ? "Edit note" : "New note")
+        );
+        var where = data.note_type + (data.deck ? " · " + data.deck : "");
+        head.appendChild(el("span", "cwyc-proposal-where", where));
+        var pill = el("span", "cwyc-proposal-status", proposalStatusLabel(data.status));
+        pill.classList.add("cwyc-status-" + data.status);
+        head.appendChild(pill);
+        root.appendChild(head);
+        record.pill = pill;
+
+        (data.warnings || []).forEach(function (warning) {
+            root.appendChild(el("div", "cwyc-proposal-warning", warning));
+        });
+        if (data.rationale) {
+            root.appendChild(el("div", "cwyc-proposal-rationale", data.rationale));
+        }
+
+        var body = el("div", "cwyc-proposal-body");
+        root.appendChild(body);
+
+        if (data.kind === "edit") {
+            renderEditFields(record, body);
+        } else {
+            renderCreateFields(record, body);
+        }
+
+        // tag chips (+ add/remove for edits)
+        var tagRow = el("div", "cwyc-proposal-tags");
+        (data.tags || []).forEach(function (tag) {
+            tagRow.appendChild(el("span", "cwyc-tag", tag));
+        });
+        (data.add_tags || []).forEach(function (tag) {
+            tagRow.appendChild(el("span", "cwyc-tag cwyc-tag-add", "+ " + tag));
+        });
+        (data.remove_tags || []).forEach(function (tag) {
+            tagRow.appendChild(el("span", "cwyc-tag cwyc-tag-remove", "− " + tag));
+        });
+        if (tagRow.childNodes.length) {
+            body.appendChild(tagRow);
+        }
+
+        if (data.previews) {
+            var preview = buildPreviewTabs(data.previews);
+            if (preview) {
+                body.appendChild(preview);
+            }
+        }
+
+        var errorBox = el("div", "cwyc-proposal-error");
+        errorBox.hidden = true;
+        root.appendChild(errorBox);
+        record.errorBox = errorBox;
+
+        var actions = el("div", "cwyc-proposal-actions");
+        if (data.status === "pending") {
+            var reject = el("button", "cwyc-btn-reject", "Reject");
+            reject.type = "button";
+            reject.title = "Reject (Cmd/Ctrl+Backspace)";
+            reject.addEventListener("click", function () {
+                post({ type: "proposal_reject", id: data.id });
+            });
+            var accept = el("button", "cwyc-btn-accept cwyc-primary", "Accept");
+            accept.type = "button";
+            accept.title = "Accept (Cmd/Ctrl+Enter)";
+            accept.addEventListener("click", function () {
+                acceptProposal(data.id);
+            });
+            actions.appendChild(reject);
+            actions.appendChild(accept);
+        }
+        root.appendChild(actions);
+        record.actions = actions;
+
+        root.addEventListener("focusin", function () {
+            activeProposalId = data.id;
+            root.classList.add("cwyc-proposal-active");
+        });
+        root.addEventListener("focusout", function () {
+            root.classList.remove("cwyc-proposal-active");
+        });
+
+        if (existing && existing.root) {
+            existing.root.replaceWith(root);
+        } else {
+            var row = el("div", "cwyc-row cwyc-row-proposal");
+            row.appendChild(root);
+            transcript.appendChild(row);
+            proposalOrder.push(data.id);
+        }
+        record.root = root;
+        proposals[data.id] = record;
+        if (data.status === "pending" && !activeProposalId) {
+            activeProposalId = data.id;
+        }
+        if (data.status !== "pending") {
+            markResolved(data.id, data.status, data.note_id);
+        }
+        scrollToBottomIfPinned();
+    }
+
+    function fieldEditor(record, name, value) {
+        var area = document.createElement("textarea");
+        area.className = "cwyc-field-input";
+        area.value = value;
+        area.rows = 1;
+        area.addEventListener("input", function () {
+            autosizeArea(area);
+        });
+        record.fieldInputs[name] = area;
+        // Autosize once attached to the DOM (scrollHeight is 0 before).
+        setTimeout(function () {
+            autosizeArea(area);
+        }, 0);
+        return area;
+    }
+
+    function renderCreateFields(record, body) {
+        record.data.fields.forEach(function (fieldData) {
+            var row = el("div", "cwyc-field");
+            row.appendChild(el("label", "cwyc-field-name", fieldData.name));
+            row.appendChild(fieldEditor(record, fieldData.name, fieldData.new));
+            body.appendChild(row);
+        });
+    }
+
+    function renderEditFields(record, body) {
+        record.data.fields.forEach(function (fieldData) {
+            record.included[fieldData.name] = record.included[fieldData.name] !== false;
+
+            var row = el("div", "cwyc-field");
+            var head = el("div", "cwyc-field-head");
+            var toggle = document.createElement("input");
+            toggle.type = "checkbox";
+            toggle.checked = record.included[fieldData.name];
+            toggle.title = "Apply this field change";
+            toggle.addEventListener("change", function () {
+                record.included[fieldData.name] = toggle.checked;
+                row.classList.toggle("cwyc-field-skipped", !toggle.checked);
+            });
+            head.appendChild(toggle);
+            head.appendChild(el("label", "cwyc-field-name", fieldData.name));
+
+            var editBtn = el("button", "cwyc-field-edit-btn", "Edit");
+            editBtn.type = "button";
+            editBtn.title = "Edit the proposed value";
+            head.appendChild(editBtn);
+            row.appendChild(head);
+
+            var diffBox = el("div", "cwyc-field-diff");
+            renderDiff(diffBox, fieldData.old || "", fieldData.new);
+            row.appendChild(diffBox);
+
+            var area = fieldEditor(record, fieldData.name, fieldData.new);
+            area.hidden = true;
+            row.appendChild(area);
+            editBtn.addEventListener("click", function () {
+                var editing = area.hidden;
+                area.hidden = !editing;
+                diffBox.hidden = editing;
+                editBtn.textContent = editing ? "Diff" : "Edit";
+                if (editing) {
+                    autosizeArea(area);
+                    area.focus();
+                } else {
+                    renderDiff(diffBox, fieldData.old || "", area.value);
+                }
+            });
+            body.appendChild(row);
+        });
+    }
+
+    function acceptProposal(id) {
+        var record = proposals[id];
+        if (!record || record.data.status !== "pending") {
+            return;
+        }
+        var fields = {};
+        Object.keys(record.fieldInputs).forEach(function (name) {
+            fields[name] = record.fieldInputs[name].value;
+        });
+        var msg = { type: "proposal_accept", id: id, fields: fields };
+        if (record.data.kind === "edit") {
+            msg.accepted_fields = Object.keys(fields).filter(function (name) {
+                return record.included[name] !== false;
+            });
+        }
+        post(msg);
+    }
+
+    function rejectProposal(id) {
+        var record = proposals[id];
+        if (!record || record.data.status !== "pending") {
+            return;
+        }
+        post({ type: "proposal_reject", id: id });
+    }
+
+    function markResolved(id, status, noteId) {
+        var record = proposals[id];
+        if (!record) {
+            return;
+        }
+        record.data.status = status;
+        record.root.classList.add("cwyc-proposal-resolved");
+        record.pill.textContent = proposalStatusLabel(status);
+        record.pill.className = "cwyc-proposal-status cwyc-status-" + status;
+        record.root
+            .querySelectorAll("textarea, input, .cwyc-field-edit-btn")
+            .forEach(function (node) {
+                node.disabled = true;
+            });
+        record.actions.innerHTML = "";
+        if (status === "accepted" || status === "auto-accepted") {
+            var revert = el("button", "cwyc-btn-revert", "Revert");
+            revert.type = "button";
+            revert.title = "Undo this change";
+            revert.addEventListener("click", function () {
+                post({ type: "proposal_revert", id: id });
+            });
+            record.actions.appendChild(revert);
+        }
+        if (activeProposalId === id) {
+            activeProposalId = firstPendingProposal();
+        }
+    }
+
+    function firstPendingProposal() {
+        for (var i = 0; i < proposalOrder.length; i++) {
+            var record = proposals[proposalOrder[i]];
+            if (record && record.data.status === "pending") {
+                return proposalOrder[i];
+            }
+        }
+        return null;
+    }
+
+    function targetProposal() {
+        var record = activeProposalId && proposals[activeProposalId];
+        if (record && record.data.status === "pending") {
+            return activeProposalId;
+        }
+        return firstPendingProposal();
+    }
+
+    function cycleProposalFocus(direction) {
+        var pending = proposalOrder.filter(function (id) {
+            return proposals[id] && proposals[id].data.status === "pending";
+        });
+        if (!pending.length) {
+            return;
+        }
+        var index = pending.indexOf(activeProposalId);
+        index = index === -1 ? 0 : (index + direction + pending.length) % pending.length;
+        activeProposalId = pending[index];
+        var root = proposals[activeProposalId].root;
+        root.focus();
+        root.scrollIntoView({ block: "nearest" });
+    }
+
+    /* ---- ledger strip ---- */
+
+    var ledgerBox = null;
+
+    function renderLedger(data) {
+        if (!ledgerBox) {
+            return;
+        }
+        var live = (data.entries || []).filter(function (entry) {
+            return !entry.undone;
+        });
+        ledgerBox.hidden = live.length === 0;
+        var label = document.getElementById("cwyc-ledger-label");
+        if (label) {
+            label.textContent =
+                live.length + " AI change" + (live.length === 1 ? "" : "s") + " this session";
+        }
+    }
+
+    /* ---- pins panel ---- */
+
+    function renderPins(data) {
+        pins = data || {};
+        var label = document.getElementById("cwyc-pins-label");
+        var count =
+            (pins.deck ? 1 : 0) +
+            (pins.note_type ? 1 : 0) +
+            ((pins.tags || []).length ? 1 : 0) +
+            (Object.keys(pins.fields || {}).length ? 1 : 0);
+        label.textContent = count ? "Pins · " + count : "Pins";
+        document.getElementById("cwyc-pin-deck").value = pins.deck || "";
+        document.getElementById("cwyc-pin-notetype").value = pins.note_type || "";
+        document.getElementById("cwyc-pin-tags").value = (pins.tags || []).join(", ");
+        document.getElementById("cwyc-pin-fields").value = Object.keys(pins.fields || {})
+            .map(function (name) {
+                return name + ": " + pins.fields[name];
+            })
+            .join("\n");
+    }
+
+    function collectPins() {
+        var fieldLines = document.getElementById("cwyc-pin-fields").value.split("\n");
+        var fields = {};
+        fieldLines.forEach(function (line) {
+            var split = line.indexOf(":");
+            if (split > 0) {
+                var name = line.slice(0, split).trim();
+                var value = line.slice(split + 1).trim();
+                if (name) {
+                    fields[name] = value;
+                }
+            }
+        });
+        return {
+            deck: document.getElementById("cwyc-pin-deck").value.trim(),
+            note_type: document.getElementById("cwyc-pin-notetype").value.trim(),
+            tags: document
+                .getElementById("cwyc-pin-tags")
+                .value.split(",")
+                .map(function (tag) {
+                    return tag.trim();
+                })
+                .filter(Boolean),
+            fields: fields,
+        };
+    }
+
+    /* ---- dispatch ---- */
 
     function dispatch(payload) {
         switch (payload.type) {
@@ -161,6 +664,26 @@
                 break;
             case "tool_call_finished":
                 finishToolChip(payload.call_id, payload.ok, payload.summary);
+                break;
+            case "proposal":
+                renderProposal(payload.proposal);
+                break;
+            case "proposal_resolved":
+                markResolved(payload.id, payload.status, payload.note_id);
+                break;
+            case "proposal_error": {
+                var record = proposals[payload.id];
+                if (record) {
+                    record.errorBox.textContent = payload.message;
+                    record.errorBox.hidden = false;
+                }
+                break;
+            }
+            case "ledger":
+                renderLedger(payload);
+                break;
+            case "pins":
+                renderPins(payload.pins);
                 break;
             case "done":
                 finalizeStream(false);
@@ -176,9 +699,7 @@
                 resetTranscript();
                 break;
             case "notice": {
-                var note = document.createElement("div");
-                note.className = "cwyc-notice";
-                note.textContent = payload.text;
+                var note = el("div", "cwyc-notice", payload.text);
                 transcript.appendChild(note);
                 scrollToBottomIfPinned();
                 break;
@@ -212,6 +733,30 @@
             post(event.shiftKey ? { type: "new_chat" } : { type: "toggle_focus" });
             return;
         }
+        if (mod && event.key === "Enter") {
+            var acceptId = targetProposal();
+            if (acceptId) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                acceptProposal(acceptId);
+            }
+            return;
+        }
+        if (mod && event.key === "Backspace") {
+            var rejectId = targetProposal();
+            if (rejectId) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                rejectProposal(rejectId);
+            }
+            return;
+        }
+        if (mod && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            cycleProposalFocus(event.key === "ArrowDown" ? 1 : -1);
+            return;
+        }
         if (event.key === "Escape") {
             // AnkiWebView injects its own bubble-phase Escape handler that
             // pycmd("close")s; intercept in capture phase and stop it.
@@ -225,6 +770,7 @@
         transcript = document.getElementById("cwyc-transcript");
         input = document.getElementById("cwyc-input");
         sendButton = document.getElementById("cwyc-send");
+        ledgerBox = document.getElementById("cwyc-ledger");
 
         sendButton.addEventListener("click", function () {
             if (streaming) {
@@ -250,6 +796,25 @@
             pinnedToBottom = distance < 40;
         });
         document.addEventListener("keydown", onKeydownCapture, true);
+
+        var pinsPanel = document.getElementById("cwyc-pins-panel");
+        document.getElementById("cwyc-pins-toggle").addEventListener("click", function () {
+            pinsPanel.hidden = !pinsPanel.hidden;
+        });
+        document.getElementById("cwyc-pins-save").addEventListener("click", function () {
+            post({ type: "set_pins", pins: collectPins() });
+            pinsPanel.hidden = true;
+        });
+        document.getElementById("cwyc-pins-clear").addEventListener("click", function () {
+            post({ type: "set_pins", pins: { deck: "", note_type: "", tags: [], fields: {} } });
+            pinsPanel.hidden = true;
+        });
+        document.getElementById("cwyc-ledger-undo").addEventListener("click", function () {
+            post({ type: "undo_session" });
+        });
+        document.getElementById("cwyc-ledger-browser").addEventListener("click", function () {
+            post({ type: "open_session_browser" });
+        });
 
         autosizeInput();
         pingReadyUntilAcked();

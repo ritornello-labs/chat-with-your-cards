@@ -293,4 +293,7 @@ def build_registry() -> ToolRegistry:
     ]
     for spec in specs:
         registry.register(spec)
+    from .proposals import register_proposal_tools
+
+    register_proposal_tools(registry)
     return registry

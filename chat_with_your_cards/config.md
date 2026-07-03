@@ -13,8 +13,18 @@
 - `claude_cli_path` (default empty): explicit path to the `claude` binary when it
   is not on the standard lookup paths.
 - `permission_mode` (default `default`): `default` allows collection reads without
-  asking; `read-only` additionally tells the assistant the session must not
-  modify anything.
+  asking and gates note creation/editing behind proposal cards; `read-only`
+  removes the write tools entirely; `auto-accept` applies the assistant's note
+  *creations* immediately (tagged `ai-created`, up to `auto_accept_cap` per
+  session) while edits stay behind proposals.
+- `auto_accept_cap` (default `20`): in `auto-accept` mode, how many notes may be
+  created without review per chat session before proposals pause for manual
+  review again.
+- `conventions_prompt` (default empty): your note-authoring conventions (style,
+  field usage, tagging). Injected into the assistant's instructions for every
+  proposal and materialized as `user_files/skills/note-conventions/SKILL.md`.
+- `pins` (managed from the dock's Pins panel, not edited here): pinned deck,
+  note type, tags, and prefilled field defaults applied to every proposed note.
 - `stats_refresh_minutes` (default `30`): how often the collection overview
   (deck/tag hierarchies with counts and review time) is recomputed in the
   background.

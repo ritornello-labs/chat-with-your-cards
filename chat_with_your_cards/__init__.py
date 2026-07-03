@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from .controller import ChatController
     from .dock import ChatDock
     from .mcp_server import McpServer
+    from .proposals import ProposalManager
     from .stats import StatsCache
 
 DEFAULT_CONFIG: dict[str, Any] = {
@@ -26,6 +27,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "permission_mode": "default",
     "stats_refresh_minutes": 30,
     "context_token_budget": 8000,
+    "auto_accept_cap": 20,
+    "conventions_prompt": "",
+    "pins": {},
 }
 
 USER_FILES = Path(__file__).resolve().parent / "user_files"
@@ -37,6 +41,7 @@ class AddonState:
     controller: Optional[ChatController] = None
     stats_cache: Optional[StatsCache] = None
     mcp: Optional[McpServer] = None
+    proposals: Optional[ProposalManager] = None
     shortcuts: list[Any] = field(default_factory=list)
     web_ready: bool = False
     config: dict[str, Any] = field(default_factory=dict)
@@ -67,6 +72,8 @@ def _setup() -> None:
     from . import shortcuts as shortcuts_mod
     from .context import build_system_prompt
     from .controller import ChatController
+    from .proposals import ProposalManager
+    from .skills import load_conventions
     from .stats import StatsCache
 
     config = dict(DEFAULT_CONFIG)
@@ -81,13 +88,25 @@ def _setup() -> None:
 
     state.dock = dock_mod.create_dock(dock_width=int(config["dock_width"]))
 
+    state.proposals = ProposalManager(
+        get_col=lambda: mw.col,
+        push=state.dock.bridge.push,
+        config=config,
+        save_pins=_save_pins,
+    )
+
+    conventions = load_conventions(USER_FILES, str(config.get("conventions_prompt", "")))
+
     def system_prompt() -> str:
         cache = state.stats_cache
         overview = (
             cache.overview(int(config["context_token_budget"])) if cache else None
         )
         return build_system_prompt(
-            overview, permission_mode=str(config["permission_mode"])
+            overview,
+            permission_mode=str(config["permission_mode"]),
+            pins=state.proposals.pins if state.proposals else None,
+            conventions=conventions,
         )
 
     state.controller = ChatController(
@@ -96,6 +115,7 @@ def _setup() -> None:
         system_prompt_builder=system_prompt,
         ensure_mcp=_ensure_mcp,
         workdir=USER_FILES / "agent-home",
+        proposals=state.proposals,
     )
     _wire_bridge()
     shortcuts_mod.register_shortcuts(state)
@@ -109,6 +129,10 @@ class _ToolCtx:
     @property
     def stats(self) -> dict[str, Any] | None:
         return state.stats_cache.stats if state.stats_cache else None
+
+    @property
+    def proposals(self) -> Any:
+        return state.proposals
 
 
 def _ensure_mcp() -> tuple[str, str]:
@@ -166,11 +190,43 @@ def _wire_bridge() -> None:
     bridge.on("toggle_focus", lambda _msg: toggle_chat_focus())
     bridge.on("focus_reviewer", lambda _msg: shortcuts_mod.focus_main_window())
 
+    proposals = state.proposals
+    assert proposals is not None
+    bridge.on("proposal_accept", proposals.accept)
+    bridge.on("proposal_reject", proposals.reject)
+    bridge.on("proposal_revert", proposals.revert)
+    bridge.on("undo_session", lambda _msg: proposals.undo_session())
+    bridge.on("set_pins", lambda msg: proposals.set_pins(msg.get("pins") or {}))
+    bridge.on("open_session_browser", lambda _msg: _open_session_browser())
+
 
 def _mark_web_ready() -> None:
     state.web_ready = True
     if state.dock is not None:
         state.dock.web.eval("window.chatUI && window.chatUI.ackReady();")
+    if state.proposals is not None:
+        state.proposals.push_ui_state()
+
+
+def _save_pins(pins: dict[str, Any]) -> None:
+    config = mw.addonManager.getConfig(__name__) or {}
+    config["pins"] = pins
+    mw.addonManager.writeConfig(__name__, config)
+
+
+def _open_session_browser() -> None:
+    """One-click review of this session's AI-created notes in the Browser."""
+    if state.proposals is None:
+        return
+    from aqt import dialogs
+
+    query = f'tag:"{state.proposals.session_tag}"'
+    browser = dialogs.open("Browser", mw)
+    try:
+        browser.search_for(query)
+    except AttributeError:
+        browser.form.searchEdit.lineEdit().setText(query)
+        browser.onSearchActivated()
 
 
 def _teardown() -> None:

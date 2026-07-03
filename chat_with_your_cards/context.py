@@ -57,10 +57,41 @@ def build_card_block(info: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def build_pins_block(pins: dict[str, Any] | None) -> str | None:
+    """Render user pins as constraints the agent must not fight (DESIGN.md 8)."""
+    pins = pins or {}
+    lines = []
+    if pins.get("deck"):
+        lines.append(f"- Deck is pinned to {pins['deck']!r}: every proposal goes there.")
+    if pins.get("note_type"):
+        lines.append(
+            f"- Note type is pinned to {pins['note_type']!r}: propose_note only "
+            "accepts this type."
+        )
+    if pins.get("tags"):
+        lines.append(
+            "- Pinned tags added to every proposal: " + ", ".join(pins["tags"]) + "."
+        )
+    if pins.get("fields"):
+        lines.append(
+            "- Prefilled field defaults (keep unless you have strong reason, and "
+            "say so when you override): "
+            + "; ".join(f"{k} = {v!r}" for k, v in pins["fields"].items())
+        )
+    if not lines:
+        return None
+    return (
+        "The user pinned these note-creation constraints in the dock. Do not "
+        "fight them:\n" + "\n".join(lines)
+    )
+
+
 def build_system_prompt(
     overview: str | None,
     *,
     permission_mode: str = "default",
+    pins: dict[str, Any] | None = None,
+    conventions: str | None = None,
 ) -> str:
     parts = [
         "You are the assistant inside \"Chat With Your Cards\", a chat dock in "
@@ -84,6 +115,34 @@ def build_system_prompt(
         parts.append(
             "\nThis session is read-only: do not attempt any modification."
         )
+    else:
+        parts.append(
+            "\nTo create or change notes, use propose_note and "
+            "propose_note_edit. They never write directly: the user reviews a "
+            "proposal card (with diffs and a rendered card preview) and "
+            "accepts, edits, or rejects it. Check the note type's fields with "
+            "get_note_type before proposing; match the user's existing style "
+            "(look at similar notes first). Propose one focused note per "
+            "concept rather than a batch. For edits, only include fields that "
+            "actually change."
+        )
+        if permission_mode == "auto-accept":
+            parts.append(
+                "\nAuto-accept is on: your note creations apply immediately "
+                "(up to a session cap) and are tagged ai-created. Be "
+                "conservative - only create notes the user clearly asked for. "
+                "Edits still require manual review."
+            )
+        pins_block = build_pins_block(pins)
+        if pins_block:
+            parts.append("\n" + pins_block)
+        if conventions:
+            parts.append(
+                "\n<note-conventions>\nThe user's note-authoring conventions - "
+                "follow them for every proposal:\n"
+                + conventions.strip()
+                + "\n</note-conventions>"
+            )
     if overview:
         parts.append("\n<collection-overview>\n" + overview + "\n</collection-overview>")
     else:

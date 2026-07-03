@@ -7,9 +7,49 @@
             </svg>
             New chat
         </button>
+        <span id="cwyc-header-spacer"></span>
+        <button id="cwyc-pins-toggle" type="button"
+                title="Pin deck, note type, tags, and field defaults for proposed notes">
+            <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+                <path d="M9.5 1.5l5 5-2.2.7-2.5 2.5.4 3.3-1.6-1.6L4 15l-3-3 3.6-4.6L3 5.8l1.6-1.6 3.3.4 2.5-2.5z"
+                      fill="currentColor" opacity="0.85"/>
+            </svg>
+            <span id="cwyc-pins-label">Pins</span>
+        </button>
     </header>
+    <section id="cwyc-pins-panel" hidden>
+        <div class="cwyc-pins-row">
+            <label for="cwyc-pin-deck">Deck</label>
+            <input id="cwyc-pin-deck" type="text" placeholder="e.g. Math::Analysis">
+        </div>
+        <div class="cwyc-pins-row">
+            <label for="cwyc-pin-notetype">Note type</label>
+            <input id="cwyc-pin-notetype" type="text" placeholder="e.g. Basic">
+        </div>
+        <div class="cwyc-pins-row">
+            <label for="cwyc-pin-tags">Tags</label>
+            <input id="cwyc-pin-tags" type="text" placeholder="comma-separated">
+        </div>
+        <div class="cwyc-pins-row">
+            <label for="cwyc-pin-fields">Fields</label>
+            <textarea id="cwyc-pin-fields" rows="2"
+                      placeholder="One per line: Field name: default value"></textarea>
+        </div>
+        <div class="cwyc-pins-actions">
+            <span class="cwyc-pins-hint">Pins apply to every proposed note until changed.</span>
+            <button id="cwyc-pins-clear" type="button">Clear</button>
+            <button id="cwyc-pins-save" type="button" class="cwyc-primary">Save pins</button>
+        </div>
+    </section>
     <main id="cwyc-transcript" aria-live="polite"></main>
     <footer id="cwyc-footer">
+        <div id="cwyc-ledger" hidden>
+            <span id="cwyc-ledger-label"></span>
+            <button id="cwyc-ledger-browser" type="button"
+                    title="Show this session's AI-created notes in the Browser">Browser</button>
+            <button id="cwyc-ledger-undo" type="button"
+                    title="Revert every change made this session">Undo session</button>
+        </div>
         <div id="cwyc-context-chip" title="What the assistant will see">
             Context: collection overview
         </div>

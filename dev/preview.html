@@ -99,13 +99,108 @@
             });
             dispatchLater(step(50), { type: "done" });
         }
+        // ---- proposal demo fixtures (M2) ----
+        var demoCss = ".card { font-family: -apple-system, sans-serif; font-size: 18px; " +
+            "text-align: center; color: #111; background: #fff; padding: 12px; }" +
+            ".card.nightMode { color: #eee; background: #2c2c2c; }";
+        var ledgerEntries = [];
+        function proposeCreate() {
+            var t = 0;
+            var step = function (ms) { t += ms; return t; };
+            var pre = "That gap deserves its own card. Here is a proposal:\n\n";
+            pre.split(" ").forEach(function (word) {
+                dispatchLater(step(30), { type: "text_delta", text: word + " " });
+            });
+            dispatchLater(step(300), {
+                type: "proposal",
+                proposal: {
+                    id: "p1", kind: "create", status: "pending",
+                    note_type: "Basic", deck: "Math::Analysis",
+                    tags: ["analysis"], note_id: null,
+                    fields: [
+                        { name: "Front", new: "Analysis: why does the quantifier order in the epsilon-delta definition matter?" },
+                        { name: "Back", new: "Because for every epsilon there exists delta lets delta depend on epsilon. Swapping them would force f to be locally constant." },
+                    ],
+                    add_tags: [], remove_tags: [],
+                    rationale: "You said the quantifier order was the confusing part; this isolates it as one recall step.",
+                    warnings: ["deck 'Math::Analysis' does not exist yet; it will be created"],
+                    previews: {
+                        before: null,
+                        after: {
+                            question: "Analysis: why does the quantifier order matter?",
+                            answer: "Analysis: why does the quantifier order matter?<hr id=answer>Because delta may depend on epsilon.",
+                            css: demoCss,
+                        },
+                    },
+                },
+            });
+            dispatchLater(step(200), { type: "done" });
+        }
+        function proposeEdit() {
+            var t = 0;
+            var step = function (ms) { t += ms; return t; };
+            dispatchLater(step(200), {
+                type: "proposal",
+                proposal: {
+                    id: "p2", kind: "edit", status: "pending",
+                    note_type: "Basic", deck: "Math::Analysis",
+                    tags: ["analysis"], note_id: 1234567,
+                    fields: [
+                        {
+                            name: "Back",
+                            old: "For every epsilon there is a delta such that |x-a| < delta implies |f(x)-L| < epsilon.",
+                            new: "For every epsilon > 0 there is a delta > 0 such that 0 < |x-a| < delta implies |f(x)-L| < epsilon. The puncture (0 <) excludes x = a itself.",
+                        },
+                    ],
+                    add_tags: ["definitions"], remove_tags: ["todo"],
+                    rationale: "The current back drops the positivity constraints and the puncture.",
+                    warnings: [],
+                    previews: {
+                        before: { question: "Define the limit.", answer: "Define the limit.<hr id=answer>For every epsilon there is a delta ...", css: demoCss },
+                        after: { question: "Define the limit.", answer: "Define the limit.<hr id=answer>For every epsilon > 0 there is a delta > 0 ...", css: demoCss },
+                    },
+                },
+            });
+            dispatchLater(step(200), { type: "done" });
+        }
+        function pushLedger() {
+            window.chatUI.dispatch({
+                type: "ledger",
+                session_id: "demo", session_tag: "ai-chat-dock::session-demo",
+                entries: ledgerEntries.slice(),
+            });
+        }
         window.pycmd = function (raw) {
             if (raw.indexOf("cwyc:") !== 0) { return; }
             var msg = JSON.parse(raw.slice(5));
             if (msg.type === "ready") {
                 window.chatUI.ackReady();
+                window.chatUI.dispatch({ type: "pins", pins: { deck: "", note_type: "", tags: [], fields: {} } });
             } else if (msg.type === "send") {
-                replyStream();
+                var text = (msg.text || "").toLowerCase();
+                if (text.indexOf("edit") !== -1) { proposeEdit(); }
+                else if (text.indexOf("propose") !== -1 || text.indexOf("note") !== -1) { proposeCreate(); }
+                else { replyStream(); }
+            } else if (msg.type === "proposal_accept") {
+                ledgerEntries.push({ id: msg.id, kind: "create", note_id: 424242, label: "demo note", undone: false });
+                window.chatUI.dispatch({ type: "proposal_resolved", id: msg.id, status: "accepted", note_id: 424242 });
+                pushLedger();
+            } else if (msg.type === "proposal_reject") {
+                window.chatUI.dispatch({ type: "proposal_resolved", id: msg.id, status: "rejected" });
+            } else if (msg.type === "proposal_revert") {
+                ledgerEntries.forEach(function (e) { if (e.id === msg.id) { e.undone = true; } });
+                window.chatUI.dispatch({ type: "proposal_resolved", id: msg.id, status: "undone" });
+                pushLedger();
+            } else if (msg.type === "undo_session") {
+                ledgerEntries.forEach(function (e) {
+                    if (!e.undone) {
+                        e.undone = true;
+                        window.chatUI.dispatch({ type: "proposal_resolved", id: e.id, status: "undone" });
+                    }
+                });
+                pushLedger();
+            } else if (msg.type === "set_pins") {
+                window.chatUI.dispatch({ type: "pins", pins: msg.pins });
             } else if (msg.type === "cancel") {
                 pendingTimers.forEach(clearTimeout);
                 pendingTimers = [];
@@ -113,6 +208,7 @@
             } else if (msg.type === "new_chat") {
                 pendingTimers.forEach(clearTimeout);
                 pendingTimers = [];
+                ledgerEntries = [];
                 window.chatUI.dispatch({ type: "reset" });
             }
         };

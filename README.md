@@ -11,17 +11,21 @@ An Anki add-on that adds a collapsible, modern chat dock/sidebar for talking to 
 
 ## Status
 
-M1 complete: the dock talks to a real agent. The Claude Code CLI backend runs
-as a persistent headless subprocess with token-level streaming, connected to
-an in-process localhost MCP server exposing nine collection read tools
-(search, note/card fetch, annotated deck/tag trees, stats, clue-based
-find_related). The current card under review is injected into context per
-message, the collection overview comes from a background stats cache, and
-everything falls back to a scripted demo backend when the CLI is absent (so
-smoke tests stay deterministic). Verified by a live headless CLI check plus
-green GUI smokes on macOS host (stealth) and Docker/Xvfb. Next: M2 — note
-proposals. Architecture, milestones, and known issues live in
-[DESIGN.md](DESIGN.md).
+M2 complete: the agent can now author notes, safely. `propose_note` and
+`propose_note_edit` write tools route through a ProposalManager (the single
+write path): validation, pins-as-constraints, and proposal cards in the chat
+with per-field word diffs, before/after previews rendered through the note's
+real card templates, editable fields, per-field acceptance, and keyboard-first
+review (Cmd+Enter / Cmd+Backspace / Cmd+arrows). Edits carry a staleness guard
+(the proposal refreshes instead of applying blind if the note changed
+underneath). A session ledger backs per-change revert, one-click "undo
+session", and a Browser jump to this session's `ai-created` notes; auto-accept
+mode applies creations only, capped per session. Conventions (prompt tier) and
+pinned deck/note type/tags/field defaults shape every proposal. Verified by 17
+new unit tests plus a Docker/Xvfb GUI smoke that accepts a scripted proposal
+and finds the real note in the collection. Next: M3 — Codex adapter, chat
+history/resume, ask-each-read, doctor panel. Architecture, milestones, and
+known issues live in [DESIGN.md](DESIGN.md).
 
 ## Development
 
