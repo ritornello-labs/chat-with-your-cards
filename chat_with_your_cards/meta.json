@@ -1,1 +1,0 @@
-{"config": {"toggle_shortcut": "Ctrl+J", "new_chat_shortcut": "Ctrl+Shift+J", "dock_width": 420, "backend": "auto", "claude_cli_path": "", "permission_mode": "default", "stats_refresh_minutes": 30, "context_token_budget": 8000, "auto_accept_cap": 20, "conventions_prompt": "", "pins": {"deck": "", "note_type": "", "tags": [], "fields": {}}}}

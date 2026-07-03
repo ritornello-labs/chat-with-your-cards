@@ -14,3 +14,4 @@ user_files/
 .uv-cache/
 .tmp-gui-workbench/
 .tmp-gui-smoke/
+meta.json
