@@ -398,6 +398,47 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(ledger["entries"], [])
 
 
+class TagConfigTests(unittest.TestCase):
+    def test_custom_created_tag(self) -> None:
+        manager, col, pushed = make_manager({"created_tag": "robot"})
+        result = manager.submit_create(dict(CREATE_ARGS))
+        manager.accept({"id": result["proposal_id"]})
+        note = col.get_note(pushes_of(pushed, "proposal_resolved")[-1]["note_id"])
+        self.assertIn("robot", note.tags)
+        self.assertNotIn(AI_TAG, note.tags)
+
+    def test_no_tags_when_all_disabled(self) -> None:
+        config = {"created_tag": "", "session_tag_prefix": ""}
+        manager, col, pushed = make_manager(config)
+        result = manager.submit_create({**CREATE_ARGS, "tags": []})
+        manager.accept({"id": result["proposal_id"]})
+        note = col.get_note(pushes_of(pushed, "proposal_resolved")[-1]["note_id"])
+        self.assertEqual([], note.tags)
+        self.assertEqual("", manager.session_tag)
+
+    def test_edited_tag_stamped_on_accepted_edit(self) -> None:
+        manager, col, pushed = make_manager({"edited_tag": "touched"})
+        create = manager.submit_create(dict(CREATE_ARGS))
+        manager.accept({"id": create["proposal_id"]})
+        nid = pushes_of(pushed, "proposal_resolved")[-1]["note_id"]
+        edit = manager.submit_edit(
+            {"note_id": nid, "field_changes": {"Front": "New Q?"}}
+        )
+        manager.accept({"id": edit["proposal_id"]})
+        self.assertIn("touched", col.get_note(nid).tags)
+
+    def test_edited_tag_off_when_empty(self) -> None:
+        manager, col, pushed = make_manager({"edited_tag": ""})
+        create = manager.submit_create(dict(CREATE_ARGS))
+        manager.accept({"id": create["proposal_id"]})
+        nid = pushes_of(pushed, "proposal_resolved")[-1]["note_id"]
+        edit = manager.submit_edit(
+            {"note_id": nid, "field_changes": {"Front": "New Q?"}}
+        )
+        manager.accept({"id": edit["proposal_id"]})
+        self.assertNotIn("ai-edited", col.get_note(nid).tags)
+
+
 class SupersedeTests(unittest.TestCase):
     def test_supersede_deactivates_prior_pending(self) -> None:
         manager, _col, pushed = make_manager()

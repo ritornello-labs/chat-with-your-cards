@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 AI_TAG = "ai-created"
+AI_EDIT_TAG = "ai-edited"
 SESSION_TAG_PREFIX = "ai-chat-dock::session-"
 DEFAULT_AUTO_ACCEPT_CAP = 20
 
@@ -129,7 +130,22 @@ class ProposalManager:
 
     @property
     def session_tag(self) -> str:
-        return SESSION_TAG_PREFIX + self.session_id
+        prefix = str(self._config.get("session_tag_prefix", SESSION_TAG_PREFIX))
+        return (prefix + self.session_id) if prefix else ""
+
+    @property
+    def created_tag(self) -> str:
+        return str(self._config.get("created_tag", AI_TAG))
+
+    @property
+    def edited_tag(self) -> str:
+        return str(self._config.get("edited_tag", AI_EDIT_TAG))
+
+    def _tag_edit(self, note: Any) -> None:
+        """Stamp the configured 'edited by AI' tag, if any, on an edited note."""
+        tag = self.edited_tag
+        if tag and tag not in note.tags:
+            note.tags.append(tag)
 
     def _col(self) -> Any:
         col = self._get_col()
@@ -416,6 +432,7 @@ class ProposalManager:
             if tag not in note.tags:
                 note.tags.append(tag)
         note.tags = [t for t in note.tags if t not in proposal.remove_tags]
+        self._tag_edit(note)
         col.update_note(note)
         proposal.status = ACCEPTED
         first = next(iter(prior_fields.values()), "")
@@ -476,6 +493,7 @@ class ProposalManager:
                     if tag not in note.tags:
                         note.tags.append(tag)
                 note.tags = [t for t in note.tags if t not in proposal.remove_tags]
+                self._tag_edit(note)
                 col.update_note(note)
                 self._ledger.append(
                     LedgerEntry(
@@ -653,8 +671,8 @@ class ProposalManager:
         for name, value in proposal.fields.items():
             note[name] = value
         tags = list(proposal.tags)
-        for tag in (AI_TAG, self.session_tag):
-            if tag not in tags:
+        for tag in (self.created_tag, self.session_tag):
+            if tag and tag not in tags:
                 tags.append(tag)
         note.tags = tags
         deck_id = col.decks.id(proposal.deck)

@@ -968,7 +968,8 @@ body {
     color: #ea4335;
 }
 
-#cwyc-pin-tag-entry {
+#cwyc-pin-tag-entry,
+.cwyc-tag-entry {
     flex: 1 1 70px;
     min-width: 70px;
     border: none;
@@ -1059,4 +1060,67 @@ body {
 #cwyc-bulk-reject:hover {
     border-color: #ea4335;
     color: #ea4335;
+}
+
+/* ---------- header dock/undock control ---------- */
+
+#cwyc-dock-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--fg);
+    padding: 4px 7px;
+    margin-left: 6px;
+    cursor: pointer;
+}
+
+#cwyc-dock-toggle:hover {
+    background: var(--cwyc-bubble-user);
+}
+
+#cwyc-dock-toggle.cwyc-docked-out {
+    border-color: var(--cwyc-accent);
+    color: var(--cwyc-accent);
+}
+
+/* ---------- editable deck/tags on create proposals ---------- */
+
+.cwyc-proposal-field-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.cwyc-proposal-field-label {
+    flex: 0 0 44px;
+    padding-top: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+    color: var(--fg-subtle, var(--fg));
+}
+
+.cwyc-proposal-deck {
+    flex: 1 1 auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--canvas);
+    color: var(--fg);
+    font-family: var(--cwyc-font);
+    font-size: 12.5px;
+    padding: 5px 8px;
+    outline: none;
+    cursor: pointer;
+}
+
+.cwyc-proposal-deck:focus {
+    border-color: var(--cwyc-accent);
+}
+
+.cwyc-proposal-field-row .cwyc-tag-input {
+    background: var(--canvas);
 }

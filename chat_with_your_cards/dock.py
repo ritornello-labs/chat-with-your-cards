@@ -38,6 +38,18 @@ class ChatDock(QDockWidget):
         self.setWidget(self.web)
         self.bridge = Bridge(self.web)
         self._load_ui()
+        # Keep the header's dock/undock control in sync with the actual state.
+        self.topLevelChanged.connect(lambda _floating: self.push_dock_state())
+
+    def toggle_float(self) -> None:
+        self.setFloating(not self.isFloating())
+        if not self.isFloating():
+            # Redocking a hidden-area dock: make sure it lands somewhere visible.
+            self.show()
+            self.raise_()
+
+    def push_dock_state(self) -> None:
+        self.bridge.push({"type": "dock_state", "floating": self.isFloating()})
 
     def _load_ui(self) -> None:
         addon_pkg = mw.addonManager.addonFromModule(__name__)

@@ -366,6 +366,87 @@
         area.style.height = Math.min(area.scrollHeight, 200) + "px";
     }
 
+    // Reusable tag-chip editor (proposal cards). Autocompletes from the same
+    // shared #cwyc-tag-options datalist the pins panel populates.
+    function createTagEditor(initialTags) {
+        var container = el("div", "cwyc-tag-input");
+        var entry = document.createElement("input");
+        entry.type = "text";
+        entry.className = "cwyc-tag-entry";
+        entry.placeholder = "add a tag…";
+        entry.autocomplete = "off";
+        entry.setAttribute("list", "cwyc-tag-options");
+        container.appendChild(entry);
+        var tags = (initialTags || []).slice();
+
+        function render() {
+            container.querySelectorAll(".cwyc-tag-chip").forEach(function (c) {
+                c.remove();
+            });
+            tags.forEach(function (tag) {
+                var chip = el("span", "cwyc-tag-chip");
+                chip.appendChild(document.createTextNode(tag));
+                var x = document.createElement("button");
+                x.type = "button";
+                x.className = "cwyc-tag-chip-x";
+                x.textContent = "×";
+                x.title = "Remove " + tag;
+                x.addEventListener("click", function () {
+                    tags = tags.filter(function (t) { return t !== tag; });
+                    render();
+                });
+                chip.appendChild(x);
+                container.insertBefore(chip, entry);
+            });
+        }
+        function add(raw) {
+            (raw || "").split(/[\s,]+/).forEach(function (part) {
+                var t = part.trim();
+                if (t && tags.indexOf(t) === -1) {
+                    tags.push(t);
+                }
+            });
+            render();
+        }
+        entry.addEventListener("keydown", function (event) {
+            if (event.key === " " || event.key === "Enter" || event.key === ",") {
+                event.preventDefault();
+                if (entry.value.trim()) { add(entry.value); entry.value = ""; }
+            } else if (event.key === "Backspace" && !entry.value && tags.length) {
+                event.preventDefault();
+                tags.pop();
+                render();
+            }
+        });
+        entry.addEventListener("blur", function () {
+            if (entry.value.trim()) { add(entry.value); entry.value = ""; }
+        });
+        container.addEventListener("click", function () { entry.focus(); });
+        render();
+        return {
+            el: container,
+            get: function () {
+                if (entry.value.trim()) { add(entry.value); entry.value = ""; }
+                return tags.slice();
+            },
+        };
+    }
+
+    function fillDeckSelect(select, values, current) {
+        select.innerHTML = "";
+        var all = values.slice();
+        if (current && all.indexOf(current) === -1) {
+            all.unshift(current); // keep the proposed deck even if new
+        }
+        all.forEach(function (value) {
+            var opt = document.createElement("option");
+            opt.value = value;
+            opt.textContent = value;
+            select.appendChild(opt);
+        });
+        select.value = current || all[0] || "";
+    }
+
     function renderProposal(data) {
         breakAssistantBlock();
         var existing = proposals[data.id];
@@ -387,7 +468,9 @@
         head.appendChild(
             el("span", "cwyc-proposal-kind", data.kind === "edit" ? "Edit note" : "New note")
         );
-        var where = data.note_type + (data.deck ? " · " + data.deck : "");
+        // Creates carry an editable deck below; edits show their deck here.
+        var where = data.note_type +
+            (data.kind === "edit" && data.deck ? " · " + data.deck : "");
         head.appendChild(el("span", "cwyc-proposal-where", where));
         var pill = el("span", "cwyc-proposal-status", proposalStatusLabel(data.status));
         pill.classList.add("cwyc-status-" + data.status);
@@ -411,19 +494,38 @@
             renderCreateFields(record, body);
         }
 
-        // tag chips (+ add/remove for edits)
-        var tagRow = el("div", "cwyc-proposal-tags");
-        (data.tags || []).forEach(function (tag) {
-            tagRow.appendChild(el("span", "cwyc-tag", tag));
-        });
-        (data.add_tags || []).forEach(function (tag) {
-            tagRow.appendChild(el("span", "cwyc-tag cwyc-tag-add", "+ " + tag));
-        });
-        (data.remove_tags || []).forEach(function (tag) {
-            tagRow.appendChild(el("span", "cwyc-tag cwyc-tag-remove", "− " + tag));
-        });
-        if (tagRow.childNodes.length) {
-            body.appendChild(tagRow);
+        if (data.kind === "create") {
+            // Editable destination: deck it lands in, and its tags.
+            var deckRow = el("div", "cwyc-proposal-field-row");
+            deckRow.appendChild(el("span", "cwyc-proposal-field-label", "Deck"));
+            var deckSelect = document.createElement("select");
+            deckSelect.className = "cwyc-proposal-deck";
+            fillDeckSelect(deckSelect, collectionMeta.decks, data.deck);
+            deckRow.appendChild(deckSelect);
+            body.appendChild(deckRow);
+            record.deckSelect = deckSelect;
+
+            var tagsRow = el("div", "cwyc-proposal-field-row");
+            tagsRow.appendChild(el("span", "cwyc-proposal-field-label", "Tags"));
+            var tagEditor = createTagEditor(data.tags || []);
+            tagsRow.appendChild(tagEditor.el);
+            body.appendChild(tagsRow);
+            record.tagEditor = tagEditor;
+        } else {
+            // Edit: read-only current tags plus proposed add/remove.
+            var tagRow = el("div", "cwyc-proposal-tags");
+            (data.tags || []).forEach(function (tag) {
+                tagRow.appendChild(el("span", "cwyc-tag", tag));
+            });
+            (data.add_tags || []).forEach(function (tag) {
+                tagRow.appendChild(el("span", "cwyc-tag cwyc-tag-add", "+ " + tag));
+            });
+            (data.remove_tags || []).forEach(function (tag) {
+                tagRow.appendChild(el("span", "cwyc-tag cwyc-tag-remove", "− " + tag));
+            });
+            if (tagRow.childNodes.length) {
+                body.appendChild(tagRow);
+            }
         }
 
         record.previewBody = body;
@@ -645,6 +747,13 @@
             msg.accepted_fields = Object.keys(fields).filter(function (name) {
                 return record.included[name] !== false;
             });
+        } else {
+            if (record.deckSelect) {
+                msg.deck = record.deckSelect.value;
+            }
+            if (record.tagEditor) {
+                msg.tags = record.tagEditor.get();
+            }
         }
         post(msg);
     }
@@ -852,6 +961,7 @@
             input.dataset.field = name;
             input.value = (pins.fields || {})[name] || "";
             input.placeholder = "default (optional)";
+            input.addEventListener("input", debouncedSavePins);
             row.appendChild(input);
             container.appendChild(row);
         });
@@ -922,6 +1032,7 @@
             return t !== tag;
         });
         renderTagChips();
+        savePins();
     }
 
     function commitTagEntry() {
@@ -930,7 +1041,19 @@
             addPinTagValue(entry.value);
             entry.value = "";
             renderTagChips();
+            savePins();
         }
+    }
+
+    // Pins persist automatically on any change — no explicit Save.
+    function savePins() {
+        post({ type: "set_pins", pins: collectPins() });
+    }
+
+    var pinsSaveTimer = null;
+    function debouncedSavePins() {
+        clearTimeout(pinsSaveTimer);
+        pinsSaveTimer = setTimeout(savePins, 400);
     }
 
     /* ---- agent (model / effort) ---- */
@@ -961,8 +1084,16 @@
         });
     }
 
+    function renderDockState(floating) {
+        var btn = document.getElementById("cwyc-dock-toggle");
+        if (!btn) {
+            return;
+        }
+        btn.title = floating ? "Re-dock panel into the main window" : "Detach panel";
+        btn.classList.toggle("cwyc-docked-out", !!floating);
+    }
+
     function collectPins() {
-        commitTagEntry(); // fold in any half-typed tag before saving
         var fields = {};
         document
             .getElementById("cwyc-pin-fields")
@@ -1022,6 +1153,9 @@
                 break;
             case "agent":
                 renderAgent(payload);
+                break;
+            case "dock_state":
+                renderDockState(payload.floating);
                 break;
             case "done":
                 finalizeStream(false);
@@ -1120,6 +1254,9 @@
         document.getElementById("cwyc-new-chat").addEventListener("click", function () {
             post({ type: "new_chat" });
         });
+        document.getElementById("cwyc-dock-toggle").addEventListener("click", function () {
+            post({ type: "toggle_float" });
+        });
         input.addEventListener("keydown", function (event) {
             if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
@@ -1147,17 +1284,14 @@
         });
         document.getElementById("cwyc-agent-model").addEventListener("change", sendAgent);
         document.getElementById("cwyc-agent-effort").addEventListener("change", sendAgent);
-        document.getElementById("cwyc-pins-save").addEventListener("click", function () {
-            post({ type: "set_pins", pins: collectPins() });
-            pinsPanel.hidden = true;
-        });
         document.getElementById("cwyc-pins-clear").addEventListener("click", function () {
             post({ type: "set_pins", pins: { deck: "", note_type: "", tags: [], fields: {} } });
-            pinsPanel.hidden = true;
         });
-        document
-            .getElementById("cwyc-pin-notetype")
-            .addEventListener("change", renderPinFields);
+        document.getElementById("cwyc-pin-deck").addEventListener("change", savePins);
+        document.getElementById("cwyc-pin-notetype").addEventListener("change", function () {
+            renderPinFields();
+            savePins();
+        });
 
         var tagEntry = document.getElementById("cwyc-pin-tag-entry");
         tagEntry.addEventListener("keydown", function (event) {

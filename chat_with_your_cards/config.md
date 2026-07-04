@@ -31,6 +31,15 @@
 - `conventions_prompt` (default empty): your note-authoring conventions (style,
   field usage, tagging). Injected into the assistant's instructions for every
   proposal and materialized as `user_files/skills/note-conventions/SKILL.md`.
+- `created_tag` (default `ai-created`): tag stamped on every note the assistant
+  creates. Set to an empty string to add no created-by-AI tag.
+- `edited_tag` (default `ai-edited`): tag stamped on any existing note the
+  assistant edits (via an accepted edit proposal). Empty string = no edit tag.
+- `session_tag_prefix` (default `ai-chat-dock::session-`): notes created in a
+  chat also get a per-session tag (`<prefix><id>`) that powers the dock's
+  "review this session's notes in the Browser" and undo-session actions. Set to
+  an empty string to disable session tagging (those actions then no-op). With
+  `created_tag`, `edited_tag`, and this all empty, AI notes get no automatic tags.
 - `pins` (managed from the dock's Pins panel, not edited here): pinned deck,
   note type, tags, and prefilled field defaults applied to every proposed note.
 - `stats_refresh_minutes` (default `30`): how often the collection overview

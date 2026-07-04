@@ -7,6 +7,14 @@
             </svg>
             New chat
         </button>
+        <button id="cwyc-dock-toggle" type="button" title="Detach panel">
+            <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+                <rect x="2.5" y="2.5" width="11" height="11" rx="1.5"
+                      stroke="currentColor" stroke-width="1.4" fill="none"/>
+                <rect x="8" y="8" width="5.5" height="5.5" rx="1"
+                      fill="currentColor" opacity="0.85"/>
+            </svg>
+        </button>
         <span id="cwyc-header-spacer"></span>
         <button id="cwyc-agent-toggle" type="button"
                 title="Choose the model and effort level">
@@ -84,9 +92,8 @@
             </div>
         </div>
         <div class="cwyc-pins-actions">
-            <span class="cwyc-pins-spacer"></span>
-            <button id="cwyc-pins-clear" type="button">Clear</button>
-            <button id="cwyc-pins-save" type="button" class="cwyc-primary">Save pins</button>
+            <span class="cwyc-pins-hint">Saved automatically.</span>
+            <button id="cwyc-pins-clear" type="button">Clear all</button>
         </div>
     </section>
     <main id="cwyc-transcript" aria-live="polite"></main>

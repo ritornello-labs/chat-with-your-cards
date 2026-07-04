@@ -31,6 +31,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "context_token_budget": 8000,
     "auto_accept_cap": 20,
     "conventions_prompt": "",
+    "created_tag": "ai-created",
+    "edited_tag": "ai-edited",
+    "session_tag_prefix": "ai-chat-dock::session-",
     "pins": {},
 }
 
@@ -205,6 +208,7 @@ def _wire_bridge() -> None:
     bridge.on("set_pins", lambda msg: proposals.set_pins(msg.get("pins") or {}))
     bridge.on("open_session_browser", lambda _msg: _open_session_browser())
     bridge.on("set_agent", _set_agent)
+    bridge.on("toggle_float", lambda _msg: state.dock.toggle_float() if state.dock else None)
 
 
 def _mark_web_ready() -> None:
@@ -215,6 +219,8 @@ def _mark_web_ready() -> None:
         state.proposals.push_ui_state()
     if state.controller is not None:
         state.controller.push_agent_state()
+    if state.dock is not None:
+        state.dock.push_dock_state()
     _push_collection_meta()
 
 
@@ -284,9 +290,19 @@ def _open_session_browser() -> None:
     """One-click review of this session's AI-created notes in the Browser."""
     if state.proposals is None:
         return
+    session_tag = state.proposals.session_tag
+    if not session_tag:
+        state.dock.bridge.push(
+            {
+                "type": "notice",
+                "text": "Session tagging is off (session_tag_prefix is empty), so "
+                "this session's notes can't be filtered in the Browser.",
+            }
+        ) if state.dock else None
+        return
     from aqt import dialogs
 
-    query = f'tag:"{state.proposals.session_tag}"'
+    query = f'tag:"{session_tag}"'
     browser = dialogs.open("Browser", mw)
     try:
         browser.search_for(query)
