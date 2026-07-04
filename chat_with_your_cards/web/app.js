@@ -23,6 +23,7 @@
     var activeProposalId = null;
     var pins = { deck: "", note_type: "", tags: [], fields: {} };
     var collectionMeta = { decks: [], note_types: [], tags: [] };
+    var pinTags = []; // committed tag chips in the pins panel
 
     function post(msg) {
         if (typeof pycmd === "function") {
@@ -707,8 +708,65 @@
             noteTypeNames(),
             pins.note_type
         );
-        document.getElementById("cwyc-pin-tags").value = (pins.tags || []).join(", ");
+        setPinTags(pins.tags || []);
         renderPinFields();
+    }
+
+    /* ---- tag chip editor (Anki-editor-like: space/enter commits a tag) ---- */
+
+    function renderTagChips() {
+        var container = document.getElementById("cwyc-pin-tags");
+        var entry = document.getElementById("cwyc-pin-tag-entry");
+        container.querySelectorAll(".cwyc-tag-chip").forEach(function (chip) {
+            chip.remove();
+        });
+        pinTags.forEach(function (tag) {
+            var chip = el("span", "cwyc-tag-chip");
+            chip.appendChild(document.createTextNode(tag));
+            var remove = document.createElement("button");
+            remove.type = "button";
+            remove.className = "cwyc-tag-chip-x";
+            remove.textContent = "×";
+            remove.title = "Remove " + tag;
+            remove.addEventListener("click", function () {
+                removePinTag(tag);
+            });
+            chip.appendChild(remove);
+            container.insertBefore(chip, entry);
+        });
+    }
+
+    function addPinTagValue(raw) {
+        // Anki tags are whitespace-separated; split defensively so a pasted
+        // "a b, c" becomes three chips.
+        (raw || "").split(/[\s,]+/).forEach(function (part) {
+            var tag = part.trim();
+            if (tag && pinTags.indexOf(tag) === -1) {
+                pinTags.push(tag);
+            }
+        });
+    }
+
+    function setPinTags(tags) {
+        pinTags = [];
+        (tags || []).forEach(addPinTagValue);
+        renderTagChips();
+    }
+
+    function removePinTag(tag) {
+        pinTags = pinTags.filter(function (t) {
+            return t !== tag;
+        });
+        renderTagChips();
+    }
+
+    function commitTagEntry() {
+        var entry = document.getElementById("cwyc-pin-tag-entry");
+        if (entry.value.trim()) {
+            addPinTagValue(entry.value);
+            entry.value = "";
+            renderTagChips();
+        }
     }
 
     /* ---- agent (model / effort) ---- */
@@ -740,6 +798,7 @@
     }
 
     function collectPins() {
+        commitTagEntry(); // fold in any half-typed tag before saving
         var fields = {};
         document
             .getElementById("cwyc-pin-fields")
@@ -753,13 +812,7 @@
         return {
             deck: document.getElementById("cwyc-pin-deck").value.trim(),
             note_type: document.getElementById("cwyc-pin-notetype").value.trim(),
-            tags: document
-                .getElementById("cwyc-pin-tags")
-                .value.split(",")
-                .map(function (tag) {
-                    return tag.trim();
-                })
-                .filter(Boolean),
+            tags: pinTags.slice(),
             fields: fields,
         };
     }
@@ -938,6 +991,21 @@
         document
             .getElementById("cwyc-pin-notetype")
             .addEventListener("change", renderPinFields);
+
+        var tagEntry = document.getElementById("cwyc-pin-tag-entry");
+        tagEntry.addEventListener("keydown", function (event) {
+            if (event.key === " " || event.key === "Enter" || event.key === ",") {
+                event.preventDefault();
+                commitTagEntry();
+            } else if (event.key === "Backspace" && !tagEntry.value && pinTags.length) {
+                event.preventDefault();
+                removePinTag(pinTags[pinTags.length - 1]);
+            }
+        });
+        tagEntry.addEventListener("blur", commitTagEntry);
+        document.getElementById("cwyc-pin-tags").addEventListener("click", function () {
+            tagEntry.focus();
+        });
         document.getElementById("cwyc-ledger-undo").addEventListener("click", function () {
             post({ type: "undo_session" });
         });

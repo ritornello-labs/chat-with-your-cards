@@ -921,3 +921,61 @@ body {
 .cwyc-pins-spacer {
     flex: 1 1 auto;
 }
+
+/* ---------- pins tag chip editor ---------- */
+
+.cwyc-tag-input {
+    flex: 1 1 auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    min-height: 28px;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--canvas);
+    padding: 3px 5px;
+    cursor: text;
+}
+
+.cwyc-tag-input:focus-within {
+    border-color: var(--cwyc-accent);
+}
+
+.cwyc-tag-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    background: var(--cwyc-bubble-user);
+    border: 1px solid var(--border-subtle, var(--border));
+    border-radius: 999px;
+    padding: 1px 3px 1px 9px;
+    font-size: 11.5px;
+    color: var(--fg);
+}
+
+.cwyc-tag-chip-x {
+    border: none !important;
+    background: transparent !important;
+    color: var(--fg-subtle, var(--fg));
+    font-size: 14px;
+    line-height: 1;
+    padding: 0 3px !important;
+    cursor: pointer;
+}
+
+.cwyc-tag-chip-x:hover {
+    color: #ea4335;
+}
+
+#cwyc-pin-tag-entry {
+    flex: 1 1 70px;
+    min-width: 70px;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--fg);
+    font-family: var(--cwyc-font);
+    font-size: 12px;
+    padding: 2px;
+}
