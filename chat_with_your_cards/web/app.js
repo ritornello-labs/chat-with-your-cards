@@ -22,6 +22,7 @@
     var proposalOrder = [];
     var activeProposalId = null;
     var pins = { deck: "", note_type: "", tags: [], fields: {} };
+    var collectionMeta = { decks: [], note_types: [], tags: [] };
 
     function post(msg) {
         if (typeof pycmd === "function") {
@@ -613,8 +614,86 @@
 
     /* ---- pins panel ---- */
 
+    function fillSelect(select, values, current) {
+        while (select.options.length > 1) {
+            select.remove(1); // keep the leading "— none —" option
+        }
+        values.forEach(function (value) {
+            var opt = document.createElement("option");
+            opt.value = value;
+            opt.textContent = value;
+            select.appendChild(opt);
+        });
+        // A pinned value that no longer exists is still shown, not dropped.
+        if (current && values.indexOf(current) === -1) {
+            var ghost = document.createElement("option");
+            ghost.value = current;
+            ghost.textContent = current + " (missing)";
+            select.appendChild(ghost);
+        }
+        select.value = current || "";
+    }
+
+    function noteTypeNames() {
+        return collectionMeta.note_types.map(function (nt) { return nt.name; });
+    }
+
+    function renderCollectionMeta(data) {
+        collectionMeta = {
+            decks: data.decks || [],
+            note_types: data.note_types || [],
+            tags: data.tags || [],
+        };
+        fillSelect(document.getElementById("cwyc-pin-deck"), collectionMeta.decks, pins.deck);
+        fillSelect(
+            document.getElementById("cwyc-pin-notetype"),
+            noteTypeNames(),
+            pins.note_type
+        );
+        var datalist = document.getElementById("cwyc-tag-options");
+        datalist.innerHTML = "";
+        collectionMeta.tags.forEach(function (tag) {
+            var opt = document.createElement("option");
+            opt.value = tag;
+            datalist.appendChild(opt);
+        });
+        renderPinFields();
+    }
+
+    function fieldsForNoteType(name) {
+        var nt = collectionMeta.note_types.filter(function (t) {
+            return t.name === name;
+        })[0];
+        return nt ? nt.fields : [];
+    }
+
+    function renderPinFields() {
+        var container = document.getElementById("cwyc-pin-fields");
+        var empty = document.getElementById("cwyc-pin-fields-empty");
+        var noteType = document.getElementById("cwyc-pin-notetype").value;
+        var fields = fieldsForNoteType(noteType);
+        container.innerHTML = "";
+        if (!noteType || !fields.length) {
+            empty.hidden = false;
+            return;
+        }
+        empty.hidden = true;
+        fields.forEach(function (name) {
+            var row = el("div", "cwyc-pin-field");
+            row.appendChild(el("label", "cwyc-pin-field-name", name));
+            var input = document.createElement("input");
+            input.type = "text";
+            input.className = "cwyc-pin-field-input";
+            input.dataset.field = name;
+            input.value = (pins.fields || {})[name] || "";
+            input.placeholder = "default (optional)";
+            row.appendChild(input);
+            container.appendChild(row);
+        });
+    }
+
     function renderPins(data) {
-        pins = data || {};
+        pins = data || { deck: "", note_type: "", tags: [], fields: {} };
         var label = document.getElementById("cwyc-pins-label");
         var count =
             (pins.deck ? 1 : 0) +
@@ -622,14 +701,14 @@
             ((pins.tags || []).length ? 1 : 0) +
             (Object.keys(pins.fields || {}).length ? 1 : 0);
         label.textContent = count ? "Pins · " + count : "Pins";
-        document.getElementById("cwyc-pin-deck").value = pins.deck || "";
-        document.getElementById("cwyc-pin-notetype").value = pins.note_type || "";
+        fillSelect(document.getElementById("cwyc-pin-deck"), collectionMeta.decks, pins.deck);
+        fillSelect(
+            document.getElementById("cwyc-pin-notetype"),
+            noteTypeNames(),
+            pins.note_type
+        );
         document.getElementById("cwyc-pin-tags").value = (pins.tags || []).join(", ");
-        document.getElementById("cwyc-pin-fields").value = Object.keys(pins.fields || {})
-            .map(function (name) {
-                return name + ": " + pins.fields[name];
-            })
-            .join("\n");
+        renderPinFields();
     }
 
     /* ---- agent (model / effort) ---- */
@@ -661,18 +740,16 @@
     }
 
     function collectPins() {
-        var fieldLines = document.getElementById("cwyc-pin-fields").value.split("\n");
         var fields = {};
-        fieldLines.forEach(function (line) {
-            var split = line.indexOf(":");
-            if (split > 0) {
-                var name = line.slice(0, split).trim();
-                var value = line.slice(split + 1).trim();
-                if (name) {
-                    fields[name] = value;
+        document
+            .getElementById("cwyc-pin-fields")
+            .querySelectorAll(".cwyc-pin-field-input")
+            .forEach(function (input) {
+                var value = input.value.trim();
+                if (value) {
+                    fields[input.dataset.field] = value;
                 }
-            }
-        });
+            });
         return {
             deck: document.getElementById("cwyc-pin-deck").value.trim(),
             note_type: document.getElementById("cwyc-pin-notetype").value.trim(),
@@ -719,6 +796,9 @@
                 break;
             case "pins":
                 renderPins(payload.pins);
+                break;
+            case "collection_meta":
+                renderCollectionMeta(payload);
                 break;
             case "agent":
                 renderAgent(payload);
@@ -855,6 +935,9 @@
             post({ type: "set_pins", pins: { deck: "", note_type: "", tags: [], fields: {} } });
             pinsPanel.hidden = true;
         });
+        document
+            .getElementById("cwyc-pin-notetype")
+            .addEventListener("change", renderPinFields);
         document.getElementById("cwyc-ledger-undo").addEventListener("click", function () {
             post({ type: "undo_session" });
         });

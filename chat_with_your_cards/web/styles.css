@@ -837,3 +837,74 @@ body {
     color: var(--fg-subtle, var(--fg));
     font-size: 11px;
 }
+
+/* ---------- pins selectors (Anki-editor-like, dock-styled) ---------- */
+
+.cwyc-pins-row select {
+    flex: 1 1 auto;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--canvas);
+    color: var(--fg);
+    font-family: var(--cwyc-font);
+    font-size: 12px;
+    padding: 4px 8px;
+    outline: none;
+    cursor: pointer;
+}
+
+.cwyc-pins-row select:focus,
+.cwyc-pins-row input:focus {
+    border-color: var(--cwyc-accent);
+}
+
+#cwyc-pin-fields-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.cwyc-pins-fields-label {
+    color: var(--fg-subtle, var(--fg));
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+}
+
+#cwyc-pin-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.cwyc-pin-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.cwyc-pin-field-name {
+    flex: 0 0 88px;
+    font-size: 11.5px;
+    color: var(--fg-subtle, var(--fg));
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cwyc-pin-field-input {
+    flex: 1 1 auto;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--canvas);
+    color: var(--fg);
+    font-family: var(--cwyc-font);
+    font-size: 12px;
+    padding: 4px 8px;
+    outline: none;
+}
+
+.cwyc-pin-field-input:focus {
+    border-color: var(--cwyc-accent);
+}

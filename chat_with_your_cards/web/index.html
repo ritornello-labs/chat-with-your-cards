@@ -54,23 +54,31 @@
     <section id="cwyc-pins-panel" hidden>
         <div class="cwyc-pins-row">
             <label for="cwyc-pin-deck">Deck</label>
-            <input id="cwyc-pin-deck" type="text" placeholder="e.g. Math::Analysis">
+            <select id="cwyc-pin-deck">
+                <option value="">— none —</option>
+            </select>
         </div>
         <div class="cwyc-pins-row">
             <label for="cwyc-pin-notetype">Note type</label>
-            <input id="cwyc-pin-notetype" type="text" placeholder="e.g. Basic">
+            <select id="cwyc-pin-notetype">
+                <option value="">— none —</option>
+            </select>
         </div>
         <div class="cwyc-pins-row">
             <label for="cwyc-pin-tags">Tags</label>
-            <input id="cwyc-pin-tags" type="text" placeholder="comma-separated">
+            <input id="cwyc-pin-tags" type="text" placeholder="comma-separated"
+                   autocomplete="off" list="cwyc-tag-options">
+            <datalist id="cwyc-tag-options"></datalist>
         </div>
-        <div class="cwyc-pins-row">
-            <label for="cwyc-pin-fields">Fields</label>
-            <textarea id="cwyc-pin-fields" rows="2"
-                      placeholder="One per line: Field name: default value"></textarea>
+        <div id="cwyc-pin-fields-wrap">
+            <div class="cwyc-pins-fields-label">Field defaults</div>
+            <div id="cwyc-pin-fields"></div>
+            <div class="cwyc-pins-hint" id="cwyc-pin-fields-empty">
+                Pick a note type to set default field values.
+            </div>
         </div>
         <div class="cwyc-pins-actions">
-            <span class="cwyc-pins-hint">Pins apply to every proposed note until changed.</span>
+            <span class="cwyc-pins-hint">Applied to every proposed note until changed.</span>
             <button id="cwyc-pins-clear" type="button">Clear</button>
             <button id="cwyc-pins-save" type="button" class="cwyc-primary">Save pins</button>
         </div>

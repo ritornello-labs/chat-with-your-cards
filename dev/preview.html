@@ -175,6 +175,14 @@
             var msg = JSON.parse(raw.slice(5));
             if (msg.type === "ready") {
                 window.chatUI.ackReady();
+                window.chatUI.dispatch({ type: "collection_meta",
+                    decks: ["Default", "Math::Analysis", "Math::Algebra", "Spanish::Verbs"],
+                    note_types: [
+                        { name: "Basic", fields: ["Front", "Back"] },
+                        { name: "Cloze", fields: ["Text", "Back Extra"] },
+                        { name: "Pokemon", fields: ["Name", "Image", "Types", "Dex"] }
+                    ],
+                    tags: ["analysis", "definitions", "todo", "pokemon", "spanish"] });
                 window.chatUI.dispatch({ type: "pins", pins: { deck: "", note_type: "", tags: [], fields: {} } });
                 window.chatUI.dispatch({ type: "agent", backend: "claude", model: "", effort: "" });
             } else if (msg.type === "set_agent") {

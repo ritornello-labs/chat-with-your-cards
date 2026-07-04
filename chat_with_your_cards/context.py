@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from .tools.collection import extract_field_prefixes
+from .tools.media import image_filenames
 
 
 def extract_card_info(col: Any, card: Any) -> dict[str, Any]:
@@ -45,6 +46,15 @@ def build_card_block(info: dict[str, Any]) -> str:
     ]
     for name, value in info["fields"].items():
         lines.append(f"  {name}: {value}")
+    images = image_filenames(list(info["fields"].values()))
+    if images:
+        lines.append(
+            f"Images: this card embeds {len(images)} image(s) "
+            + "(" + ", ".join(images[:4]) + ("…" if len(images) > 4 else "") + "). "
+            + "You see the field HTML, not the pixels — call get_card_images "
+            + f"with card id {info['card_id']} to actually view them when the "
+            + "visual matters."
+        )
     clues = extract_field_prefixes(list(info["fields"].values()))
     if clues:
         lines.append(
@@ -102,10 +112,11 @@ def build_system_prompt(
         "You have MCP tools (server \"anki\") to query the user's collection: "
         "search_notes (full Anki search syntax), get_note, get_card, "
         "deck_tree, tag_tree, collection_stats, list_note_types, "
-        "get_note_type, and find_related (clue-based: field prefixes like "
-        "\"Analysis:\", shared tags, same deck). Reads are allowed without "
-        "asking. When looking for related material, prefer find_related "
-        "first, then refine with search_notes.",
+        "get_note_type, find_related (clue-based: field prefixes like "
+        "\"Analysis:\", shared tags, same deck), and get_card_images (view a "
+        "card's actual images, not just their filenames). Reads are allowed "
+        "without asking. When looking for related material, prefer "
+        "find_related first, then refine with search_notes.",
         "",
         "When a <current-card> block is present in a message, that is the "
         "card the user is looking at right now; treat it as the default "

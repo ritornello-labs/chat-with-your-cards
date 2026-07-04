@@ -119,6 +119,7 @@ Read (default-allowed):
 - `collection_stats(scope)` — cached stats; deck- or tag-scoped.
 - `list_note_types()` / `get_note_type(name)` — fields, templates (for convention-following).
 - `find_related(card_id, strategy?)` — convenience wrapper that applies the clue heuristics (prefix/tags/deck/keywords) and merges results.
+- `get_card_images(card_id?|note_id?)` — returns the card's embedded images as **MCP image content blocks** (base64 from `collection.media`, capped count/size, local files only — remote/`data:` sources skipped), so the model actually sees the picture rather than the `<img src>` filename. The current-card context block flags when a card has images and points the agent here. Audio is deliberately out of scope: the model cannot ingest audio, so a `[sound:...]` reference would need a transcription step. The MCP server passes a tool result straight through when it is already a list of content blocks, else wraps it as one text block.
 
 Write (proposal-gated):
 - `propose_note(note_type, deck, tags, fields, rationale)` — never writes directly; creates a proposal card in the UI (see §8).
@@ -162,7 +163,7 @@ Flow: agent calls `propose_note` → ProposalManager validates (note type exists
 - **Reversible**: the session ledger stores each edit's prior field values; one-click revert per edit and "revert session".
 - **Auto-accept scope**: auto-accept mode applies to *creations only* by default. Edits mutate existing user content and stay proposal-gated unless a separate, explicit auto-accept-edits toggle is enabled (same cap + ledger safeguards).
 
-**Pinning**: a dock panel lets the user pin deck, tags, note type, and prefilled field values. Pins persist (per-profile config) until changed. Pins are injected into context as *constraints*: pinned deck/tags are applied to every proposal (agent told not to fight them); pinned note type restricts `propose_note`; prefilled fields are defaults the agent should keep unless it has strong reason (and must flag when it overrides).
+**Pinning**: a dock panel lets the user pin deck, tags, note type, and prefilled field values, through Anki-editor-like selectors styled to the dock — deck and note-type dropdowns populated from a `collection_meta` event (deck names, note types + their fields, existing tags) pushed on web-ready, tag autocomplete via a `<datalist>`, and per-field default inputs that render from the selected note type's actual fields. Pins persist (per-profile config) until changed. Pins are injected into context as *constraints*: pinned deck/tags are applied to every proposal (agent told not to fight them); pinned note type restricts `propose_note`; prefilled fields are defaults the agent should keep unless it has strong reason (and must flag when it overrides).
 
 **Auto-accept mode** safeguards (this feature is the riskiest in the product):
 - Every AI-created note is tagged `ai-created` (+ `ai-chat-dock::session-<id>`), matching the existing workspace convention.

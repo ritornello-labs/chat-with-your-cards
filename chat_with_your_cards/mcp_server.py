@@ -156,13 +156,24 @@ class McpServer:
                     "content": [{"type": "text", "text": f"Tool error: {exc}"}],
                     "isError": True,
                 }
-            return {
-                "content": [
-                    {"type": "text", "text": json.dumps(result, ensure_ascii=False)}
-                ],
-                "isError": False,
-            }
+            return {"content": _as_content_blocks(result), "isError": False}
         raise _MethodNotFound(method)
+
+
+def _as_content_blocks(result: Any) -> list[dict[str, Any]]:
+    """Normalize a tool return into MCP content blocks.
+
+    A tool may return raw content blocks directly (a list of dicts each
+    carrying a "type", e.g. image/text from get_card_images); anything
+    else is JSON-encoded into a single text block.
+    """
+    if (
+        isinstance(result, list)
+        and result
+        and all(isinstance(block, dict) and "type" in block for block in result)
+    ):
+        return result
+    return [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}]
 
 
 class _MethodNotFound(Exception):

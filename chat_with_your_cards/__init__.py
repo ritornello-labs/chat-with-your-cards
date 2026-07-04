@@ -211,6 +211,31 @@ def _mark_web_ready() -> None:
         state.proposals.push_ui_state()
     if state.controller is not None:
         state.controller.push_agent_state()
+    _push_collection_meta()
+
+
+def _push_collection_meta() -> None:
+    """Feed the pins selectors: deck names, note types + fields, tags."""
+    if state.dock is None or mw.col is None:
+        return
+    try:
+        decks = sorted(mw.col.decks.all_names())
+        note_types = [
+            {"name": m["name"], "fields": [f["name"] for f in m["flds"]]}
+            for m in (mw.col.models.by_name(nt.name) for nt in mw.col.models.all_names_and_ids())
+            if m is not None
+        ]
+        tags = sorted(mw.col.tags.all())
+    except Exception:
+        return
+    state.dock.bridge.push(
+        {
+            "type": "collection_meta",
+            "decks": decks,
+            "note_types": note_types,
+            "tags": tags,
+        }
+    )
 
 
 def _set_agent(msg: dict[str, Any]) -> None:

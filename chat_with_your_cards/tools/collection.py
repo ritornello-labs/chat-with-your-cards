@@ -293,7 +293,9 @@ def build_registry() -> ToolRegistry:
     ]
     for spec in specs:
         registry.register(spec)
+    from .media import register_media_tools
     from .proposals import register_proposal_tools
 
+    register_media_tools(registry)
     register_proposal_tools(registry)
     return registry
