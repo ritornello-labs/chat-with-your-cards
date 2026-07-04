@@ -17,7 +17,7 @@
             </svg>
         </button>
         <button id="cwyc-pins-toggle" type="button"
-                title="Pin deck, note type, tags, and field defaults for proposed notes">
+                title="Defaults the assistant reuses for every note it proposes">
             <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
                 <path d="M9.5 1.5l5 5-2.2.7-2.5 2.5.4 3.3-1.6-1.6L4 15l-3-3 3.6-4.6L3 5.8l1.6-1.6 3.3.4 2.5-2.5z"
                       fill="currentColor" opacity="0.85"/>
@@ -52,6 +52,10 @@
         </div>
     </section>
     <section id="cwyc-pins-panel" hidden>
+        <p class="cwyc-pins-intro">
+            Pins are defaults the assistant reuses for every note it proposes —
+            deck, note type, tags, and field values — until you change them.
+        </p>
         <div class="cwyc-pins-row">
             <label for="cwyc-pin-deck">Deck</label>
             <select id="cwyc-pin-deck">
@@ -78,7 +82,7 @@
             </div>
         </div>
         <div class="cwyc-pins-actions">
-            <span class="cwyc-pins-hint">Applied to every proposed note until changed.</span>
+            <span class="cwyc-pins-spacer"></span>
             <button id="cwyc-pins-clear" type="button">Clear</button>
             <button id="cwyc-pins-save" type="button" class="cwyc-primary">Save pins</button>
         </div>

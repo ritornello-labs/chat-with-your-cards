@@ -908,3 +908,16 @@ body {
 .cwyc-pin-field-input:focus {
     border-color: var(--cwyc-accent);
 }
+
+/* ---------- pins panel intro ---------- */
+
+.cwyc-pins-intro {
+    margin: 0 0 2px;
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: var(--fg-subtle, var(--fg));
+}
+
+.cwyc-pins-spacer {
+    flex: 1 1 auto;
+}
