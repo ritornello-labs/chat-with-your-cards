@@ -134,6 +134,14 @@ Permission modes (per-profile setting + per-session override in the dock header)
 
 For the CLI backend, modes map onto CLI permission flags *and* are enforced server-side in the MCP layer — the MCP server is the actual security boundary, the CLI flags are just UX.
 
+**Planned extension — graduated power tiers and bulk actions (proposed 2026-07-04, pending confirmation):**
+
+- **Bulk single-op tools** (default tier, proposal-gated): some "bulk" operations are one semantic op in Anki — `rename_tag` (`col.tags.rename`), `find_and_replace`, `move_cards_to_deck`. Each renders as *one* proposal card ("Rename tag X → Y — affects 1,243 notes"). No new permissions needed.
+- **Change sets** (default tier and up): for semantic sweeps ("fix this subtle problem across 1,000 cards"), the agent opens a change set, streams per-note edits into it, and the UI shows one card with the count, sampled diffs for spot-checking, and an expandable full list. Accept/reject applies the whole set: forced `col.create_backup` checkpoint first, chunked main-thread application (the 15s marshal timeout applies per chunk, not per set), one ledger entry, one-click revert. Review-at-scale = audit a sample + description, not 1,000 cards.
+- **trusted-writes tier** (new mode): direct write tools (update/add/delete/bulk) without proposal cards. Safeguards: backup checkpoint at first write of a session, every touched note ledgered + provenance-tagged, a per-session write budget that pauses for confirmation when exceeded, deletes always confirmed.
+- **unrestricted tier** (undecided): would additionally unlock the CLI's own Bash/file/web tools. Sharp edge: card/field content is untrusted model input (§13.3), so environment access turns a malicious shared deck's prompt injection into potential arbitrary code execution. If shipped: typed opt-in (user types the mode name), never sticky across sessions, prominent warning. Collection-power and environment-power are deliberately separate axes.
+- Rationale vs. raw AnkiConnect / third-party Anki MCP proxies: a power user can always bypass us, so the top sanctioned tier must be strictly better — undo/ledger integration, session grouping, backup checkpoints, injection-aware gating — leaving no reason to route around the add-on.
+
 ## 6. Stats cache
 
 - Background job every N minutes (default 30, configurable) and on demand (manual refresh button; debounced hooks on sync/deck changes).
