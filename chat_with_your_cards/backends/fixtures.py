@@ -45,8 +45,11 @@ TOOL_SCRIPT: list[Step] = [
     },
     {
         "kind": "tool",
-        "tool": "search_notes",
-        "summary": 'deck:current "limit"',
+        # Real backends emit MCP tool names (mcp__anki__*); the UI maps these
+        # to friendly labels and hides bare/internal names, so the fixture
+        # must use the real shape.
+        "tool": "mcp__anki__search_notes",
+        "summary": '{"query": "deck:current \\"limit\\""}',
         "result": "12 notes",
         "ok": True,
         "duration_ms": 900,

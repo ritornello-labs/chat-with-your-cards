@@ -134,13 +134,14 @@ class FakeCol:
         return []
 
 
-def make_manager(config: dict[str, Any] | None = None):
+def make_manager(config: dict[str, Any] | None = None, writes: list | None = None):
     col = FakeCol()
     pushed: list[dict[str, Any]] = []
     manager = ProposalManager(
         get_col=lambda: col,
         push=pushed.append,
         config=config if config is not None else {},
+        after_write=(writes.append if writes is not None else None),
     )
     return manager, col, pushed
 
@@ -395,6 +396,123 @@ class LedgerTests(unittest.TestCase):
         manager.push_ui_state()
         ledger = pushes_of(pushed, "ledger")[-1]
         self.assertEqual(ledger["entries"], [])
+
+
+class SupersedeTests(unittest.TestCase):
+    def test_supersede_deactivates_prior_pending(self) -> None:
+        manager, _col, pushed = make_manager()
+        first = manager.submit_create(dict(CREATE_ARGS))
+        manager.submit_create({**CREATE_ARGS, "supersedes": first["proposal_id"]})
+        superseded = [
+            p for p in pushes_of(pushed, "proposal_resolved") if p["status"] == "superseded"
+        ]
+        self.assertEqual(1, len(superseded))
+        self.assertEqual(first["proposal_id"], superseded[0]["id"])
+
+    def test_supersede_ignores_already_resolved(self) -> None:
+        manager, _col, pushed = make_manager()
+        first = manager.submit_create(dict(CREATE_ARGS))
+        manager.accept({"id": first["proposal_id"]})
+        before = len(pushes_of(pushed, "proposal_resolved"))
+        manager.submit_create({**CREATE_ARGS, "supersedes": first["proposal_id"]})
+        # No new "superseded" resolution for an already-accepted proposal.
+        superseded = [
+            p for p in pushes_of(pushed, "proposal_resolved") if p["status"] == "superseded"
+        ]
+        self.assertEqual([], superseded)
+        self.assertGreaterEqual(len(pushes_of(pushed, "proposal_resolved")), before)
+
+
+class RestoreTests(unittest.TestCase):
+    def test_restore_superseded_returns_to_pending(self) -> None:
+        manager, _col, pushed = make_manager()
+        first = manager.submit_create(dict(CREATE_ARGS))
+        manager.submit_create({**CREATE_ARGS, "supersedes": first["proposal_id"]})
+        manager.restore({"id": first["proposal_id"]})
+        restored = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertEqual(first["proposal_id"], restored["id"])
+        self.assertEqual("pending", restored["status"])
+        # And it can then be accepted normally.
+        manager.accept({"id": first["proposal_id"]})
+        self.assertEqual(
+            "accepted", pushes_of(pushed, "proposal_resolved")[-1]["status"]
+        )
+
+    def test_restore_rejected_returns_to_pending(self) -> None:
+        manager, _col, pushed = make_manager()
+        first = manager.submit_create(dict(CREATE_ARGS))
+        manager.reject({"id": first["proposal_id"]})
+        manager.restore({"id": first["proposal_id"]})
+        self.assertEqual(
+            "pending", pushes_of(pushed, "proposal")[-1]["proposal"]["status"]
+        )
+
+
+class ReaddTests(unittest.TestCase):
+    def _create_then_undo(self, manager, col, pushed) -> str:
+        result = manager.submit_create(dict(CREATE_ARGS))
+        manager.accept({"id": result["proposal_id"]})
+        manager.revert({"id": result["proposal_id"]})
+        return result["proposal_id"]
+
+    def test_readd_recreates_undone_note(self) -> None:
+        manager, col, pushed = make_manager()
+        pid = self._create_then_undo(manager, col, pushed)
+        self.assertEqual(0, len(col._notes))
+        manager.readd({"id": pid})
+        self.assertEqual(1, len(col._notes))
+        note = next(iter(col._notes.values()))
+        self.assertIn(AI_TAG, note.tags)
+        self.assertEqual(
+            "accepted", pushes_of(pushed, "proposal_resolved")[-1]["status"]
+        )
+
+    def test_readd_reapplies_undone_edit(self) -> None:
+        manager, col, pushed = make_manager()
+        create = manager.submit_create(dict(CREATE_ARGS))
+        manager.accept({"id": create["proposal_id"]})
+        nid = pushes_of(pushed, "proposal_resolved")[-1]["note_id"]
+        edit = manager.submit_edit(
+            {"note_id": nid, "field_changes": {"Front": "New Q?"}}
+        )
+        manager.accept({"id": edit["proposal_id"]})
+        manager.revert({"id": edit["proposal_id"]})
+        self.assertEqual(col.get_note(nid)["Front"], "Q?")
+
+        manager.readd({"id": edit["proposal_id"]})
+        self.assertEqual(col.get_note(nid)["Front"], "New Q?")
+        # Re-adding an edit is itself revertible again.
+        manager.revert({"id": edit["proposal_id"]})
+        self.assertEqual(col.get_note(nid)["Front"], "Q?")
+
+    def test_readd_only_acts_on_undone(self) -> None:
+        manager, col, pushed = make_manager()
+        result = manager.submit_create(dict(CREATE_ARGS))  # still pending
+        manager.readd({"id": result["proposal_id"]})
+        self.assertEqual(0, len(col._notes))
+
+
+class AfterWriteTests(unittest.TestCase):
+    def test_after_write_fires_on_create_and_revert(self) -> None:
+        writes: list = []
+        manager, _col, pushed = make_manager(writes=writes)
+        result = manager.submit_create(dict(CREATE_ARGS))
+        manager.accept({"id": result["proposal_id"]})
+        nid = pushes_of(pushed, "proposal_resolved")[-1]["note_id"]
+        self.assertIn(nid, writes[-1])
+        writes.clear()
+        manager.revert({"id": result["proposal_id"]})
+        self.assertIn(nid, writes[-1])
+
+    def test_preview_request_pushes_update(self) -> None:
+        manager, _col, pushed = make_manager()
+        result = manager.submit_create(dict(CREATE_ARGS))
+        manager.preview_request(
+            {"id": result["proposal_id"], "fields": {"Front": "Live edit"}}
+        )
+        updates = pushes_of(pushed, "preview_update")
+        self.assertEqual(1, len(updates))
+        self.assertEqual(result["proposal_id"], updates[0]["id"])
 
 
 if __name__ == "__main__":

@@ -25,6 +25,7 @@ ACCEPTED = "accepted"
 AUTO_ACCEPTED = "auto-accepted"
 REJECTED = "rejected"
 UNDONE = "undone"
+SUPERSEDED = "superseded"
 
 
 class ProposalError(Exception):
@@ -100,11 +101,15 @@ class ProposalManager:
         push: Callable[[dict[str, Any]], None],
         config: dict[str, Any],
         save_pins: Callable[[dict[str, Any]], None] | None = None,
+        after_write: Callable[[list[int]], None] | None = None,
     ) -> None:
         self._get_col = get_col
         self._push = push
         self._config = config
         self._save_pins = save_pins
+        # Called with the affected note ids after any collection write, so the
+        # add-on can refresh the reviewer if it is showing one of them.
+        self._after_write = after_write or (lambda _ids: None)
         self._proposals: dict[str, Proposal] = {}
         self._ledger: list[LedgerEntry] = []
         self._counter = 0
@@ -163,6 +168,16 @@ class ProposalManager:
         """Initial state for the webview: pins and the current ledger."""
         self._push({"type": "pins", "pins": self.pins})
         self._push_ledger()
+
+    def _maybe_supersede(self, supersedes: Any) -> None:
+        """Deactivate a still-pending proposal that a new one revises, so the
+        old card is set aside in favor of the new version (DESIGN.md 8)."""
+        prev = self._proposals.get(str(supersedes or ""))
+        if prev is not None and prev.status == PENDING:
+            prev.status = SUPERSEDED
+            self._push(
+                {"type": "proposal_resolved", "id": prev.id, "status": SUPERSEDED}
+            )
 
     # ---- agent-facing submission (tool entry points) ----
 
@@ -228,7 +243,9 @@ class ProposalManager:
                 proposal.note_id = note_id
                 self._proposals[proposal.id] = proposal
                 self._push({"type": "proposal", "proposal": proposal.to_payload()})
+                self._maybe_supersede(args.get("supersedes"))
                 self._push_ledger()
+                self._after_write([note_id])
                 return {
                     "status": "created",
                     "note_id": note_id,
@@ -248,6 +265,7 @@ class ProposalManager:
 
         self._proposals[proposal.id] = proposal
         self._push({"type": "proposal", "proposal": proposal.to_payload()})
+        self._maybe_supersede(args.get("supersedes"))
         return {
             "status": "pending_user_review",
             "proposal_id": proposal.id,
@@ -299,6 +317,7 @@ class ProposalManager:
         proposal.previews = self._render_edit_preview(col, note_id, changes)
         self._proposals[proposal.id] = proposal
         self._push({"type": "proposal", "proposal": proposal.to_payload()})
+        self._maybe_supersede(args.get("supersedes"))
         return {
             "status": "pending_user_review",
             "proposal_id": proposal.id,
@@ -335,6 +354,8 @@ class ProposalManager:
             }
         )
         self._push_ledger()
+        if proposal.note_id is not None:
+            self._after_write([proposal.note_id])
 
     def _accept_create(
         self, proposal: Proposal, msg: dict[str, Any], final_fields: dict[str, str]
@@ -418,6 +439,94 @@ class ProposalManager:
             {"type": "proposal_resolved", "id": proposal.id, "status": REJECTED}
         )
 
+    def restore(self, msg: dict[str, Any]) -> None:
+        """Reactivate a superseded or rejected proposal back to pending review."""
+        proposal = self._proposals.get(str(msg.get("id", "")))
+        if proposal is None or proposal.status not in (SUPERSEDED, REJECTED):
+            return
+        proposal.status = PENDING
+        proposal.warnings = []
+        self._push({"type": "proposal", "proposal": proposal.to_payload()})
+
+    def readd(self, msg: dict[str, Any]) -> None:
+        """Re-apply a proposal that was undone (re-create the note, or
+        re-apply the edit), so an accidental undo is one click to reverse."""
+        proposal = self._proposals.get(str(msg.get("id", "")))
+        if proposal is None or proposal.status != UNDONE:
+            return
+        col = self._col()
+        try:
+            if proposal.kind == "create":
+                model = self._validate_note_type_and_fields(
+                    col, proposal.note_type, proposal.fields
+                )
+                proposal.note_id = self._apply_create(col, model, proposal)
+            else:
+                assert proposal.note_id is not None
+                note = col.get_note(proposal.note_id)
+                current = dict(note.items())
+                prior_fields = {
+                    name: current[name] for name in proposal.fields if name in current
+                }
+                prior_tags = list(note.tags)
+                for name, value in proposal.fields.items():
+                    if name in current:
+                        note[name] = value
+                for tag in proposal.add_tags:
+                    if tag not in note.tags:
+                        note.tags.append(tag)
+                note.tags = [t for t in note.tags if t not in proposal.remove_tags]
+                col.update_note(note)
+                self._ledger.append(
+                    LedgerEntry(
+                        id=proposal.id,
+                        kind="edit",
+                        note_id=proposal.note_id,
+                        label=_short_label(next(iter(proposal.fields.values()), "")),
+                        prior_fields=prior_fields,
+                        prior_tags=prior_tags,
+                    )
+                )
+        except Exception as exc:  # ProposalError or collection trouble
+            self._push(
+                {"type": "proposal_error", "id": proposal.id, "message": str(exc)}
+            )
+            return
+        proposal.status = ACCEPTED
+        self._push(
+            {
+                "type": "proposal_resolved",
+                "id": proposal.id,
+                "status": proposal.status,
+                "note_id": proposal.note_id,
+            }
+        )
+        self._push_ledger()
+        if proposal.note_id is not None:
+            self._after_write([proposal.note_id])
+
+    def preview_request(self, msg: dict[str, Any]) -> None:
+        """Re-render a proposal's card preview from the user's in-progress
+        edits, so the live card reflects what they are typing."""
+        proposal = self._proposals.get(str(msg.get("id", "")))
+        if proposal is None:
+            return
+        edited = {str(k): str(v) for k, v in (msg.get("fields") or {}).items()}
+        try:
+            col = self._col()
+            if proposal.kind == "create":
+                model = col.models.by_name(proposal.note_type)
+                previews = (
+                    self._render_create_fields(col, model, edited) if model else None
+                )
+            else:
+                previews = self._render_edit_live(col, proposal, edited)
+        except Exception:
+            return
+        self._push(
+            {"type": "preview_update", "id": proposal.id, "previews": previews}
+        )
+
     # ---- ledger: revert / undo ----
 
     def revert(self, msg: dict[str, Any]) -> None:
@@ -439,6 +548,7 @@ class ProposalManager:
                 {"type": "proposal_resolved", "id": proposal.id, "status": UNDONE}
             )
         self._push_ledger()
+        self._after_write([entry.note_id])
 
     def undo_session(self) -> None:
         errors = 0
@@ -465,6 +575,7 @@ class ProposalManager:
                 }
             )
         self._push_ledger()
+        self._after_write([e.note_id for e in self._ledger])
 
     def _revert_entry(self, entry: LedgerEntry) -> None:
         col = self._col()
@@ -570,6 +681,44 @@ class ProposalManager:
 
         after = _render_ephemeral(col, lambda: build(col.new_note(model)), model)
         return {"before": None, "after": after} if after else None
+
+    def _render_create_fields(
+        self, col: Any, model: Any, fields: dict[str, str]
+    ) -> dict[str, Any] | None:
+        valid = {f["name"] for f in model["flds"]}
+
+        def build(note: Any) -> Any:
+            for name, value in fields.items():
+                if name in valid:
+                    note[name] = value
+            return note
+
+        after = _render_ephemeral(col, lambda: build(col.new_note(model)), model)
+        return {"before": None, "after": after} if after else None
+
+    def _render_edit_live(
+        self, col: Any, proposal: Proposal, edited: dict[str, str]
+    ) -> dict[str, Any] | None:
+        note_id = proposal.note_id
+        if note_id is None:
+            return None
+        model_of = lambda n: n.note_type()  # noqa: E731
+        before = _render_ephemeral(
+            col, lambda: col.get_note(note_id), model_of, ord_from_note=True
+        )
+
+        def mutated() -> Any:
+            note = col.get_note(note_id)
+            fields = dict(note.items())
+            for name, value in edited.items():
+                if name in fields:
+                    note[name] = value
+            return note
+
+        after = _render_ephemeral(col, mutated, model_of, ord_from_note=True)
+        if before is None and after is None:
+            return None
+        return {"before": before, "after": after}
 
     def _render_edit_preview(
         self, col: Any, note_id: int, changes: dict[str, str]

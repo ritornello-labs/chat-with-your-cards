@@ -979,3 +979,84 @@ body {
     font-size: 12px;
     padding: 2px;
 }
+
+/* ---------- proposal: superseded + extra action buttons ---------- */
+
+.cwyc-proposal-superseded {
+    opacity: 0.6;
+}
+
+.cwyc-proposal-superseded .cwyc-proposal-body {
+    /* set aside in favor of a newer version */
+    filter: grayscale(0.4);
+}
+
+.cwyc-status-superseded {
+    background: rgba(120, 120, 120, 0.18);
+    color: var(--fg-subtle, var(--fg));
+}
+
+.cwyc-btn-suggest {
+    margin-right: auto !important; /* push accept/reject to the right */
+    border: 1px solid var(--border) !important;
+    color: var(--fg-subtle, var(--fg));
+}
+
+.cwyc-btn-suggest:hover {
+    border-color: var(--cwyc-accent) !important;
+    color: var(--cwyc-accent);
+}
+
+.cwyc-btn-readd:hover {
+    border-color: var(--cwyc-accent);
+    color: var(--cwyc-accent);
+}
+
+.cwyc-btn-restore:hover {
+    border-color: var(--cwyc-accent);
+    color: var(--cwyc-accent);
+}
+
+/* ---------- bulk accept/reject bar ---------- */
+
+#cwyc-bulk {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11.5px;
+    color: var(--fg-subtle, var(--fg));
+    border: 1px solid var(--border-subtle, var(--border));
+    border-radius: 10px;
+    background: var(--canvas-elevated, var(--canvas));
+    padding: 5px 8px;
+    margin-bottom: 7px;
+}
+
+#cwyc-bulk[hidden] {
+    display: none;
+}
+
+#cwyc-bulk-label {
+    flex: 1 1 auto;
+}
+
+#cwyc-bulk button {
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: transparent;
+    color: var(--fg);
+    font-size: 11.5px;
+    padding: 3px 10px;
+    cursor: pointer;
+}
+
+#cwyc-bulk button.cwyc-primary {
+    background: var(--cwyc-accent);
+    border-color: var(--cwyc-accent);
+    color: #fff;
+}
+
+#cwyc-bulk-reject:hover {
+    border-color: #ea4335;
+    color: #ea4335;
+}

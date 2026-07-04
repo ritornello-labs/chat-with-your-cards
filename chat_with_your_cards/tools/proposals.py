@@ -50,6 +50,12 @@ def register_proposal_tools(registry: ToolRegistry) -> None:
                         "type": "string",
                         "description": "One sentence: why this note helps the user",
                     },
+                    "supersedes": {
+                        "type": "string",
+                        "description": "If this revises a proposal the user has not "
+                        "accepted yet, pass that proposal_id so the old card is set "
+                        "aside in favor of this one.",
+                    },
                 },
                 "required": ["fields"],
             },
@@ -77,6 +83,11 @@ def register_proposal_tools(registry: ToolRegistry) -> None:
                     "rationale": {
                         "type": "string",
                         "description": "One sentence: why this edit improves the note",
+                    },
+                    "supersedes": {
+                        "type": "string",
+                        "description": "If this revises an earlier unaccepted proposal, "
+                        "pass its proposal_id so the old card is set aside.",
                     },
                 },
                 "required": ["note_id"],

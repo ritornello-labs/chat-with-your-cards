@@ -95,6 +95,7 @@ def _setup() -> None:
         push=state.dock.bridge.push,
         config=config,
         save_pins=_save_pins,
+        after_write=_refresh_reviewer,
     )
 
     conventions = load_conventions(USER_FILES, str(config.get("conventions_prompt", "")))
@@ -197,6 +198,9 @@ def _wire_bridge() -> None:
     bridge.on("proposal_accept", proposals.accept)
     bridge.on("proposal_reject", proposals.reject)
     bridge.on("proposal_revert", proposals.revert)
+    bridge.on("proposal_readd", proposals.readd)
+    bridge.on("proposal_restore", proposals.restore)
+    bridge.on("proposal_preview", proposals.preview_request)
     bridge.on("undo_session", lambda _msg: proposals.undo_session())
     bridge.on("set_pins", lambda msg: proposals.set_pins(msg.get("pins") or {}))
     bridge.on("open_session_browser", lambda _msg: _open_session_browser())
@@ -254,6 +258,26 @@ def _save_pins(pins: dict[str, Any]) -> None:
     config = mw.addonManager.getConfig(__name__) or {}
     config["pins"] = pins
     mw.addonManager.writeConfig(__name__, config)
+
+
+def _refresh_reviewer(note_ids: list[int]) -> None:
+    """Re-render the reviewer if it is showing a note we just wrote to, so an
+    accepted edit shows without the user leaving and re-entering review."""
+    if mw is None or mw.state != "review":
+        return
+    reviewer: Any = getattr(mw, "reviewer", None)
+    card = getattr(reviewer, "card", None) if reviewer else None
+    if reviewer is None or card is None or card.nid not in set(note_ids):
+        return
+    try:
+        card.load()  # re-read the mutated note from the collection
+        if getattr(reviewer, "state", "question") == "answer":
+            reviewer._showAnswer()
+        else:
+            reviewer._showQuestion()
+    except Exception:
+        # Best-effort: a private-API drift shouldn't break the write itself.
+        pass
 
 
 def _open_session_browser() -> None:

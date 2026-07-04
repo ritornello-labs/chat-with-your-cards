@@ -135,7 +135,10 @@ def build_system_prompt(
             "get_note_type before proposing; match the user's existing style "
             "(look at similar notes first). Propose one focused note per "
             "concept rather than a batch. For edits, only include fields that "
-            "actually change."
+            "actually change. When you revise a proposal the user has NOT yet "
+            "accepted (e.g. they asked for a change to a card still pending "
+            "review), pass supersedes=<that proposal_id> so the old card is "
+            "set aside in favor of your new one instead of piling up."
         )
         if permission_mode == "auto-accept":
             parts.append(
