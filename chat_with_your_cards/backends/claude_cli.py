@@ -30,6 +30,7 @@ from .base import (
     TextDelta,
     ToolCallFinished,
     ToolCallStarted,
+    UsageUpdate,
 )
 
 SUMMARY_CHARS = 90
@@ -175,9 +176,24 @@ def parse_stream_line(obj: dict[str, Any], state: ParserState) -> list[ChatEvent
 
     if kind == "result":
         state.session_id = obj.get("session_id") or state.session_id
+        result_events: list[ChatEvent] = []
+        usage = obj.get("usage") or {}
+        cost = obj.get("total_cost_usd")
+        if cost is not None or usage:
+            result_events.append(
+                UsageUpdate(
+                    cost_usd=float(cost) if cost is not None else None,
+                    input_tokens=usage.get("input_tokens"),
+                    output_tokens=usage.get("output_tokens"),
+                )
+            )
         if obj.get("subtype") == "success" or not obj.get("is_error"):
-            return [Done()]
-        return [ErrorEvent(str(obj.get("result") or obj.get("subtype"))), Done()]
+            return [*result_events, Done()]
+        return [
+            *result_events,
+            ErrorEvent(str(obj.get("result") or obj.get("subtype"))),
+            Done(),
+        ]
 
     return []
 

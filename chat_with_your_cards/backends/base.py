@@ -45,6 +45,15 @@ class ProposalRequest:
 
 
 @dataclass(frozen=True)
+class UsageUpdate:
+    """Cumulative session cost/usage as reported by the harness."""
+
+    cost_usd: float | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+
+
+@dataclass(frozen=True)
 class Done:
     pass
 
@@ -55,7 +64,13 @@ class ErrorEvent:
 
 
 ChatEvent = Union[
-    TextDelta, ToolCallStarted, ToolCallFinished, ProposalRequest, Done, ErrorEvent
+    TextDelta,
+    ToolCallStarted,
+    ToolCallFinished,
+    ProposalRequest,
+    UsageUpdate,
+    Done,
+    ErrorEvent,
 ]
 
 EventCallback = Callable[[ChatEvent], None]
@@ -81,6 +96,13 @@ def event_to_dict(event: ChatEvent) -> dict[str, Any]:
         }
     if isinstance(event, ProposalRequest):
         return {"type": "proposal_request", "kind": event.kind, "payload": event.payload}
+    if isinstance(event, UsageUpdate):
+        return {
+            "type": "usage",
+            "cost_usd": event.cost_usd,
+            "input_tokens": event.input_tokens,
+            "output_tokens": event.output_tokens,
+        }
     if isinstance(event, Done):
         return {"type": "done"}
     if isinstance(event, ErrorEvent):

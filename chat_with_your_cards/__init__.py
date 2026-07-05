@@ -28,6 +28,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "effort": "",
     "web_access": True,
     "compact_tool_descriptions": True,
+    "suggested_questions": True,
     "anthropic_api_key": "",
     "anthropic_api_key_op": "",
     "openai_api_key": "",
@@ -80,6 +81,8 @@ def new_chat() -> None:
 
 
 def _setup() -> None:
+    from aqt import gui_hooks
+
     from . import dock as dock_mod
     from . import shortcuts as shortcuts_mod
     from .context import build_system_prompt
@@ -137,6 +140,14 @@ def _setup() -> None:
     _wire_bridge()
     shortcuts_mod.register_shortcuts(state)
 
+    # Live context chip: refresh as the user moves between screens/cards.
+    def _chip(*_args: Any) -> None:
+        if state.controller is not None:
+            state.controller.push_context_chip()
+
+    gui_hooks.reviewer_did_show_question.append(_chip)
+    gui_hooks.state_did_change.append(_chip)
+
 
 class _ToolCtx:
     @property
@@ -164,7 +175,23 @@ def _ensure_mcp() -> tuple[str, str]:
         read_only = mode == "read-only"
         trusted = mode == "trusted-writes"
 
+        specs_by_name = {spec.name: spec for spec in registry.specs(include_trusted=True)}
+
         def execute_tool(name: str, args: dict[str, Any]) -> Any:
+            # The MCP server is the security boundary: enforce the LIVE
+            # permission mode here, not just in what tools are advertised.
+            # This is what makes runtime mode switching sound.
+            spec = specs_by_name.get(name)
+            live_mode = str(state.config.get("permission_mode", "default"))
+            if spec is not None and spec.writes and live_mode == "read-only":
+                raise PermissionError(
+                    "this session is read-only; the user must switch the "
+                    "permission mode to allow writes"
+                )
+            if spec is not None and spec.trusted_only and live_mode != "trusted-writes":
+                raise PermissionError(
+                    f"{name} is only available in trusted-writes mode"
+                )
             box: dict[str, Any] = {}
             done = threading.Event()
 
@@ -222,6 +249,7 @@ def _wire_bridge() -> None:
     bridge.on("set_pins", lambda msg: proposals.set_pins(msg.get("pins") or {}))
     bridge.on("open_session_browser", lambda _msg: _open_session_browser())
     bridge.on("set_agent", _set_agent)
+    bridge.on("set_permission_mode", _set_permission_mode)
     bridge.on("toggle_float", lambda _msg: state.dock.toggle_float() if state.dock else None)
 
 
@@ -235,6 +263,16 @@ def _mark_web_ready() -> None:
         state.controller.push_agent_state()
     if state.dock is not None:
         state.dock.push_dock_state()
+        state.dock.bridge.push(
+            {
+                "type": "ui_config",
+                "suggested_questions": bool(
+                    state.config.get("suggested_questions", True)
+                ),
+            }
+        )
+    if state.controller is not None:
+        state.controller.push_context_chip()
     _push_collection_meta()
 
 
@@ -260,6 +298,15 @@ def _push_collection_meta() -> None:
             "tags": tags,
         }
     )
+
+
+def _set_permission_mode(msg: dict[str, Any]) -> None:
+    if state.controller is None:
+        return
+    state.controller.set_permission_mode(str(msg.get("mode", "")))
+    config = mw.addonManager.getConfig(__name__) or {}
+    config["permission_mode"] = state.config.get("permission_mode", "default")
+    mw.addonManager.writeConfig(__name__, config)
 
 
 def _set_agent(msg: dict[str, Any]) -> None:

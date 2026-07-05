@@ -20,6 +20,9 @@
   Switching model or effort mid-chat keeps the current conversation - the CLI is
   re-invoked with `--resume` on your next message. Your choice is remembered
   across chats and restarts; the CLI default only applies until you first pick.
+- `suggested_questions` (default `true`): show a context-aware suggested
+  question as gray ghost text in the empty composer; Tab accepts it, typing
+  dismisses it.
 - `web_access` (default `true`): allow the assistant to use web search and
   page fetching (useful for sourcing card content). Set `false` to keep the
   agent strictly inside your collection.

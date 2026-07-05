@@ -1204,3 +1204,62 @@ body {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
+/* ---------- permission mode chip ---------- */
+
+#cwyc-mode-chip {
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--fg-subtle, var(--fg));
+    font-size: 11.5px;
+    padding: 3px 10px;
+    margin-right: 6px;
+    cursor: pointer;
+}
+
+#cwyc-mode-chip:hover {
+    background: var(--cwyc-bubble-user);
+}
+
+#cwyc-mode-chip.cwyc-mode-read-only {
+    color: var(--cwyc-accent);
+    border-color: var(--cwyc-accent);
+}
+
+#cwyc-mode-chip.cwyc-mode-auto-accept {
+    color: #b8860b;
+    border-color: #b8860b;
+}
+
+#cwyc-mode-chip.cwyc-mode-trusted-writes {
+    color: #ea4335;
+    border-color: #ea4335;
+}
+
+/* ---------- footer chips row (context + usage) ---------- */
+
+#cwyc-footer-chips {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 7px;
+}
+
+#cwyc-footer-chips #cwyc-context-chip {
+    margin-bottom: 0;
+}
+
+#cwyc-usage-chip {
+    font-size: 11px;
+    color: var(--fg-subtle, var(--fg));
+    border: 1px solid var(--border-subtle, var(--border));
+    border-radius: 999px;
+    padding: 2px 9px;
+    opacity: 0.85;
+    white-space: nowrap;
+}
+
+#cwyc-usage-chip[hidden] {
+    display: none;
+}

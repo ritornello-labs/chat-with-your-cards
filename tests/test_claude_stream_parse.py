@@ -183,6 +183,26 @@ class ParseStreamLineTest(unittest.TestCase):
         self.assertEqual([Done()], events)
         self.assertEqual("s2", self.state.session_id)
 
+    def test_result_with_usage_emits_usage_update(self) -> None:
+        from chat_with_your_cards.backends import UsageUpdate
+
+        events = parse_stream_line(
+            {
+                "type": "result",
+                "subtype": "success",
+                "total_cost_usd": 0.0421,
+                "usage": {"input_tokens": 12000, "output_tokens": 450},
+            },
+            self.state,
+        )
+        self.assertEqual(2, len(events))
+        usage = events[0]
+        assert isinstance(usage, UsageUpdate)
+        self.assertAlmostEqual(0.0421, usage.cost_usd or 0)
+        self.assertEqual(12000, usage.input_tokens)
+        self.assertEqual(450, usage.output_tokens)
+        self.assertIsInstance(events[1], Done)
+
     def test_result_error_emits_error_then_done(self) -> None:
         events = parse_stream_line(
             {

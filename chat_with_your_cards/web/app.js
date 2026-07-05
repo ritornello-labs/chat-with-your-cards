@@ -195,6 +195,8 @@
         }
         input.value = "";
         autosizeInput();
+        suggestionIndex += 1;
+        refreshSuggestion();
         addUserMessage(text);
         startAssistantMessage();
         setStreaming(true);
@@ -1194,6 +1196,9 @@
         label.textContent = effort ? modelLabel + " · " + effort : modelLabel;
         document.getElementById("cwyc-agent-model").value = model;
         document.getElementById("cwyc-agent-effort").value = effort;
+        if (data.mode) {
+            renderMode(data.mode);
+        }
     }
 
     function sendAgent() {
@@ -1202,6 +1207,105 @@
             model: document.getElementById("cwyc-agent-model").value,
             effort: document.getElementById("cwyc-agent-effort").value,
         });
+    }
+
+    /* ---- permission mode chip ---- */
+
+    var MODES = ["default", "read-only", "auto-accept", "trusted-writes"];
+    var MODE_LABELS = {
+        "default": "Propose",
+        "read-only": "Read-only",
+        "auto-accept": "Auto-accept",
+        "trusted-writes": "Trusted",
+    };
+    var currentMode = "default";
+
+    function renderMode(mode) {
+        currentMode = MODES.indexOf(mode) === -1 ? "default" : mode;
+        var chip = document.getElementById("cwyc-mode-chip");
+        chip.textContent = MODE_LABELS[currentMode];
+        chip.className = "cwyc-mode-" + currentMode;
+    }
+
+    function cycleMode() {
+        var next = MODES[(MODES.indexOf(currentMode) + 1) % MODES.length];
+        if (next === "trusted-writes" &&
+            !window.confirm(
+                "Trusted-writes lets the assistant change your collection " +
+                "directly (deletes still ask). Everything is ledgered and " +
+                "revertible, with a per-session write budget. Enable?"
+            )) {
+            next = MODES[(MODES.indexOf(next) + 1) % MODES.length];
+        }
+        post({ type: "set_permission_mode", mode: next });
+    }
+
+    /* ---- usage chip ---- */
+
+    function renderUsage(payload) {
+        var chip = document.getElementById("cwyc-usage-chip");
+        if (!chip) {
+            return;
+        }
+        var parts = [];
+        if (payload.cost_usd !== null && payload.cost_usd !== undefined) {
+            parts.push("$" + payload.cost_usd.toFixed(payload.cost_usd < 1 ? 3 : 2));
+        }
+        var tokens = (payload.input_tokens || 0) + (payload.output_tokens || 0);
+        if (tokens) {
+            parts.push(
+                tokens >= 1000 ? Math.round(tokens / 1000) + "k tokens" : tokens + " tokens"
+            );
+        }
+        chip.textContent = parts.join(" · ");
+        chip.hidden = parts.length === 0;
+    }
+
+    /* ---- suggested questions (ghost text via placeholder) ---- */
+
+    var uiConfig = { suggested_questions: true };
+    var contextKind = "overview";
+    var suggestionIndex = 0;
+    var currentSuggestion = "";
+    var DEFAULT_PLACEHOLDER = "Ask about this card…";
+
+    var SUGGESTIONS = {
+        card: [
+            "Explain this card to me — I forgot.",
+            "Why is this the answer?",
+            "Find cards related to this one.",
+            "Make a card for the part of this I keep missing.",
+        ],
+        overview: [
+            "What should I study today?",
+            "Which decks are getting rusty?",
+            "What did I create with you this week?",
+        ],
+    };
+
+    function refreshSuggestion() {
+        if (!input) {
+            return;
+        }
+        if (!uiConfig.suggested_questions) {
+            currentSuggestion = "";
+            input.placeholder = DEFAULT_PLACEHOLDER;
+            return;
+        }
+        var pool = SUGGESTIONS[contextKind] || SUGGESTIONS.overview;
+        currentSuggestion = pool[suggestionIndex % pool.length];
+        input.placeholder = currentSuggestion + "  (Tab)";
+    }
+
+    function acceptSuggestion() {
+        if (!currentSuggestion || input.value) {
+            return false;
+        }
+        input.value = currentSuggestion;
+        suggestionIndex += 1; // rotate for next time
+        autosizeInput();
+        input.setSelectionRange(input.value.length, input.value.length);
+        return true;
     }
 
     function renderDockState(floating) {
@@ -1301,8 +1405,19 @@
                 if (chip) {
                     chip.textContent = "Context: " + payload.label;
                 }
+                if (payload.kind && payload.kind !== contextKind) {
+                    contextKind = payload.kind;
+                    refreshSuggestion();
+                }
                 break;
             }
+            case "usage":
+                renderUsage(payload);
+                break;
+            case "ui_config":
+                uiConfig.suggested_questions = payload.suggested_questions !== false;
+                refreshSuggestion();
+                break;
             default:
                 // Unknown event types are ignored on purpose.
                 break;
@@ -1377,10 +1492,20 @@
         document.getElementById("cwyc-dock-toggle").addEventListener("click", function () {
             post({ type: "toggle_float" });
         });
+        document.getElementById("cwyc-mode-chip").addEventListener("click", cycleMode);
+        refreshSuggestion();
         input.addEventListener("keydown", function (event) {
             if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
                 sendCurrentInput();
+            } else if (event.key === "Tab" && event.shiftKey) {
+                // Mirror Claude Code: Shift+Tab cycles the permission mode.
+                event.preventDefault();
+                cycleMode();
+            } else if (event.key === "Tab" && !input.value) {
+                if (acceptSuggestion()) {
+                    event.preventDefault();
+                }
             }
         });
         input.addEventListener("input", autosizeInput);

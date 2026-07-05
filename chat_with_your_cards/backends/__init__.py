@@ -11,6 +11,7 @@ from .base import (
     TextDelta,
     ToolCallFinished,
     ToolCallStarted,
+    UsageUpdate,
     event_to_dict,
 )
 from .scripted import ScriptedBackend, ScriptedSession
@@ -28,5 +29,6 @@ __all__ = [
     "TextDelta",
     "ToolCallFinished",
     "ToolCallStarted",
+    "UsageUpdate",
     "event_to_dict",
 ]

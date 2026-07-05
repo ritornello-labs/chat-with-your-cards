@@ -8,6 +8,7 @@
     "effort": "",
     "web_access": true,
     "compact_tool_descriptions": true,
+    "suggested_questions": true,
     "anthropic_api_key": "",
     "anthropic_api_key_op": "",
     "openai_api_key": "",

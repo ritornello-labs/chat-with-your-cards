@@ -103,6 +103,7 @@
             body.split(" ").forEach(function (word) {
                 dispatchLater(step(25), { type: "text_delta", text: word + " " });
             });
+            dispatchLater(step(30), { type: "usage", cost_usd: 0.042, input_tokens: 12000, output_tokens: 450 });
             dispatchLater(step(50), { type: "done" });
         }
         // ---- proposal demo fixtures (M2) ----
@@ -259,13 +260,15 @@
                     ],
                     tags: ["analysis", "definitions", "todo", "pokemon", "spanish"] });
                 window.chatUI.dispatch({ type: "pins", pins: { deck: "", note_type: "", tags: [], fields: {} } });
-                window.chatUI.dispatch({ type: "agent", backend: "claude", model: "", effort: "" });
+                window.chatUI.dispatch({ type: "agent", backend: "claude", model: "", effort: "", mode: "default" });
                 window.chatUI.dispatch({ type: "dock_state", floating: false });
             } else if (msg.type === "toggle_float") {
                 window.__floating = !window.__floating;
                 window.chatUI.dispatch({ type: "dock_state", floating: window.__floating });
+            } else if (msg.type === "set_permission_mode") {
+                window.chatUI.dispatch({ type: "agent", backend: "claude", model: "", effort: "", mode: msg.mode });
             } else if (msg.type === "set_agent") {
-                window.chatUI.dispatch({ type: "agent", backend: "claude", model: msg.model, effort: msg.effort });
+                window.chatUI.dispatch({ type: "agent", backend: "claude", model: msg.model, effort: msg.effort, mode: "default" });
             } else if (msg.type === "send") {
                 var text = (msg.text || "").toLowerCase();
                 if (text.indexOf("bulk") !== -1) { proposeBulk(); }

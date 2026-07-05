@@ -4,8 +4,8 @@
         {
             "name": "preview",
             "runtimeExecutable": "python3",
-            "runtimeArgs": ["-m", "http.server", "8642"],
-            "port": 8642
+            "runtimeArgs": ["-m", "http.server"],
+            "autoPort": true
         }
     ]
 }

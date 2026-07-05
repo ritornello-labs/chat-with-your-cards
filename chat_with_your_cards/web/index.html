@@ -16,6 +16,8 @@
             </svg>
         </button>
         <span id="cwyc-header-spacer"></span>
+        <button id="cwyc-mode-chip" type="button"
+                title="Permission mode - click or Shift+Tab to cycle"></button>
         <button id="cwyc-agent-toggle" type="button"
                 title="Choose the model and effort level">
             <span id="cwyc-agent-label">Model</span>
@@ -110,8 +112,12 @@
             <button id="cwyc-ledger-undo" type="button"
                     title="Revert every change made this session">Undo session</button>
         </div>
-        <div id="cwyc-context-chip" title="What the assistant will see">
-            Context: collection overview
+        <div id="cwyc-footer-chips">
+            <div id="cwyc-context-chip" title="What the assistant will see">
+                Context: collection overview
+            </div>
+            <div id="cwyc-usage-chip" hidden
+                 title="This session's cost and tokens, as reported by the agent"></div>
         </div>
         <div id="cwyc-composer">
             <textarea id="cwyc-input" rows="1" placeholder="Ask about this card&hellip;"

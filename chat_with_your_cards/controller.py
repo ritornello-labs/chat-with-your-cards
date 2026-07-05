@@ -150,6 +150,18 @@ class ChatController:
         self._last_card_id_sent = info["card_id"]
         return build_card_block(info), label
 
+    def push_context_chip(self) -> None:
+        """Live-update the pre-chat context chip as the user moves between
+        the reviewer and other screens (DESIGN.md section 9: 'the chip
+        updates as the user moves', previously only refreshed on send)."""
+        info = current_card_info()
+        if info is None:
+            self._push({"type": "context", "label": "collection overview", "kind": "overview"})
+        else:
+            self._push(
+                {"type": "context", "label": f"card in {info['deck']}", "kind": "card"}
+            )
+
     def cancel(self) -> None:
         if self._session is not None and self._session.streaming:
             self._session.cancel()
@@ -208,6 +220,19 @@ class ChatController:
         label = names.get(model, model)
         return f"{label} · {effort} effort" if effort else label
 
+    VALID_MODES = ("default", "read-only", "auto-accept", "trusted-writes")
+
+    def set_permission_mode(self, mode: str) -> None:
+        """Runtime mode switch (chip / Shift+Tab). Gating is enforced live at
+        the MCP boundary; the advertised tool list only changes when the MCP
+        server is (re)built, so read-only/trusted advertising lags until the
+        next Anki run - enforcement does not."""
+        mode = (mode or "").strip()
+        if mode not in self.VALID_MODES:
+            return
+        self._config["permission_mode"] = mode
+        self.push_agent_state()
+
     def push_agent_state(self) -> None:
         self._push(
             {
@@ -215,6 +240,7 @@ class ChatController:
                 "backend": str(self._config.get("backend", "auto")),
                 "model": str(self._config.get("model", "")),
                 "effort": str(self._config.get("effort", "")),
+                "mode": str(self._config.get("permission_mode", "default")),
             }
         )
 
