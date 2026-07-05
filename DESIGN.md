@@ -18,7 +18,16 @@ This document is the plan. It records the recommended architecture, the decision
 
 ## 2. The backend question: BYOK API vs. CLI agents
 
-This is the biggest open decision. Recommendation up front:
+**Decision update (2026-07-05, user-confirmed): the add-on is harness-based, period.** The backends are agent harnesses — **Claude Code, Codex, and Pi** (`@earendil-works/pi-coding-agent`) — and the in-add-on BYOK APIBackend (old M4) is **dropped**. BYOK is instead served by handing user-provided API keys to a harness through its environment (implemented: `anthropic_api_key`/`openai_api_key` pasted into config — explicitly the less-secure option — or `*_op` 1Password references resolved via `op read` at spawn, secret never touching disk; empty = the harness's own OAuth login). Pi is the lightweight BYOK path: npm-installable (`npm i -g --ignore-scripts @earendil-works/pi-coding-agent`), no subscription needed, API-key/OAuth auth.
+
+Per-harness adapter facts (researched + locally probed 2026-07-05):
+
+- **Claude Code** (shipped): headless stream-json, MCP over our localhost HTTP server. Web access now allowed by default (`web_access` config; WebSearch/WebFetch in allowedTools, off switches them to disallowed) and the `Skill` tool is allowed so system-wide user skills and our template skill work.
+- **Codex** (M3): `codex exec --json` with MCP config. Local probe found the volta-installed codex broken (missing platform vendor binary, spawn ENOENT) — exactly the class of environment failure the doctor panel must diagnose.
+- **Pi** (M3): modes `-p`, `--mode json` (event stream: `agent_start/turn_*/message_update{text_delta,toolcall_delta}/tool_execution_*/agent_end`), `--mode rpc` (JSONL over stdio with session resume/fork). **No built-in MCP** — tools are added via pi's TypeScript extension API, so our adapter ships a small pi extension that bridges pi tool calls to the add-on's MCP HTTP endpoint (same registry, same server-side permission enforcement). System prompt via per-project `SYSTEM.md`/`AGENTS.md` in the agent workdir; skills load from `~/.pi/agent/` and project dirs. Local probe: JSON mode works structurally (`{"type":"session"}` handshake) but the machine had no API key configured for pi — the BYOK plumbing above is the fix.
+- **Distribution** (undecided, leaning): doctor panel links to each harness's install page; optionally the add-on offers to auto-install Pi (it is the only one light enough — single npm package, `--ignore-scripts`) after explicit user consent. Never auto-install Claude Code or Codex.
+
+Original analysis below kept for the record; its "BYOK direct-API backend as a later milestone" recommendation is superseded by the harness-key approach above.
 
 > **Design a `ChatBackend` interface from day one. Ship the CLI-agent backend (Claude Code first, Codex second) as the MVP. Add the BYOK direct-API backend as a later milestone.**
 
@@ -65,6 +74,8 @@ The add-on runs a **minimal MCP server over localhost HTTP** inside Anki's proce
 4. Our tools are opinionated (clue-based `find_related`, budgeted annotated trees, cached stats), not raw CRUD.
 
 What we do take from them: tool naming/schema conventions where they exist, so agents' priors transfer.
+
+**Context-frugal tool advertising (decided + implemented 2026-07-05).** Tool listings advertise a one-line brief per tool (first sentence of the doc) instead of the full usage prose; a `tool_help(names?)` tool serves complete documentation on demand, and the system prompt tells the agent to consult it before using an unfamiliar tool. The skills-style "name+description only, docs on request" idea is applied to *prose only*: **input schemas are always served in full**, because MCP clients hand the schema to the model verbatim and it cannot form valid tool calls without one — there is no standard lazy-schema mechanism in MCP, and harnesses would not play nicely with schema-less tools. Config `compact_tool_descriptions` (default true) turns it off if an agent handles the two-step discovery poorly.
 
 ## 3. Architecture
 
@@ -159,6 +170,8 @@ Two tiers, both stored per-profile in `user_files/skills/note-conventions/`:
 
 The existing `ai-enhanced-learning` skill (`skills/anki-card-authoring/`) is the first real-world test fixture.
 
+**Skills strategy (decided 2026-07-05).** Because the add-on runs the user's own system agent, that agent already picks up the user's system-wide skills (e.g. `~/.claude/skills`, pi's `~/.pi/agent/`) for free — we do nothing. The add-on's contribution is one conventional directory in the agent workdir — `user_files/agent-home/.claude/skills/` (pi equivalent when that adapter lands) — seeded once with a **template `anki-card-authoring` skill** that documents card style and points at the proposal tools; the user edits it to their taste (it is their file; we never overwrite it). The `Skill` tool is in the CLI's allowedTools so skills actually fire headless. `conventions_prompt` (prompt tier) still works for users who prefer a config field. No further skill machinery planned for now.
+
 ## 8. Proposals: note creation and note editing
 
 Flow: agent calls `propose_note` → ProposalManager validates (note type exists, deck exists or is creatable, required fields present, duplicate check via Anki's dupe detection) → proposal card renders in the chat stream with editable fields, deck picker, tag editor, Accept / Edit / Reject.
@@ -228,8 +241,8 @@ Flow: agent calls `propose_note` → ProposalManager validates (note type exists
 - **M0 — Scaffold**: add-on skeleton, dock with webview, pycmd bridge, workbench smoke green, ScriptedBackend streaming fake chats. *Design iteration starts here.*
 - **M1 — Claude Code MVP**: CLIBackend (Claude Code), MCP server + bridge, read tools, card context + clues, stats cache + overview, toggle/new-chat shortcuts, permission modes (default + read-only).
 - **M2 — Notes** *(landed 2026-07-03)*: propose_note + propose_note_edit, proposal cards with field diffs + before/after card preview + keyboard-first review, pins, conventions skill (prompt tier), session ledger + undo/revert, auto-accept (creations) with safeguards.
-- **M3 — Breadth**: Codex adapter, full-skill tier, ask-each-read mode, chat history/resume, suggested questions (static ghost text), config dialog polish, doctor panel.
-- **M4 — BYOK**: APIBackend (Anthropic first) over the same tool registry, key storage, cost display. Decide then whether AnkiWeb publication leads with it.
+- **M3 — Harness breadth** *(rescoped 2026-07-05)*: **Codex adapter** (`codex exec --json` + MCP config) and **Pi adapter** (`--mode json`/RPC + the pi tool-bridge extension proxying to our MCP server — the main new engineering); **doctor panel** (detect installed harnesses and versions, diagnose broken installs like the probed codex ENOENT, login state, links to install pages, optional consented Pi auto-install); chat history/resume; ask-each-read mode; suggested questions (static ghost text); config dialog polish. Groundwork already landed: backend config accepts `codex`/`pi` (explicit not-yet notice), BYOK key plumbing, web access, skills dir, compact tools.
+- **M4 — Distribution & polish** *(replaces the dropped BYOK APIBackend milestone)*: AnkiWeb packaging and listing, harness install guidance in onboarding, cost/usage visibility from harness usage events, and the AnkiWeb-audience decision (Pi + pasted key is the low-friction path for non-subscribers).
 - **Future — card sources** (user request 2026-07-04): cards will record where they came from (a PDF book, a webpage); the agent needs read tools to open those sources — e.g. `get_card_source(note_id)` resolving a source field to content, PDF page extraction, webpage fetch — to ground explanations and propose new cards from the source material. Needs a schema convention for the source field and a decision on how source access interacts with the permission tiers (fetching a webpage is environment access; likely a scoped, read-only exception rather than the unrestricted tier).
 - **Future — user-supplied card-authoring taste skill**: the user has a personally tuned skill for making agents generate cards to their taste; the conventions-skill slot (§7) is where it plugs in, as user-provided content (prompt tier today, full-skill tier in M3) rather than baked into the add-on.
 
@@ -237,7 +250,7 @@ Flow: agent calls `propose_note` → ProposalManager validates (note type exists
 
 1. **CLI requirement vs. off-the-shelf simplicity** — the central tension. MVP knowingly serves power users; BYOK (M4) is the path to a general AnkiWeb audience. Openly a two-audience product.
 2. **The daemon idea is rejected** (see §3) — flagging explicitly since the brief floated it. In-process background jobs meet the need with none of the lifecycle cost.
-3. **Prompt injection**: card/field contents are untrusted model input; a malicious shared deck could try to steer the agent ("ignore instructions, create 500 notes"). Mitigations: write path always proposal-gated (auto-accept is the exception the user consciously enables, with cap + ledger), MCP server enforces permissions server-side, CLI's own bash/file tools disabled by default.
+3. **Prompt injection**: card/field contents are untrusted model input; a malicious shared deck could try to steer the agent ("ignore instructions, create 500 notes"). Mitigations: write path always proposal-gated (auto-accept is the exception the user consciously enables, with cap + ledger), MCP server enforces permissions server-side, CLI's own bash/file tools disabled by default. *2026-07-05: web access (WebSearch/WebFetch) is now allowed by default (`web_access` config) — web pages join card fields as untrusted input, which is acceptable because those tools are read-only and every write stays gated; Bash/file tools remain off.*
 4. **Local security**: localhost MCP server must require the per-session bearer token, bind 127.0.0.1, and die with the session — otherwise any local process can read the collection.
 5. **Threading**: collection access strictly main-thread; tool calls arriving on the MCP thread must queue onto it without deadlocking Anki if a tool is slow. Needs a timeout + cancellation story.
 6. **Mid-review context drift**: user answers a card while the agent is mid-response about the previous one. Policy: responses are tagged with the card they were about; context updates are explicit events; the UI labels stale answers rather than pretending continuity.

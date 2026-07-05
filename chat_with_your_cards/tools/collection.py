@@ -298,4 +298,35 @@ def build_registry() -> ToolRegistry:
 
     register_media_tools(registry)
     register_proposal_tools(registry)
+
+    def tool_help(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+        names = [str(n) for n in (args.get("names") or [])]
+        known = {spec.name: spec for spec in registry.specs()}
+        docs: dict[str, dict[str, Any]] = {}
+        for name in names or sorted(known):
+            spec = known.get(name)
+            if spec is None:
+                docs[name] = {"error": "unknown tool"}
+            else:
+                docs[name] = {
+                    "description": spec.description,
+                    "input_schema": spec.input_schema,
+                }
+        return {"tools": docs}
+
+    registry.register(
+        ToolSpec(
+            "tool_help",
+            "Full documentation for the anki tools. Tool listings show only "
+            "one-line summaries to save context; call this (with specific "
+            "names, or empty for all) before using an unfamiliar tool.",
+            {
+                "type": "object",
+                "properties": {
+                    "names": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+            tool_help,
+        )
+    )
     return registry

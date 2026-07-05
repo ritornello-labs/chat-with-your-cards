@@ -193,7 +193,17 @@ def build_cli_args(
     resume_session_id: str | None = None,
     model: str = "",
     effort: str = "",
+    web_access: bool = True,
 ) -> list[str]:
+    # The agent lives in collection-land: its own file/shell tools stay off.
+    # Skill is allowed so the user's system-wide skills and our card-authoring
+    # template work; WebSearch/WebFetch are on by default (config web_access).
+    allowed = ["mcp__anki", "Skill"]
+    disallowed = ["Bash", "Edit", "Write", "NotebookEdit"]
+    if web_access:
+        allowed += ["WebSearch", "WebFetch"]
+    else:
+        disallowed += ["WebSearch", "WebFetch"]
     args = [
         cli_path,
         "-p",
@@ -209,9 +219,9 @@ def build_cli_args(
         mcp_config_path,
         "--strict-mcp-config",
         "--allowedTools",
-        "mcp__anki",
+        ",".join(allowed),
         "--disallowedTools",
-        "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch",
+        ",".join(disallowed),
     ]
     if model.strip():
         args += ["--model", model.strip()]
@@ -250,11 +260,15 @@ class ClaudeCliSession:
         log: BackendLog | None = None,
         model: str = "",
         effort: str = "",
+        web_access: bool = True,
+        extra_env: dict[str, str] | None = None,
     ) -> None:
         self._cli_path = cli_path
         self._system_prompt = system_prompt
         self._model = model
         self._effort = effort
+        self._web_access = web_access
+        self._extra_env = extra_env or {}
         self._workdir = workdir
         self._workdir.mkdir(parents=True, exist_ok=True)
         self._tmpdir = Path(tempfile.mkdtemp(prefix="cwyc-claude-"))
@@ -319,9 +333,11 @@ class ClaudeCliSession:
             resume_session_id=self._state.session_id,
             model=self._model,
             effort=self._effort,
+            web_access=self._web_access,
         )
         env = os.environ.copy()
         env.setdefault("PYTHONUNBUFFERED", "1")
+        env.update(self._extra_env)  # e.g. ANTHROPIC_API_KEY for BYOK
         self._process = subprocess.Popen(
             args,
             cwd=self._workdir,
@@ -455,6 +471,8 @@ class ClaudeCliBackend:
         workdir: Path,
         log_path: Path | None = None,
         model_effort: Callable[[], tuple[str, str]] | None = None,
+        web_access: bool = True,
+        extra_env: dict[str, str] | None = None,
     ) -> None:
         self._cli_path = cli_path
         self._system_prompt_builder = system_prompt_builder
@@ -464,6 +482,8 @@ class ClaudeCliBackend:
         self._workdir = workdir
         self._log = BackendLog(log_path)
         self._model_effort = model_effort or (lambda: ("", ""))
+        self._web_access = web_access
+        self._extra_env = extra_env or {}
 
     def start_session(self, context: dict[str, Any]) -> ClaudeCliSession:
         model, effort = self._model_effort()
@@ -477,4 +497,6 @@ class ClaudeCliBackend:
             log=self._log,
             model=model,
             effort=effort,
+            web_access=self._web_access,
+            extra_env=self._extra_env,
         )

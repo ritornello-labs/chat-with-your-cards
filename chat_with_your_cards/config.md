@@ -20,6 +20,19 @@
   Switching model or effort mid-chat keeps the current conversation - the CLI is
   re-invoked with `--resume` on your next message. Your choice is remembered
   across chats and restarts; the CLI default only applies until you first pick.
+- `web_access` (default `true`): allow the assistant to use web search and
+  page fetching (useful for sourcing card content). Set `false` to keep the
+  agent strictly inside your collection.
+- `compact_tool_descriptions` (default `true`): advertise one-line tool
+  summaries to the agent (full docs available on demand via its tool_help
+  tool) to save context. Schemas are always complete.
+- `anthropic_api_key` / `openai_api_key` (default empty): paste an API key to
+  bill usage to it instead of the agent's own login. Stored in Anki's
+  plain-text add-on config - the less-secure option.
+- `anthropic_api_key_op` / `openai_api_key_op` (default empty): a 1Password
+  reference (`op://Vault/Item/field`) resolved via the `op` CLI when the
+  agent starts; the secret never touches disk. Takes precedence over the
+  pasted key.
 - `permission_mode` (default `default`): `default` allows collection reads without
   asking and gates all writes behind proposal cards; `read-only` removes the
   write tools entirely; `auto-accept` applies the assistant's note *creations*

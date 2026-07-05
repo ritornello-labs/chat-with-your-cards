@@ -26,6 +26,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "claude_cli_path": "",
     "model": "",
     "effort": "",
+    "web_access": True,
+    "compact_tool_descriptions": True,
+    "anthropic_api_key": "",
+    "anthropic_api_key_op": "",
+    "openai_api_key": "",
+    "openai_api_key_op": "",
     "permission_mode": "default",
     "stats_refresh_minutes": 30,
     "context_token_budget": 8000,
@@ -103,7 +109,10 @@ def _setup() -> None:
         checkpoint=_backup_checkpoint,
     )
 
+    from .skills import materialize_agent_skills
+
     conventions = load_conventions(USER_FILES, str(config.get("conventions_prompt", "")))
+    materialize_agent_skills(USER_FILES / "agent-home")
 
     def system_prompt() -> str:
         cache = state.stats_cache
@@ -178,7 +187,8 @@ def _ensure_mcp() -> tuple[str, str]:
 
         state.mcp = McpServer(
             tool_specs=tool_specs_for_mcp(
-                registry.specs(include_writes=not read_only, include_trusted=trusted)
+                registry.specs(include_writes=not read_only, include_trusted=trusted),
+                compact=bool(state.config.get("compact_tool_descriptions", True)),
             ),
             execute_tool=execute_tool,
         )

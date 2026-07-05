@@ -36,6 +36,21 @@ class ToolSpec:
     writes: bool = False
     trusted_only: bool = False  # advertised only in trusted-writes mode
 
+    @property
+    def brief(self) -> str:
+        """First sentence of the description - the compact-mode advert.
+
+        Full docs stay available through the tool_help tool; schemas are
+        always served in full (the model cannot form valid calls without
+        them), so compaction only trims prose.
+        """
+        text = self.description.strip()
+        for stop in (". ", ".\n"):
+            index = text.find(stop)
+            if index != -1:
+                return text[: index + 1]
+        return text
+
 
 class ToolRegistry:
     def __init__(self) -> None:

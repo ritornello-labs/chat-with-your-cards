@@ -59,6 +59,17 @@ class ChatController:
 
     def _build_backend(self) -> Any:
         choice = os.environ.get(BACKEND_ENV) or str(self._config.get("backend", "auto"))
+        if choice in ("codex", "pi"):
+            # Adapters are designed (DESIGN.md backend strategy) but not yet
+            # implemented; be explicit rather than silently substituting.
+            self._push(
+                {
+                    "type": "notice",
+                    "text": f"The {choice} backend is planned but not implemented "
+                    "yet - using Claude Code (or the demo backend) instead.",
+                }
+            )
+            choice = "auto"
         if choice not in ("auto", "claude", "scripted"):
             choice = "auto"
         if choice == "scripted":
@@ -81,6 +92,11 @@ class ChatController:
             return ScriptedBackend(_qt_schedule)
 
         url, token = self._ensure_mcp()
+        from .keys import resolve_agent_env
+
+        extra_env, key_problems = resolve_agent_env(self._config)
+        for problem in key_problems:
+            self._push({"type": "notice", "text": f"API key config: {problem}"})
         self.backend_kind = "claude"
         return ClaudeCliBackend(
             cli_path=cli_path,
@@ -94,6 +110,8 @@ class ChatController:
                 str(self._config.get("model", "")),
                 str(self._config.get("effort", "")),
             ),
+            web_access=bool(self._config.get("web_access", True)),
+            extra_env=extra_env,
         )
 
     def ensure_ready(self) -> None:

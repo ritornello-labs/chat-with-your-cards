@@ -215,7 +215,8 @@ class BuildCliArgsTest(unittest.TestCase):
         )
         self.assertIn("--include-partial-messages", args)
         self.assertIn("--strict-mcp-config", args)
-        self.assertIn("mcp__anki", args)
+        allowed = args[args.index("--allowedTools") + 1]
+        self.assertIn("mcp__anki", allowed)
         self.assertNotIn("--resume", args)
 
     def test_resume_appended(self) -> None:
