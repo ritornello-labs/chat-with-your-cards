@@ -139,6 +139,37 @@ class SourceExtractionTests(unittest.TestCase):
         self.assertIn("https://example.com/spec", uris)  # trailing dot stripped
         self.assertFalse(any(u.startswith("data:") for u in uris))
 
+    def test_page_fragment_becomes_meta(self) -> None:
+        from chat_with_your_cards.tools.media import extract_sources
+
+        sources = extract_sources(
+            {"Extra": '<a href="file:///books/analysis.pdf#page=212">p.212</a>'}
+        )
+        self.assertEqual(1, len(sources))
+        self.assertEqual({"page": 212}, sources[0]["meta"])
+        self.assertEqual("pdf", sources[0]["kind"])
+
+    def test_data_source_json_metadata(self) -> None:
+        from chat_with_your_cards.tools.media import extract_sources
+
+        field = (
+            "<a href=\"file:///books/tao.epub\" "
+            "data-source='{\"chapter\": \"7 Limits\", \"section\": \"7.2\"}'>"
+            "Tao, ch.7</a>"
+        )
+        sources = extract_sources({"Extra": field})
+        self.assertEqual(1, len(sources))
+        self.assertEqual("7 Limits", sources[0]["meta"]["chapter"])
+        self.assertEqual("ebook", sources[0]["kind"])
+
+    def test_malformed_data_source_ignored(self) -> None:
+        from chat_with_your_cards.tools.media import extract_sources
+
+        field = "<a href=\"https://x.example\" data-source='{broken'>x</a>"
+        sources = extract_sources({"Extra": field})
+        self.assertEqual(1, len(sources))
+        self.assertNotIn("meta", sources[0])
+
     def test_field_restriction(self) -> None:
         from chat_with_your_cards.tools.media import extract_sources
 

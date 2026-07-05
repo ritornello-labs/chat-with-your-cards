@@ -13,6 +13,7 @@ scope here.
 from __future__ import annotations
 
 import base64
+import json
 import os
 import re
 from typing import Any
@@ -93,35 +94,77 @@ def get_card_images(ctx: ToolContext, args: dict[str, Any]) -> list[dict[str, An
     return [{"type": "text", "text": header}, *blocks]
 
 
+_ANCHOR_RE = re.compile(r"<a\b[^>]*>", re.IGNORECASE)
+_HREF_RE = re.compile(r"""href=["']([^"']+)["']""", re.IGNORECASE)
+_DATA_SOURCE_RE = re.compile(r"""data-source=(?:'({[^']*})'|"({[^"]*})")""", re.IGNORECASE)
 _URI_RE = re.compile(
-    r"""(?:href=["']([^"']+)["'])|((?:https?|file)://[^\s"'<>]+)|(/[^\s"'<>]*?\.pdf\b)""",
+    r"""(?:href=["']([^"']+)["'])|((?:https?|file)://[^\s"'<>]+)|(/[^\s"'<>]*?\.(?:pdf|epub)\b)""",
     re.IGNORECASE,
 )
+_PAGE_FRAGMENT_RE = re.compile(r"#page=(\d+)", re.IGNORECASE)
+
+
+def _source_kind(uri: str) -> str:
+    lowered = uri.lower().split("#", 1)[0]
+    if lowered.endswith(".pdf"):
+        return "pdf" if (uri.startswith("/") or lowered.startswith("file://")) else "pdf-url"
+    if lowered.endswith((".epub", ".mobi", ".azw3")):
+        return "ebook"
+    if lowered.startswith("file://") or uri.startswith("/"):
+        return "file"
+    return "web"
 
 
 def extract_sources(
     fields: dict[str, str], allowed_fields: list[str] | None = None
-) -> list[dict[str, str]]:
-    """Source references in a note's fields (user decision 2026-07-05):
-    any URI is a potential source; an optional per-note-type field
-    restriction narrows where we look, default is all fields."""
+) -> list[dict[str, Any]]:
+    """Source references in a note's fields (user decisions 2026-07-05).
+
+    Any URI is a potential source; an optional per-note-type field
+    restriction narrows where we look (default: all fields). Position
+    metadata rides along two ways:
+    - a standard `#page=N` URI fragment -> meta {"page": N}
+    - a `data-source='{...json...}'` attribute on the anchor (page,
+      chapter, section, quote, ...) -> merged into meta verbatim
+    """
     seen: set[str] = set()
-    out: list[dict[str, str]] = []
+    out: list[dict[str, Any]] = []
+
+    def add(name: str, uri: str, meta: dict[str, Any]) -> None:
+        uri = uri.strip().rstrip(".,;:)")
+        if not uri or uri in seen or uri.lower().startswith("data:"):
+            return
+        fragment = _PAGE_FRAGMENT_RE.search(uri)
+        if fragment and "page" not in meta:
+            meta["page"] = int(fragment.group(1))
+        seen.add(uri)
+        entry: dict[str, Any] = {"uri": uri, "field": name, "kind": _source_kind(uri)}
+        if meta:
+            entry["meta"] = meta
+        out.append(entry)
+
     for name, value in fields.items():
         if allowed_fields and name not in allowed_fields:
             continue
+        # Anchors first: they may carry data-source position metadata.
+        for tag in _ANCHOR_RE.findall(value):
+            href = _HREF_RE.search(tag)
+            if not href:
+                continue
+            meta: dict[str, Any] = {}
+            data = _DATA_SOURCE_RE.search(tag)
+            if data:
+                try:
+                    parsed = json.loads(data.group(1) or data.group(2))
+                    if isinstance(parsed, dict):
+                        meta.update(parsed)
+                except ValueError:
+                    pass
+            add(name, href.group(1), meta)
+        # Then bare URLs / file paths outside anchors.
         for match in _URI_RE.finditer(value):
             uri = next(g for g in match.groups() if g)
-            uri = uri.strip().rstrip(".,;:)")
-            if uri in seen or uri.lower().startswith("data:"):
-                continue
-            seen.add(uri)
-            kind = "web"
-            if uri.lower().startswith("file://") or uri.startswith("/"):
-                kind = "pdf" if uri.lower().endswith(".pdf") else "file"
-            elif uri.lower().endswith(".pdf"):
-                kind = "pdf-url"
-            out.append({"uri": uri, "field": name, "kind": kind})
+            add(name, uri, {})
     return out
 
 
@@ -138,9 +181,10 @@ def get_card_sources(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     return {
         "note_id": note.id,
         "sources": sources,
-        "note": "Open web sources with WebFetch; open local files (PDFs "
-        "included) with the Read tool. A renamed/moved local file simply "
-        "won't resolve - report that rather than guessing.",
+        "note": "Open web sources with WebFetch; local PDFs with the Read "
+        "tool (use meta.page to jump straight to the right pages); EPUBs "
+        "with read_epub. A renamed/moved local file simply won't resolve - "
+        "report that rather than guessing.",
     }
 
 

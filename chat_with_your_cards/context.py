@@ -118,9 +118,14 @@ def build_system_prompt(
         "without asking. When looking for related material, prefer "
         "find_related first, then refine with search_notes. Cards may record "
         "where they came from as URIs in their fields: get_card_sources "
-        "finds them; open web sources with WebFetch and local files (PDFs) "
-        "with Read - useful for grounding explanations and proposing more "
-        "cards from the same source.",
+        "finds them (with position metadata when present); open web sources "
+        "with WebFetch, local PDFs with Read (jump to meta.page), EPUBs with "
+        "read_epub - useful for grounding explanations and proposing more "
+        "cards from the same source. When YOU create a card from a source, "
+        "record it richly in the source field as an anchor: "
+        "<a href=\"URI#page=N\" data-source='{\"chapter\": \"...\", "
+        "\"section\": \"...\"}'>readable title, p.N</a> - future sessions "
+        "then jump straight to the right spot.",
         "",
         "When a <current-card> block is present in a message, that is the "
         "card the user is looking at right now; treat it as the default "

@@ -265,6 +265,10 @@
             } else if (msg.type === "toggle_float") {
                 window.__floating = !window.__floating;
                 window.chatUI.dispatch({ type: "dock_state", floating: window.__floating });
+            } else if (msg.type === "tool_approval_response") {
+                window.chatUI.dispatch({ type: "tool_approval_resolved", id: msg.id, allow: msg.allow });
+            } else if (msg.type === "open_in_claude") {
+                window.chatUI.dispatch({ type: "notice", text: "would open in " + msg.target });
             } else if (msg.type === "run_doctor") {
                 window.chatUI.dispatch({ type: "doctor", results: [
                     { label: "Claude Code", status: "ok", detail: "2.1.197 — /Users/x/.local/bin/claude" },
@@ -293,7 +297,12 @@
                 window.chatUI.dispatch({ type: "agent", backend: "claude", model: msg.model, effort: msg.effort, mode: "default" });
             } else if (msg.type === "send") {
                 var text = (msg.text || "").toLowerCase();
-                if (text.indexOf("bulk") !== -1) { proposeBulk(); }
+                if (text.indexOf("approval") !== -1) {
+                    dispatchLater(200, { type: "tool_approval", id: "ap1",
+                        tool: "mcp__anki__search_notes", summary: '{"query":"deck:current"}' });
+                    dispatchLater(400, { type: "done" });
+                }
+                else if (text.indexOf("bulk") !== -1) { proposeBulk(); }
                 else if (text.indexOf("sweep") !== -1 || text.indexOf("change set") !== -1) { proposeChangeSet(); }
                 else if (text.indexOf("shorter") !== -1 || text.indexOf("revise") !== -1 || text.indexOf("please") !== -1) { proposeRevision(); }
                 else if (text.indexOf("edit") !== -1) { proposeEdit(); }

@@ -277,7 +277,13 @@ class ChatController:
         label = names.get(model, model)
         return f"{label} · {effort} effort" if effort else label
 
-    VALID_MODES = ("default", "read-only", "auto-accept", "trusted-writes")
+    VALID_MODES = (
+        "default",
+        "ask-each-read",
+        "read-only",
+        "auto-accept",
+        "trusted-writes",
+    )
 
     def set_permission_mode(self, mode: str) -> None:
         """Runtime mode switch (chip / Shift+Tab). Gating is enforced live at

@@ -55,6 +55,7 @@ class AddonState:
     mcp: Optional[McpServer] = None
     proposals: Optional[ProposalManager] = None
     transcripts: Any = None
+    approvals: Any = None
     shortcuts: list[Any] = field(default_factory=list)
     web_ready: bool = False
     config: dict[str, Any] = field(default_factory=dict)
@@ -195,6 +196,15 @@ def _ensure_mcp() -> tuple[str, str]:
 
         specs_by_name = {spec.name: spec for spec in registry.specs(include_trusted=True)}
 
+        from .approvals import ApprovalBroker
+
+        def push_on_main(payload: dict[str, Any]) -> None:
+            mw.taskman.run_on_main(
+                lambda: state.dock.bridge.push(payload) if state.dock else None
+            )
+
+        state.approvals = ApprovalBroker(push_on_main)
+
         def execute_tool(name: str, args: dict[str, Any]) -> Any:
             # The MCP server is the security boundary: enforce the LIVE
             # permission mode here, not just in what tools are advertised.
@@ -210,6 +220,18 @@ def _ensure_mcp() -> tuple[str, str]:
                 raise PermissionError(
                     f"{name} is only available in trusted-writes mode"
                 )
+            if (
+                spec is not None
+                and not spec.writes
+                and live_mode == "ask-each-read"
+            ):
+                # Blocks this MCP thread on the inline Allow/Deny chip.
+                # Writes are not double-gated: proposals review them anyway.
+                import json as _json
+
+                summary = _json.dumps(args, ensure_ascii=False)[:120]
+                if not state.approvals.request(name, summary):
+                    raise PermissionError(f"the user declined this {name} call")
             box: dict[str, Any] = {}
             done = threading.Event()
 
@@ -295,10 +317,17 @@ def _wire_bridge() -> None:
     bridge.on("undo_session", lambda _msg: proposals.undo_session())
     bridge.on("set_pins", lambda msg: proposals.set_pins(msg.get("pins") or {}))
     bridge.on("open_session_browser", lambda _msg: _open_session_browser())
-    bridge.on("open_in_claude", lambda _msg: _open_in_claude_code())
+    bridge.on(
+        "open_in_claude",
+        lambda msg: _open_in_claude_code(str(msg.get("target", "terminal"))),
+    )
     bridge.on("list_history", lambda _msg: controller.push_history_list())
     bridge.on("load_history", lambda msg: controller.load_history(str(msg.get("id", ""))))
     bridge.on("run_doctor", lambda _msg: _run_doctor())
+    bridge.on(
+        "tool_approval_response",
+        lambda msg: state.approvals.respond(msg) if state.approvals else None,
+    )
     bridge.on("set_agent", _set_agent)
     bridge.on("set_permission_mode", _set_permission_mode)
     bridge.on("toggle_float", lambda _msg: state.dock.toggle_float() if state.dock else None)
@@ -442,24 +471,68 @@ def _run_doctor() -> None:
     mw.taskman.run_in_background(work, done)
 
 
-def _open_in_claude_code() -> None:
-    """Hand this chat to a full-power terminal Claude Code: same session id
-    (--resume), same cwd (agent-home, which carries .mcp.json for our anki
-    tools and the skills dir). The terminal instance runs with Claude Code's
-    normal defaults, so the user gets Bash/files/etc. there by choice."""
+def _open_in_claude_code(target: str = "terminal") -> None:
+    """Hand this chat to a full-power Claude Code.
+
+    Terminal: same session id via --resume, same cwd (agent-home carries
+    .mcp.json for our anki tools plus the skills dir).
+    GUI (desktop app): the claude://code/new deep link cannot resume a
+    session by id (not supported upstream yet), so we open a NEW desktop
+    session in agent-home with a prompt pointing at our transcript file -
+    the agent reads it and picks the conversation up from there.
+    """
     import shlex
     import subprocess
     import sys as _sys
+    import urllib.parse
 
     agent_home = USER_FILES / "agent-home"
     sid = state.controller.backend_session_id if state.controller else None
-    cmd = f"cd {shlex.quote(str(agent_home))} && claude"
-    if sid:
-        cmd += f" --resume {shlex.quote(str(sid))}"
 
     def notice(text: str) -> None:
         if state.dock is not None:
             state.dock.bridge.push({"type": "notice", "text": text})
+
+    if target == "gui":
+        prompt = (
+            "This continues an Anki chat from the Chat With Your Cards "
+            "add-on (the anki MCP tools are configured in this folder)."
+        )
+        if state.transcripts is not None:
+            state.transcripts.flush()
+            transcript = (
+                USER_FILES / "transcripts" / f"{state.transcripts.current_id}.json"
+            )
+            if transcript.exists():
+                prompt += (
+                    f" Read the conversation so far at {transcript} before "
+                    "responding, then continue helping."
+                )
+        url = (
+            "claude://code/new?folder="
+            + urllib.parse.quote(str(agent_home), safe="")
+            + "&q="
+            + urllib.parse.quote(prompt, safe="")
+        )
+        try:
+            if _sys.platform == "darwin":
+                subprocess.run(["open", url], check=True, timeout=10)
+            else:
+                import webbrowser
+
+                webbrowser.open(url)
+            notice(
+                "Opened in the Claude Code desktop app (new session - the "
+                "app can't resume by id yet, so it reads this chat's "
+                "transcript instead)."
+            )
+        except Exception:
+            notice(f"Could not open the desktop app; deep link: {url}")
+        return
+
+    cmd = f"cd {shlex.quote(str(agent_home))} && claude"
+    if sid:
+        cmd += f" --resume {shlex.quote(str(sid))}"
 
     if _sys.platform == "darwin":
         script = cmd.replace("\\", "\\\\").replace('"', '\\"')
@@ -519,6 +592,8 @@ def _open_session_browser() -> None:
 
 
 def _teardown() -> None:
+    if state.approvals is not None:
+        state.approvals.deny_all()
     if state.controller is not None:
         state.controller.shutdown()
     if state.mcp is not None:

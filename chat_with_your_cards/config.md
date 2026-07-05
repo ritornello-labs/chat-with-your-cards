@@ -40,7 +40,9 @@
   pasted key.
 - `permission_mode` (default `default`): `default` allows collection reads without
   asking and gates all writes behind proposal cards; `read-only` removes the
-  write tools entirely; `auto-accept` applies the assistant's note *creations*
+  write tools entirely; `ask-each-read` additionally shows an inline
+  Allow/Deny chip for every collection read (for chats about untrusted
+  shared decks) - denials and 120s timeouts refuse the call; `auto-accept` applies the assistant's note *creations*
   immediately (up to `auto_accept_cap` per session) while edits stay behind
   proposals; `trusted-writes` applies creations, edits, bulk operations, and
   change sets directly (an Anki backup checkpoint is forced before bulk

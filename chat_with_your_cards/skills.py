@@ -75,7 +75,11 @@ yours to change, and the assistant treats it as the house rules.
 - Sweeps across many notes: open_change_set / add_to_change_set /
   close_change_set so the user reviews one batch, not fifty cards.
 - If a card has sources (URIs in fields - get_card_sources), ground your
-  edits in the source rather than guessing.
+  edits in the source rather than guessing: WebFetch for pages, Read for
+  local PDFs (meta.page jumps you to the spot), read_epub for books.
+- When creating a card FROM a source, record the source richly:
+  <a href="URI#page=N" data-source='{"chapter": "...", "section": "..."}'>
+  readable title, p.N</a> in the source/extra field.
 """
 
 

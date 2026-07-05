@@ -1211,9 +1211,10 @@
 
     /* ---- permission mode chip ---- */
 
-    var MODES = ["default", "read-only", "auto-accept", "trusted-writes"];
+    var MODES = ["default", "ask-each-read", "read-only", "auto-accept", "trusted-writes"];
     var MODE_LABELS = {
         "default": "Propose",
+        "ask-each-read": "Ask reads",
         "read-only": "Read-only",
         "auto-accept": "Auto-accept",
         "trusted-writes": "Trusted",
@@ -1306,6 +1307,50 @@
         autosizeInput();
         input.setSelectionRange(input.value.length, input.value.length);
         return true;
+    }
+
+    /* ---- ask-each-read approval chips ---- */
+
+    var approvalChips = {}; // id -> element
+
+    function renderApprovalRequest(payload) {
+        breakAssistantBlock();
+        var chip = el("div", "cwyc-approval");
+        var label = friendlyTool(payload.tool) || payload.tool;
+        chip.appendChild(el("span", "cwyc-approval-label", label));
+        if (payload.summary) {
+            chip.appendChild(el("span", "cwyc-approval-summary", toolHint(payload.summary)));
+        }
+        var deny = el("button", "cwyc-approval-deny", "Deny");
+        deny.type = "button";
+        var allow = el("button", "cwyc-approval-allow cwyc-primary", "Allow");
+        allow.type = "button";
+        function answer(ok) {
+            post({ type: "tool_approval_response", id: payload.id, allow: ok });
+        }
+        deny.addEventListener("click", function () { answer(false); });
+        allow.addEventListener("click", function () { answer(true); });
+        chip.appendChild(deny);
+        chip.appendChild(allow);
+        var row = el("div", "cwyc-row cwyc-row-tool");
+        row.appendChild(chip);
+        transcript.appendChild(row);
+        approvalChips[payload.id] = chip;
+        scrollToBottomIfPinned();
+    }
+
+    function resolveApproval(payload) {
+        var chip = approvalChips[payload.id];
+        if (!chip) {
+            return;
+        }
+        chip.querySelectorAll("button").forEach(function (b) { b.remove(); });
+        chip.classList.add(payload.allow ? "cwyc-approval-ok" : "cwyc-approval-no");
+        chip.appendChild(
+            el("span", "cwyc-approval-result",
+                payload.allow ? "allowed" : payload.reason === "timed out" ? "timed out" : "denied")
+        );
+        delete approvalChips[payload.id];
     }
 
     /* ---- doctor panel ---- */
@@ -1485,6 +1530,12 @@
             case "usage":
                 renderUsage(payload);
                 break;
+            case "tool_approval":
+                renderApprovalRequest(payload);
+                break;
+            case "tool_approval_resolved":
+                resolveApproval(payload);
+                break;
             case "doctor":
                 renderDoctor(payload.results);
                 break;
@@ -1573,8 +1624,21 @@
             post({ type: "toggle_float" });
         });
         document.getElementById("cwyc-mode-chip").addEventListener("click", cycleMode);
-        document.getElementById("cwyc-open-cc").addEventListener("click", function () {
-            post({ type: "open_in_claude" });
+        var openMenu = document.getElementById("cwyc-open-cc-menu");
+        document.getElementById("cwyc-open-cc").addEventListener("click", function (event) {
+            event.stopPropagation();
+            openMenu.hidden = !openMenu.hidden;
+        });
+        document.getElementById("cwyc-open-cc-gui").addEventListener("click", function () {
+            openMenu.hidden = true;
+            post({ type: "open_in_claude", target: "gui" });
+        });
+        document.getElementById("cwyc-open-cc-term").addEventListener("click", function () {
+            openMenu.hidden = true;
+            post({ type: "open_in_claude", target: "terminal" });
+        });
+        document.addEventListener("click", function () {
+            openMenu.hidden = true;
         });
         var doctorPanel = document.getElementById("cwyc-doctor-panel");
         var historyPanel = document.getElementById("cwyc-history-panel");
