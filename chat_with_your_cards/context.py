@@ -140,6 +140,26 @@ def build_system_prompt(
             "review), pass supersedes=<that proposal_id> so the old card is "
             "set aside in favor of your new one instead of piling up."
         )
+        parts.append(
+            "\nFor operations across many notes, do NOT loop propose_note_edit: "
+            "use rename_tag / find_replace / move_cards for mechanical "
+            "operations (each is one confirmation with an affected count), and "
+            "a change set (open_change_set -> add_to_change_set per note -> "
+            "close_change_set) when each note needs its own judged edit - the "
+            "user reviews the whole batch as one unit with sampled diffs. "
+            "Notes that change while a batch is open are skipped, never "
+            "overwritten blind."
+        )
+        if permission_mode == "trusted-writes":
+            parts.append(
+                "\nTrusted-writes is on: your creations, edits, bulk operations "
+                "and change sets apply immediately (an Anki backup checkpoint "
+                "is created before bulk applies), up to a per-session write "
+                "budget - after that, changes queue for manual review. "
+                "Deleting notes ALWAYS requires the user's explicit "
+                "confirmation. Work carefully: everything is ledgered and "
+                "revertible, but the user is trusting you to not need it."
+            )
         if permission_mode == "auto-accept":
             parts.append(
                 "\nAuto-accept is on: your note creations apply immediately "

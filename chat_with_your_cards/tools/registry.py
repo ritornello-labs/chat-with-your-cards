@@ -34,6 +34,7 @@ class ToolSpec:
     input_schema: dict[str, Any]
     func: ToolFunc
     writes: bool = False
+    trusted_only: bool = False  # advertised only in trusted-writes mode
 
 
 class ToolRegistry:
@@ -45,11 +46,14 @@ class ToolRegistry:
             raise ValueError(f"duplicate tool: {spec.name}")
         self._specs[spec.name] = spec
 
-    def specs(self, *, include_writes: bool = True) -> list[ToolSpec]:
+    def specs(
+        self, *, include_writes: bool = True, include_trusted: bool = False
+    ) -> list[ToolSpec]:
         return [
             spec
             for spec in self._specs.values()
-            if include_writes or not spec.writes
+            if (include_writes or not spec.writes)
+            and (include_trusted or not spec.trusted_only)
         ]
 
     def call(self, ctx: ToolContext, name: str, args: dict[str, Any]) -> Any:

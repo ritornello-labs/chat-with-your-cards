@@ -30,6 +30,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "stats_refresh_minutes": 30,
     "context_token_budget": 8000,
     "auto_accept_cap": 20,
+    "write_budget": 200,
     "conventions_prompt": "",
     "created_tag": "ai-created",
     "edited_tag": "ai-edited",
@@ -99,6 +100,7 @@ def _setup() -> None:
         config=config,
         save_pins=_save_pins,
         after_write=_refresh_reviewer,
+        checkpoint=_backup_checkpoint,
     )
 
     conventions = load_conventions(USER_FILES, str(config.get("conventions_prompt", "")))
@@ -149,7 +151,9 @@ def _ensure_mcp() -> tuple[str, str]:
 
         registry = build_registry()
         ctx = _ToolCtx()
-        read_only = state.config.get("permission_mode") == "read-only"
+        mode = str(state.config.get("permission_mode", "default"))
+        read_only = mode == "read-only"
+        trusted = mode == "trusted-writes"
 
         def execute_tool(name: str, args: dict[str, Any]) -> Any:
             box: dict[str, Any] = {}
@@ -174,7 +178,7 @@ def _ensure_mcp() -> tuple[str, str]:
 
         state.mcp = McpServer(
             tool_specs=tool_specs_for_mcp(
-                registry.specs(include_writes=not read_only)
+                registry.specs(include_writes=not read_only, include_trusted=trusted)
             ),
             execute_tool=execute_tool,
         )
@@ -264,6 +268,20 @@ def _save_pins(pins: dict[str, Any]) -> None:
     config = mw.addonManager.getConfig(__name__) or {}
     config["pins"] = pins
     mw.addonManager.writeConfig(__name__, config)
+
+
+def _backup_checkpoint(reason: str) -> None:
+    """Force an Anki backup before bulk/delete/change-set applies, so even
+    non-ledger-revertible operations have a way back."""
+    if mw is None or mw.col is None:
+        return
+    try:
+        mw.col.create_backup(
+            backup_folder=mw.pm.backupFolder(), force=True, wait_for_completion=False
+        )
+    except Exception:
+        # Backups are defense-in-depth; their failure must not block the op.
+        pass
 
 
 def _refresh_reviewer(note_ids: list[int]) -> None:

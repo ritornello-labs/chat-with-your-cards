@@ -186,6 +186,58 @@
             });
             dispatchLater(step(200), { type: "done" });
         }
+        function proposeBulk() {
+            var t = 0;
+            var step = function (ms) { t += ms; return t; };
+            emitProposal(step(200), {
+                id: "b1", kind: "bulk", op: "rename_tag",
+                op_args: { old_tag: "todo", new_tag: "review-later" },
+                status: "pending", note_type: "", deck: "", tags: [],
+                fields: [], add_tags: [], remove_tags: [], items: [], open: false,
+                rationale: "Consolidates the todo tag into your naming scheme.",
+                count: 1243, samples: [{ text: "todo → review-later" }],
+                warnings: [], previews: null, note_id: null, title: "",
+            });
+            emitProposal(step(200), {
+                id: "d1", kind: "delete", op: "", op_args: { note_ids: [1, 2, 3] },
+                status: "pending", note_type: "", deck: "", tags: [],
+                fields: [], add_tags: [], remove_tags: [], items: [], open: false,
+                rationale: "These three notes duplicate the new cloze cards.",
+                count: 3,
+                samples: [{ text: "What is a limit?" }, { text: "Define limit (dup)" }],
+                warnings: ["Deleting notes cannot be undone from the chat ledger. A backup checkpoint is created first."],
+                previews: null, note_id: null, title: "",
+            });
+            dispatchLater(step(150), { type: "done" });
+        }
+        function proposeChangeSet() {
+            var t = 0;
+            var step = function (ms) { t += ms; return t; };
+            var cs = {
+                id: "cs1", kind: "change_set", op: "", op_args: {},
+                status: "pending", note_type: "", deck: "", tags: [],
+                fields: [], add_tags: [], remove_tags: [], open: true,
+                rationale: "Normalizing pinyin tone marks across the deck.",
+                count: 0, samples: [], items: [], previews: null, note_id: null,
+                title: "Fix pinyin tone marks",
+            };
+            emitProposal(step(200), cs);
+            dispatchLater(step(700), { type: "proposal", proposal: Object.assign({}, cs, { count: 2, items: [
+                { note_id: 11, label: "niao niao", fields: ["Pinyin"] },
+                { note_id: 12, label: "ma shang", fields: ["Pinyin"] },
+            ] }) });
+            dispatchLater(step(900), { type: "proposal", proposal: Object.assign({}, cs, {
+                open: false, count: 214,
+                samples: [
+                    { label: "niao niao", old: "niao3 niao3", new: "niǎo niǎo" },
+                    { label: "ma shang", old: "ma3 shang4", new: "mǎ shàng" },
+                ],
+                items: Array.from({length: 214}, function (_, i) {
+                    return { note_id: 100 + i, label: "note " + (100 + i), fields: ["Pinyin"] };
+                }),
+            }) });
+            dispatchLater(step(150), { type: "done" });
+        }
         function pushLedger() {
             window.chatUI.dispatch({
                 type: "ledger",
@@ -216,7 +268,9 @@
                 window.chatUI.dispatch({ type: "agent", backend: "claude", model: msg.model, effort: msg.effort });
             } else if (msg.type === "send") {
                 var text = (msg.text || "").toLowerCase();
-                if (text.indexOf("shorter") !== -1 || text.indexOf("revise") !== -1 || text.indexOf("please") !== -1) { proposeRevision(); }
+                if (text.indexOf("bulk") !== -1) { proposeBulk(); }
+                else if (text.indexOf("sweep") !== -1 || text.indexOf("change set") !== -1) { proposeChangeSet(); }
+                else if (text.indexOf("shorter") !== -1 || text.indexOf("revise") !== -1 || text.indexOf("please") !== -1) { proposeRevision(); }
                 else if (text.indexOf("edit") !== -1) { proposeEdit(); }
                 else if (text.indexOf("propose") !== -1 || text.indexOf("note") !== -1) { proposeCreate(); }
                 else { replyStream(); }

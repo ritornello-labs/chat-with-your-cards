@@ -21,13 +21,18 @@
   re-invoked with `--resume` on your next message. Your choice is remembered
   across chats and restarts; the CLI default only applies until you first pick.
 - `permission_mode` (default `default`): `default` allows collection reads without
-  asking and gates note creation/editing behind proposal cards; `read-only`
-  removes the write tools entirely; `auto-accept` applies the assistant's note
-  *creations* immediately (tagged `ai-created`, up to `auto_accept_cap` per
-  session) while edits stay behind proposals.
+  asking and gates all writes behind proposal cards; `read-only` removes the
+  write tools entirely; `auto-accept` applies the assistant's note *creations*
+  immediately (up to `auto_accept_cap` per session) while edits stay behind
+  proposals; `trusted-writes` applies creations, edits, bulk operations, and
+  change sets directly (an Anki backup checkpoint is forced before bulk
+  applies) up to `write_budget` notes per session — after that everything
+  falls back to manual review. Deleting notes always asks, in every mode.
 - `auto_accept_cap` (default `20`): in `auto-accept` mode, how many notes may be
   created without review per chat session before proposals pause for manual
   review again.
+- `write_budget` (default `200`): in `trusted-writes` mode, how many notes the
+  assistant may write directly per chat session before pausing for review.
 - `conventions_prompt` (default empty): your note-authoring conventions (style,
   field usage, tagging). Injected into the assistant's instructions for every
   proposal and materialized as `user_files/skills/note-conventions/SKILL.md`.

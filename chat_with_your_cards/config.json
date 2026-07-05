@@ -10,6 +10,7 @@
     "stats_refresh_minutes": 30,
     "context_token_budget": 8000,
     "auto_accept_cap": 20,
+    "write_budget": 200,
     "conventions_prompt": "",
     "created_tag": "ai-created",
     "edited_tag": "ai-edited",

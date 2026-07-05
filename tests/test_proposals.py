@@ -24,10 +24,12 @@ BASIC = {"name": "Basic", "flds": [{"name": "Front"}, {"name": "Back"}], "css": 
 
 
 class FakeCard:
-    def __init__(self, did: int = 1, ord_: int = 0, reps: int = 0) -> None:
+    def __init__(self, did: int = 1, ord_: int = 0, reps: int = 0, cid: int = 0) -> None:
         self.did = did
         self.ord = ord_
         self.reps = reps
+        self.id = cid
+        self.nid = 0
 
 
 class FakeNote:
@@ -93,11 +95,23 @@ class FakeDecks:
         return ""
 
 
+class FakeTags:
+    def __init__(self, col: "FakeCol") -> None:
+        self._col = col
+
+    def rename(self, old: str, new: str) -> None:
+        for note in self._col._notes.values():
+            if old in note.tags:
+                note.tags = [new if t == old else t for t in note.tags]
+
+
 class FakeCol:
     def __init__(self) -> None:
         self.models = FakeModels([BASIC])
         self.decks = FakeDecks(["Default"])
+        self.tags = FakeTags(self)
         self._notes: dict[int, FakeNote] = {}
+        self._cards: dict[int, FakeCard] = {}
         self._next_id = 100
 
     def new_note(self, model: dict[str, Any]) -> FakeNote:
@@ -105,9 +119,32 @@ class FakeCol:
 
     def add_note(self, note: FakeNote, deck_id: int) -> None:
         note.id = self._next_id
-        note._cards = [FakeCard(did=deck_id)]
+        card = FakeCard(did=deck_id, cid=self._next_id * 10)
+        card.nid = note.id
+        note._cards = [card]
+        self._cards[card.id] = card
         self._next_id += 1
         self._notes[note.id] = note
+
+    def note_count(self) -> int:
+        return len(self._notes)
+
+    def card_count(self) -> int:
+        return len(self._cards)
+
+    def find_cards(self, query: str) -> list[int]:
+        # Supports the deck:"X" shape used by move_cards tests.
+        if query.startswith('deck:"') and query.endswith('"'):
+            did = self.decks.id(query[6:-1])
+            return [cid for cid, c in self._cards.items() if c.did == did]
+        return list(self._cards)
+
+    def get_card(self, card_id: int) -> FakeCard:
+        return self._cards[card_id]
+
+    def set_deck(self, card_ids: list[int], deck_id: int) -> None:
+        for cid in card_ids:
+            self._cards[cid].did = deck_id
 
     def get_note(self, note_id: int) -> FakeNote:
         # Like real Anki: a fresh Note object per call (cards stay shared so
@@ -128,13 +165,24 @@ class FakeCol:
 
     def remove_notes(self, note_ids: list[int]) -> None:
         for nid in note_ids:
+            for card in self._notes[nid]._cards:
+                self._cards.pop(card.id, None)
             del self._notes[nid]
 
     def find_notes(self, query: str) -> list[int]:
+        if query.startswith('tag:"') and query.endswith('"'):
+            tag = query[5:-1]
+            return [nid for nid, n in self._notes.items() if tag in n.tags]
+        if query == "deck:*":
+            return list(self._notes)
         return []
 
 
-def make_manager(config: dict[str, Any] | None = None, writes: list | None = None):
+def make_manager(
+    config: dict[str, Any] | None = None,
+    writes: list | None = None,
+    checkpoints: list | None = None,
+):
     col = FakeCol()
     pushed: list[dict[str, Any]] = []
     manager = ProposalManager(
@@ -142,6 +190,7 @@ def make_manager(config: dict[str, Any] | None = None, writes: list | None = Non
         push=pushed.append,
         config=config if config is not None else {},
         after_write=(writes.append if writes is not None else None),
+        checkpoint=(checkpoints.append if checkpoints is not None else None),
     )
     return manager, col, pushed
 
@@ -554,6 +603,237 @@ class AfterWriteTests(unittest.TestCase):
         updates = pushes_of(pushed, "preview_update")
         self.assertEqual(1, len(updates))
         self.assertEqual(result["proposal_id"], updates[0]["id"])
+
+
+def _seed_notes(manager, col, pushed, n=3, tag="analysis"):
+    ids = []
+    for i in range(n):
+        result = manager.submit_create(
+            {**CREATE_ARGS, "fields": {"Front": f"Q{i}?", "Back": f"A{i}."},
+             "tags": [tag]}
+        )
+        if "proposal_id" in result:  # gated mode: accept manually
+            manager.accept({"id": result["proposal_id"]})
+            ids.append(pushes_of(pushed, "proposal_resolved")[-1]["note_id"])
+        else:  # trusted/auto mode: applied directly
+            ids.append(result["note_id"])
+    return ids
+
+
+class BulkOpsTests(unittest.TestCase):
+    def test_rename_tag_accept_and_revert(self) -> None:
+        checkpoints: list = []
+        manager, col, pushed = make_manager(checkpoints=checkpoints)
+        _seed_notes(manager, col, pushed)
+        result = manager.submit_rename_tag(
+            {"old_tag": "analysis", "new_tag": "math"}
+        )
+        self.assertEqual("pending_user_review", result["status"])
+        self.assertEqual(3, result["affected"])
+        manager.accept({"id": result["proposal_id"]})
+        self.assertTrue(checkpoints)  # backup before applying
+        self.assertEqual(3, len(col.find_notes('tag:"math"')))
+        self.assertEqual(0, len(col.find_notes('tag:"analysis"')))
+        manager.revert({"id": result["proposal_id"]})
+        self.assertEqual(3, len(col.find_notes('tag:"analysis"')))
+
+    def test_rename_missing_tag_rejected(self) -> None:
+        manager, _col, _pushed = make_manager()
+        with self.assertRaises(ProposalError):
+            manager.submit_rename_tag({"old_tag": "nope", "new_tag": "x"})
+
+    def test_find_replace_apply_and_revert(self) -> None:
+        manager, col, pushed = make_manager()
+        ids = _seed_notes(manager, col, pushed)
+        result = manager.submit_find_replace(
+            {"search": "Q1", "replacement": "QUESTION-1"}
+        )
+        self.assertEqual(1, result["affected"])
+        payload = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertEqual("bulk", payload["kind"])
+        self.assertTrue(payload["samples"])
+        manager.accept({"id": result["proposal_id"]})
+        self.assertEqual("QUESTION-1?", col.get_note(ids[1])["Front"])
+        manager.revert({"id": result["proposal_id"]})
+        self.assertEqual("Q1?", col.get_note(ids[1])["Front"])
+
+    def test_find_replace_skips_stale_notes(self) -> None:
+        manager, col, pushed = make_manager()
+        ids = _seed_notes(manager, col, pushed)
+        result = manager.submit_find_replace({"search": "A", "replacement": "B"})
+        # One note changes underneath before acceptance.
+        changed = col.get_note(ids[0])
+        changed["Back"] = "mutated"
+        col.update_note(changed)
+        manager.accept({"id": result["proposal_id"]})
+        resolved = pushes_of(pushed, "proposal_resolved")[-1]
+        self.assertTrue(any("skipped" in w for w in resolved.get("warnings", [])))
+        self.assertEqual("mutated", col.get_note(ids[0])["Back"])  # untouched
+        self.assertEqual("B1.", col.get_note(ids[1])["Back"])  # applied
+
+    def test_move_cards_apply_and_revert(self) -> None:
+        manager, col, pushed = make_manager()
+        _seed_notes(manager, col, pushed)
+        result = manager.submit_move_cards(
+            {"query": 'deck:"Default"', "deck": "Archive"}
+        )
+        self.assertEqual(3, result["affected"])
+        manager.accept({"id": result["proposal_id"]})
+        archive_id = col.decks.id("Archive")
+        self.assertEqual(3, len([c for c in col._cards.values() if c.did == archive_id]))
+        manager.revert({"id": result["proposal_id"]})
+        default_id = col.decks.id("Default")
+        self.assertEqual(3, len([c for c in col._cards.values() if c.did == default_id]))
+
+
+class DeleteTests(unittest.TestCase):
+    def test_delete_gated_even_in_trusted_mode(self) -> None:
+        checkpoints: list = []
+        manager, col, pushed = make_manager(
+            {"permission_mode": "trusted-writes"}, checkpoints=checkpoints
+        )
+        ids = _seed_notes(manager, col, pushed)
+        result = manager.submit_delete_notes({"note_ids": ids[:2]})
+        self.assertEqual("pending_user_review", result["status"])
+        self.assertEqual(3, len(col._notes))  # nothing deleted yet
+
+        manager.accept({"id": result["proposal_id"]})
+        self.assertEqual(1, len(col._notes))
+        self.assertTrue(checkpoints)
+        resolved = pushes_of(pushed, "proposal_resolved")[-1]
+        self.assertFalse(resolved["revertible"])
+        # Ledger revert refuses.
+        manager.revert({"id": result["proposal_id"]})
+        self.assertEqual(1, len(col._notes))
+        self.assertTrue(
+            any("backup" in n["text"] for n in pushes_of(pushed, "notice"))
+        )
+
+
+class ChangeSetTests(unittest.TestCase):
+    def _open_with_edits(self, manager, col, pushed, ids):
+        cs = manager.open_change_set({"title": "Tidy answers"})
+        cs_id = cs["change_set_id"]
+        for i, nid in enumerate(ids):
+            manager.add_to_change_set(
+                {
+                    "change_set_id": cs_id,
+                    "note_id": nid,
+                    "field_changes": {"Back": f"tidy {i}"},
+                }
+            )
+        return cs_id
+
+    def test_full_flow_apply_and_revert(self) -> None:
+        checkpoints: list = []
+        manager, col, pushed = make_manager(checkpoints=checkpoints)
+        ids = _seed_notes(manager, col, pushed)
+        cs_id = self._open_with_edits(manager, col, pushed, ids)
+
+        # Accept while still open is refused.
+        manager.accept({"id": cs_id})
+        self.assertTrue(pushes_of(pushed, "proposal_error"))
+
+        result = manager.close_change_set({"change_set_id": cs_id, "summary": "s"})
+        self.assertEqual("pending_user_review", result["status"])
+        payload = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertEqual("change_set", payload["kind"])
+        self.assertFalse(payload["open"])
+        self.assertEqual(3, payload["count"])
+        self.assertTrue(payload["samples"])
+
+        manager.accept({"id": cs_id})
+        self.assertTrue(checkpoints)
+        for i, nid in enumerate(ids):
+            self.assertEqual(f"tidy {i}", col.get_note(nid)["Back"])
+        entries = pushes_of(pushed, "ledger")[-1]["entries"]
+        self.assertEqual(1, len([e for e in entries if e["kind"] == "change_set"]))
+
+        manager.revert({"id": cs_id})
+        for i, nid in enumerate(ids):
+            self.assertEqual(f"A{i}.", col.get_note(nid)["Back"])
+
+    def test_stale_item_skipped_and_reported(self) -> None:
+        manager, col, pushed = make_manager()
+        ids = _seed_notes(manager, col, pushed)
+        cs_id = self._open_with_edits(manager, col, pushed, ids)
+        manager.close_change_set({"change_set_id": cs_id})
+        mutated = col.get_note(ids[0])
+        mutated["Back"] = "user edit"
+        col.update_note(mutated)
+        manager.accept({"id": cs_id})
+        resolved = pushes_of(pushed, "proposal_resolved")[-1]
+        self.assertTrue(any("skipped" in w for w in resolved["warnings"]))
+        self.assertEqual("user edit", col.get_note(ids[0])["Back"])
+        self.assertEqual("tidy 1", col.get_note(ids[1])["Back"])
+
+    def test_empty_close_discards(self) -> None:
+        manager, _col, pushed = make_manager()
+        cs = manager.open_change_set({"title": "empty"})
+        result = manager.close_change_set({"change_set_id": cs["change_set_id"]})
+        self.assertEqual("discarded", result["status"])
+
+
+class TrustedWritesTests(unittest.TestCase):
+    def test_create_and_edit_apply_directly(self) -> None:
+        manager, col, pushed = make_manager({"permission_mode": "trusted-writes"})
+        result = manager.submit_create(dict(CREATE_ARGS))
+        self.assertEqual("created", result["status"])
+        nid = result["note_id"]
+        self.assertIn(nid, col._notes)
+
+        edit = manager.submit_edit(
+            {"note_id": nid, "field_changes": {"Front": "direct"}}
+        )
+        self.assertEqual("applied", edit["status"])
+        self.assertEqual("direct", col.get_note(nid)["Front"])
+
+    def test_bulk_applies_directly_with_checkpoint(self) -> None:
+        checkpoints: list = []
+        manager, col, pushed = make_manager(
+            {"permission_mode": "trusted-writes"}, checkpoints=checkpoints
+        )
+        _seed_notes(manager, col, pushed)
+        result = manager.submit_rename_tag({"old_tag": "analysis", "new_tag": "x"})
+        self.assertEqual("applied", result["status"])
+        self.assertEqual(3, len(col.find_notes('tag:"x"')))
+        self.assertTrue(checkpoints)
+
+    def test_budget_pauses_to_gated_proposals(self) -> None:
+        manager, col, pushed = make_manager(
+            {"permission_mode": "trusted-writes", "write_budget": 4}
+        )
+        ids = _seed_notes(manager, col, pushed)  # 3 writes consumed
+        edit1 = manager.submit_edit(
+            {"note_id": ids[0], "field_changes": {"Front": "e1"}}
+        )
+        self.assertEqual("applied", edit1["status"])  # 4th write fits
+        edit2 = manager.submit_edit(
+            {"note_id": ids[1], "field_changes": {"Front": "e2"}}
+        )
+        self.assertEqual("pending_user_review", edit2["status"])  # budget hit
+        self.assertEqual("Q1?", col.get_note(ids[1])["Front"])  # not applied
+        self.assertTrue(
+            any("budget" in n["text"].lower() for n in pushes_of(pushed, "notice"))
+        )
+        # Manual accept still works after the pause.
+        manager.accept({"id": edit2["proposal_id"]})
+        self.assertEqual("e2", col.get_note(ids[1])["Front"])
+
+    def test_change_set_direct_apply_in_trusted(self) -> None:
+        manager, col, pushed = make_manager({"permission_mode": "trusted-writes"})
+        ids = _seed_notes(manager, col, pushed)
+        cs = manager.open_change_set({"title": "t"})
+        manager.add_to_change_set(
+            {
+                "change_set_id": cs["change_set_id"],
+                "note_id": ids[0],
+                "field_changes": {"Back": "swept"},
+            }
+        )
+        result = manager.close_change_set({"change_set_id": cs["change_set_id"]})
+        self.assertEqual("applied", result["status"])
+        self.assertEqual("swept", col.get_note(ids[0])["Back"])
 
 
 if __name__ == "__main__":

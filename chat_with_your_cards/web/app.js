@@ -354,11 +354,98 @@
         return {
             "pending": "Pending review",
             "accepted": "Accepted",
-            "auto-accepted": "Auto-accepted",
+            "auto-accepted": "Applied",
             "rejected": "Rejected",
             "undone": "Undone",
             "superseded": "Superseded",
         }[status] || status;
+    }
+
+    var KIND_BADGES = {
+        create: "New note",
+        edit: "Edit note",
+        bulk: "Bulk operation",
+        delete: "Delete notes",
+        change_set: "Change set",
+    };
+
+    function bulkOpLabel(data) {
+        if (data.kind === "delete") {
+            return "Delete " + data.count + " note(s)";
+        }
+        var op = data.op || "";
+        var a = data.op_args || {};
+        if (op === "rename_tag") {
+            return 'Rename tag "' + a.old_tag + '" → "' + a.new_tag + '" — ' +
+                data.count + " note(s)";
+        }
+        if (op === "find_replace") {
+            return 'Replace "' + a.search + '" → "' + a.replacement + '"' +
+                (a.field ? " in " + a.field : "") + " — " + data.count + " note(s)";
+        }
+        if (op === "move_cards") {
+            return "Move " + data.count + ' card(s) → "' + a.deck + '"';
+        }
+        return data.count + " item(s)";
+    }
+
+    function renderBulkBody(record, body) {
+        var data = record.data;
+        body.appendChild(el("div", "cwyc-bulk-op", bulkOpLabel(data)));
+        (data.samples || []).forEach(function (sample) {
+            if (sample.old !== undefined) {
+                var row = el("div", "cwyc-bulk-sample");
+                if (sample.label) {
+                    row.appendChild(el("div", "cwyc-bulk-sample-label", sample.label));
+                }
+                var diff = el("div", "cwyc-field-diff");
+                renderDiff(diff, sample.old, sample.new);
+                row.appendChild(diff);
+                body.appendChild(row);
+            } else if (sample.text) {
+                body.appendChild(el("div", "cwyc-bulk-sample-text", sample.text));
+            }
+        });
+    }
+
+    function renderChangeSetBody(record, body) {
+        var data = record.data;
+        if (data.open) {
+            body.appendChild(
+                el("div", "cwyc-cs-collecting",
+                    "Collecting edits… " + data.count + " note(s) so far")
+            );
+            return;
+        }
+        body.appendChild(
+            el("div", "cwyc-bulk-op", data.count + " note(s) in this change set")
+        );
+        (data.samples || []).forEach(function (sample) {
+            var row = el("div", "cwyc-bulk-sample");
+            row.appendChild(el("div", "cwyc-bulk-sample-label", sample.label));
+            var diff = el("div", "cwyc-field-diff");
+            renderDiff(diff, sample.old || "", sample.new || "");
+            row.appendChild(diff);
+            body.appendChild(row);
+        });
+        var items = data.items || [];
+        if (items.length > (data.samples || []).length) {
+            var details = document.createElement("details");
+            details.className = "cwyc-cs-details";
+            var summary = document.createElement("summary");
+            summary.textContent = "All " + items.length + " notes";
+            details.appendChild(summary);
+            var list = el("div", "cwyc-cs-list");
+            items.forEach(function (item) {
+                list.appendChild(
+                    el("div", "cwyc-cs-item",
+                        (item.label || item.note_id) + " — " +
+                        (item.fields || []).join(", "))
+                );
+            });
+            details.appendChild(list);
+            body.appendChild(details);
+        }
     }
 
     function autosizeArea(area) {
@@ -465,12 +552,19 @@
 
         // header: kind badge, note type -> deck, status pill
         var head = el("div", "cwyc-proposal-head");
-        head.appendChild(
-            el("span", "cwyc-proposal-kind", data.kind === "edit" ? "Edit note" : "New note")
-        );
+        var badge = el("span", "cwyc-proposal-kind", KIND_BADGES[data.kind] || data.kind);
+        if (data.kind === "delete") {
+            badge.classList.add("cwyc-kind-delete");
+        }
+        head.appendChild(badge);
         // Creates carry an editable deck below; edits show their deck here.
-        var where = data.note_type +
-            (data.kind === "edit" && data.deck ? " · " + data.deck : "");
+        var where = "";
+        if (data.kind === "create" || data.kind === "edit") {
+            where = data.note_type +
+                (data.kind === "edit" && data.deck ? " · " + data.deck : "");
+        } else if (data.kind === "change_set") {
+            where = data.title || "";
+        }
         head.appendChild(el("span", "cwyc-proposal-where", where));
         var pill = el("span", "cwyc-proposal-status", proposalStatusLabel(data.status));
         pill.classList.add("cwyc-status-" + data.status);
@@ -490,8 +584,12 @@
 
         if (data.kind === "edit") {
             renderEditFields(record, body);
-        } else {
+        } else if (data.kind === "create") {
             renderCreateFields(record, body);
+        } else if (data.kind === "change_set") {
+            renderChangeSetBody(record, body);
+        } else {
+            renderBulkBody(record, body); // bulk + delete
         }
 
         if (data.kind === "create") {
@@ -546,7 +644,7 @@
         record.errorBox = errorBox;
 
         var actions = el("div", "cwyc-proposal-actions");
-        if (data.status === "pending") {
+        if (data.status === "pending" && !data.open) {
             var suggest = el("button", "cwyc-btn-suggest", "Suggest change");
             suggest.type = "button";
             suggest.title = "Tell the assistant how to change this card";
@@ -559,9 +657,14 @@
             reject.addEventListener("click", function () {
                 post({ type: "proposal_reject", id: data.id });
             });
-            var accept = el("button", "cwyc-btn-accept cwyc-primary", "Accept");
+            var acceptLabel = data.kind === "delete" ? "Delete" : "Accept";
+            var acceptCls = "cwyc-btn-accept cwyc-primary" +
+                (data.kind === "delete" ? " cwyc-btn-danger" : "");
+            var accept = el("button", acceptCls, acceptLabel);
             accept.type = "button";
-            accept.title = "Accept (Cmd/Ctrl+Enter)";
+            accept.title = data.kind === "delete"
+                ? "Permanently delete these notes"
+                : "Accept (Cmd/Ctrl+Enter)";
             accept.addEventListener("click", function () {
                 acceptProposal(data.id);
             });
@@ -594,7 +697,7 @@
             activeProposalId = data.id;
         }
         if (data.status !== "pending") {
-            markResolved(data.id, data.status, data.note_id);
+            markResolved(data.id, data.status, {});
         }
         updateBulkBar();
         scrollToBottomIfPinned();
@@ -774,11 +877,12 @@
         record.actions.appendChild(button);
     }
 
-    function markResolved(id, status, noteId) {
+    function markResolved(id, status, extra) {
         var record = proposals[id];
         if (!record) {
             return;
         }
+        extra = extra || {};
         record.data.status = status;
         record.root.classList.add("cwyc-proposal-resolved");
         record.root.classList.toggle("cwyc-proposal-superseded", status === "superseded");
@@ -789,12 +893,24 @@
             .forEach(function (node) {
                 node.disabled = true;
             });
+        // Post-apply findings (stats drift, skipped-stale notes) surface on
+        // the card itself.
+        (extra.warnings || []).forEach(function (warning) {
+            record.root.insertBefore(
+                el("div", "cwyc-proposal-warning", warning),
+                record.actions
+            );
+        });
         record.actions.innerHTML = "";
-        if (status === "accepted" || status === "auto-accepted") {
+        var revertible = extra.revertible !== false;
+        if ((status === "accepted" || status === "auto-accepted") && revertible) {
             addActionButton(record, "Revert", "cwyc-btn-revert", "Undo this change", function () {
                 post({ type: "proposal_revert", id: id });
             });
-        } else if (status === "undone") {
+        } else if (
+            status === "undone" &&
+            (record.data.kind === "create" || record.data.kind === "edit")
+        ) {
             addActionButton(record, "Re-add", "cwyc-btn-readd", "Add this note again", function () {
                 post({ type: "proposal_readd", id: id });
             });
@@ -817,7 +933,11 @@
 
     function pendingProposalIds() {
         return proposalOrder.filter(function (id) {
-            return proposals[id] && proposals[id].data.status === "pending";
+            return (
+                proposals[id] &&
+                proposals[id].data.status === "pending" &&
+                !proposals[id].data.open
+            );
         });
     }
 
@@ -1132,7 +1252,7 @@
                 updateProposalPreview(payload.id, payload.previews);
                 break;
             case "proposal_resolved":
-                markResolved(payload.id, payload.status, payload.note_id);
+                markResolved(payload.id, payload.status, payload);
                 break;
             case "proposal_error": {
                 var record = proposals[payload.id];
