@@ -29,6 +29,9 @@ class FakeNote:
     def items(self):
         return self._fields.items()
 
+    def note_type(self):
+        return {"name": "Basic"}
+
 
 class FakeMedia:
     def __init__(self, directory: Path) -> None:
@@ -48,8 +51,9 @@ class FakeCol:
 
 
 class FakeCtx:
-    def __init__(self, col: FakeCol) -> None:
+    def __init__(self, col: FakeCol, config: dict | None = None) -> None:
         self._col = col
+        self._config = config or {}
 
     @property
     def col(self):
@@ -62,6 +66,10 @@ class FakeCtx:
     @property
     def proposals(self):
         return None
+
+    @property
+    def config(self):
+        return self._config
 
 
 class ImageFilenameTests(unittest.TestCase):
@@ -112,6 +120,54 @@ class GetCardImagesTests(unittest.TestCase):
     def test_needs_an_id(self) -> None:
         with self.assertRaises(ValueError):
             get_card_images(self._ctx({}), {})
+
+
+class SourceExtractionTests(unittest.TestCase):
+    def test_hrefs_bare_urls_and_pdf_paths(self) -> None:
+        from chat_with_your_cards.tools.media import extract_sources
+
+        fields = {
+            "Extra": '<a href="https://en.wikipedia.org/wiki/Limit">Wikipedia</a> '
+            "and see /home/example/books/analysis.pdf p.212",
+            "Text": "plain https://example.com/spec. Also "
+            '<img src="data:image/png;base64,AAAA">',
+        }
+        sources = extract_sources(fields)
+        uris = {s["uri"]: s for s in sources}
+        self.assertIn("https://en.wikipedia.org/wiki/Limit", uris)
+        self.assertEqual("pdf", uris["/home/example/books/analysis.pdf"]["kind"])
+        self.assertIn("https://example.com/spec", uris)  # trailing dot stripped
+        self.assertFalse(any(u.startswith("data:") for u in uris))
+
+    def test_field_restriction(self) -> None:
+        from chat_with_your_cards.tools.media import extract_sources
+
+        fields = {"Extra": "https://keep.example", "Text": "https://drop.example"}
+        sources = extract_sources(fields, ["Extra"])
+        self.assertEqual(["https://keep.example"], [s["uri"] for s in sources])
+
+    def test_get_card_sources_respects_note_type_config(self) -> None:
+        from chat_with_your_cards.tools.media import get_card_sources
+
+        note = FakeNote(
+            {"Text": "https://drop.example", "Extra": "https://keep.example"}
+        )
+        ctx = FakeCtx(
+            FakeCol(note, Path(".")),
+            config={"source_fields": {"Basic": ["Extra"]}},
+        )
+        result = get_card_sources(ctx, {"note_id": 7})
+        self.assertEqual(
+            ["https://keep.example"], [s["uri"] for s in result["sources"]]
+        )
+
+    def test_get_card_sources_default_all_fields(self) -> None:
+        from chat_with_your_cards.tools.media import get_card_sources
+
+        note = FakeNote({"Text": "https://a.example", "Extra": "https://b.example"})
+        ctx = FakeCtx(FakeCol(note, Path(".")))
+        result = get_card_sources(ctx, {"note_id": 7})
+        self.assertEqual(2, len(result["sources"]))
 
 
 class ContentBlockPassthroughTests(unittest.TestCase):

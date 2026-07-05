@@ -90,49 +90,18 @@ class WebAccessArgsTests(unittest.TestCase):
         self.assertIn("Skill", allowed)
 
 
-class CompactToolTests(unittest.TestCase):
-    def test_brief_is_first_sentence(self) -> None:
+class ToolAdvertisingTests(unittest.TestCase):
+    def test_full_descriptions_and_schemas_served(self) -> None:
+        # Compact advertising was dropped 2026-07-05: the ~380-token saving
+        # is outweighed by the extra tool_help round-trip and cache churn.
         registry = build_registry()
-        spec = {s.name: s for s in registry.specs()}["search_notes"]
-        self.assertTrue(spec.brief.endswith("."))
-        self.assertLess(len(spec.brief), len(spec.description))
-
-    def test_compact_specs_shrink_but_keep_schema(self) -> None:
-        registry = build_registry()
-        full = tool_specs_for_mcp(registry.specs())
-        compact = tool_specs_for_mcp(registry.specs(), compact=True)
-        self.assertLess(
-            sum(len(t["description"]) for t in compact),
-            sum(len(t["description"]) for t in full),
-        )
-        by_name = {t["name"]: t for t in compact}
-        for t in full:
-            self.assertEqual(t["inputSchema"], by_name[t["name"]]["inputSchema"])
-
-    def test_tool_help_returns_full_docs(self) -> None:
-        registry = build_registry()
-
-        class Ctx:
-            col = None
-            stats = None
-            proposals = None
-
-        result = registry.call(Ctx(), "tool_help", {"names": ["search_notes", "nope"]})
-        self.assertIn("Anki search syntax", result["tools"]["search_notes"]["description"])
-        self.assertIn("input_schema", result["tools"]["search_notes"])
-        self.assertEqual({"error": "unknown tool"}, result["tools"]["nope"])
-
-    def test_tool_help_all_when_no_names(self) -> None:
-        registry = build_registry()
-
-        class Ctx:
-            col = None
-            stats = None
-            proposals = None
-
-        result = registry.call(Ctx(), "tool_help", {})
-        self.assertIn("propose_note", result["tools"])
-        self.assertIn("tool_help", result["tools"])
+        specs = tool_specs_for_mcp(registry.specs())
+        names = {t["name"] for t in specs}
+        self.assertNotIn("tool_help", names)
+        by_name = {s.name: s for s in registry.specs()}
+        for t in specs:
+            self.assertEqual(by_name[t["name"]].description, t["description"])
+            self.assertIn("inputSchema", t)
 
 
 if __name__ == "__main__":

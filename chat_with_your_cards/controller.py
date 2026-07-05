@@ -9,7 +9,14 @@ from typing import Any, Callable
 from aqt import mw
 from aqt.qt import QTimer
 
-from .backends import ChatEvent, ProposalRequest, ScriptedBackend, event_to_dict
+from .backends import (
+    ChatEvent,
+    Done,
+    ProposalRequest,
+    ScriptedBackend,
+    TextDelta,
+    event_to_dict,
+)
 from .backends.claude_cli import ClaudeCliBackend, find_claude_cli
 from .context import build_card_block, extract_card_info, wrap_user_message
 
@@ -41,6 +48,7 @@ class ChatController:
         ensure_mcp: Callable[[], tuple[str, str]],
         workdir: Path,
         proposals: Any = None,
+        transcripts: Any = None,
     ) -> None:
         self._push = push
         self._config = config
@@ -48,6 +56,9 @@ class ChatController:
         self._ensure_mcp = ensure_mcp
         self._workdir = workdir
         self._proposals = proposals
+        self._transcripts = transcripts
+        self._assistant_buffer = ""
+        self._pending_resume: str | None = None
         self._backend: Any = None
         self._backend_notice_sent = False
         self._session: Any = None
@@ -119,7 +130,11 @@ class ChatController:
         if self._backend is None:
             self._backend = self._build_backend()
         if self._session is None:
-            self._session = self._backend.start_session({})
+            context: dict[str, Any] = {}
+            if self._pending_resume:
+                context["resume_session_id"] = self._pending_resume
+                self._pending_resume = None
+            self._session = self._backend.start_session(context)
         prewarm = getattr(self._session, "prewarm", None)
         if prewarm is not None:
             prewarm()
@@ -130,11 +145,18 @@ class ChatController:
     def streaming(self) -> bool:
         return self._session is not None and self._session.streaming
 
+    @property
+    def backend_session_id(self) -> str | None:
+        """The harness's own session id (for --resume / open-in-Claude-Code)."""
+        return getattr(self._session, "session_id", None)
+
     def send_user_message(self, text: str) -> None:
         text = text.strip()
         if not text or self.streaming:
             return
         self.ensure_ready()
+        if self._transcripts is not None:
+            self._transcripts.record({"type": "user_message", "text": text})
         card_block, label = self._context_for_send()
         self._push({"type": "context", "label": label})
         self._session.send(wrap_user_message(text, card_block), self._on_event)
@@ -172,10 +194,45 @@ class ChatController:
             self._session.close()
             self._session = None
         self._last_card_id_sent = None
+        self._pending_resume = None
+        self._assistant_buffer = ""
+        self.event_log.clear()
+        if self._transcripts is not None:
+            self._transcripts.flush()
+            self._transcripts.begin()
+        if self._proposals is not None:
+            self._proposals.new_session()
+        self._push({"type": "reset"})
+
+    # ---- chat history ----
+
+    def push_history_list(self) -> None:
+        if self._transcripts is None:
+            return
+        self._push({"type": "history", "sessions": self._transcripts.list()})
+
+    def load_history(self, transcript_id: str) -> None:
+        """Replay a saved chat into the UI and continue it via the backend's
+        native resume (DESIGN.md section 9)."""
+        if self._transcripts is None:
+            return
+        self._transcripts.flush()  # save whatever chat was in progress
+        events = self._transcripts.continue_from(transcript_id)
+        if events is None:
+            self._push({"type": "notice", "text": "That chat could not be loaded."})
+            return
+        if self._session is not None:
+            self._session.close()
+            self._session = None
+        self._pending_resume = self._transcripts.backend_session_id
+        self._assistant_buffer = ""
+        self._last_card_id_sent = None
         self.event_log.clear()
         if self._proposals is not None:
             self._proposals.new_session()
         self._push({"type": "reset"})
+        self._push({"type": "history_load", "events": events})
+        self.push_agent_state()
 
     def set_agent_config(self, model: str, effort: str) -> None:
         """Change model/effort. Applied to the live session mid-conversation:
@@ -245,9 +302,19 @@ class ChatController:
         )
 
     def shutdown(self) -> None:
+        if self._transcripts is not None:
+            self._flush_assistant_text()
+            self._transcripts.flush()
         if self._session is not None:
             self._session.close()
             self._session = None
+
+    def _flush_assistant_text(self) -> None:
+        if self._transcripts is not None and self._assistant_buffer.strip():
+            self._transcripts.record(
+                {"type": "assistant_text", "text": self._assistant_buffer}
+            )
+        self._assistant_buffer = ""
 
     def _on_event(self, event: ChatEvent) -> None:
         self.event_log.append(event)
@@ -257,6 +324,16 @@ class ChatController:
             # card itself). Real backends propose via the MCP tools instead.
             self._handle_proposal_request(event)
             return
+        # Transcript: deltas coalesce into one assistant_text per block
+        # (raw deltas are excluded from recording); everything else is
+        # recorded by the shared recording push in the add-on glue.
+        if isinstance(event, TextDelta):
+            self._assistant_buffer += event.text
+        else:
+            self._flush_assistant_text()
+        if isinstance(event, Done) and self._transcripts is not None:
+            self._transcripts.set_backend_session(self.backend_session_id)
+            self._transcripts.flush()
         self._push(event_to_dict(event))
 
     def _handle_proposal_request(self, event: ProposalRequest) -> None:

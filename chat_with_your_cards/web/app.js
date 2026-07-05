@@ -1308,6 +1308,77 @@
         return true;
     }
 
+    /* ---- doctor panel ---- */
+
+    function renderDoctor(results) {
+        var box = document.getElementById("cwyc-doctor-results");
+        box.innerHTML = "";
+        (results || []).forEach(function (row) {
+            var item = el("div", "cwyc-doctor-row cwyc-doctor-" + row.status);
+            item.appendChild(el("span", "cwyc-doctor-status",
+                row.status === "ok" ? "✓" : row.status === "warn" ? "•" : "✗"));
+            var body = el("div", "cwyc-doctor-body");
+            body.appendChild(el("div", "cwyc-doctor-label", row.label));
+            body.appendChild(el("div", "cwyc-doctor-detail", row.detail || ""));
+            if (row.link && row.status !== "ok") {
+                var a = document.createElement("a");
+                a.href = row.link;
+                a.textContent = "install page";
+                a.className = "cwyc-doctor-link";
+                body.appendChild(a);
+            }
+            item.appendChild(body);
+            box.appendChild(item);
+        });
+    }
+
+    /* ---- chat history ---- */
+
+    function renderHistory(sessions) {
+        var list = document.getElementById("cwyc-history-list");
+        var empty = document.getElementById("cwyc-history-empty");
+        list.innerHTML = "";
+        empty.hidden = (sessions || []).length > 0;
+        (sessions || []).forEach(function (meta) {
+            var item = el("button", "cwyc-history-item");
+            item.type = "button";
+            item.appendChild(el("div", "cwyc-history-title", meta.title || "(untitled)"));
+            var when = meta.updated_at
+                ? new Date(meta.updated_at * 1000).toLocaleString()
+                : "";
+            item.appendChild(
+                el("div", "cwyc-history-sub", when + " · " + (meta.events || 0) + " events")
+            );
+            item.addEventListener("click", function () {
+                post({ type: "load_history", id: meta.id });
+                document.getElementById("cwyc-history-panel").hidden = true;
+            });
+            list.appendChild(item);
+        });
+    }
+
+    function replayHistory(payload) {
+        resetTranscript();
+        (payload.events || []).forEach(function (ev) {
+            if (ev.type === "user_message") {
+                addUserMessage(ev.text);
+            } else if (ev.type === "assistant_text") {
+                startAssistantMessage();
+                appendDelta(ev.text);
+                breakAssistantBlock();
+            } else {
+                dispatch(ev);
+            }
+        });
+        // Proposals left pending in the old session can no longer be acted
+        // on (their manager state is gone) - set them aside visually.
+        pendingProposalIds().forEach(function (id) {
+            markResolved(id, "superseded", {});
+        });
+        setStreaming(false);
+        scrollToBottomIfPinned();
+    }
+
     function renderDockState(floating) {
         var btn = document.getElementById("cwyc-dock-toggle");
         if (!btn) {
@@ -1414,6 +1485,15 @@
             case "usage":
                 renderUsage(payload);
                 break;
+            case "doctor":
+                renderDoctor(payload.results);
+                break;
+            case "history":
+                renderHistory(payload.sessions);
+                break;
+            case "history_load":
+                replayHistory(payload);
+                break;
             case "ui_config":
                 uiConfig.suggested_questions = payload.suggested_questions !== false;
                 refreshSuggestion();
@@ -1493,6 +1573,26 @@
             post({ type: "toggle_float" });
         });
         document.getElementById("cwyc-mode-chip").addEventListener("click", cycleMode);
+        document.getElementById("cwyc-open-cc").addEventListener("click", function () {
+            post({ type: "open_in_claude" });
+        });
+        var doctorPanel = document.getElementById("cwyc-doctor-panel");
+        var historyPanel = document.getElementById("cwyc-history-panel");
+        document.getElementById("cwyc-doctor-toggle").addEventListener("click", function () {
+            doctorPanel.hidden = !doctorPanel.hidden;
+            historyPanel.hidden = true;
+            if (!doctorPanel.hidden) {
+                document.getElementById("cwyc-doctor-results").textContent = "Checking…";
+                post({ type: "run_doctor" });
+            }
+        });
+        document.getElementById("cwyc-history-toggle").addEventListener("click", function () {
+            historyPanel.hidden = !historyPanel.hidden;
+            doctorPanel.hidden = true;
+            if (!historyPanel.hidden) {
+                post({ type: "list_history" });
+            }
+        });
         refreshSuggestion();
         input.addEventListener("keydown", function (event) {
             if (event.key === "Enter" && !event.shiftKey) {

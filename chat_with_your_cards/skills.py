@@ -39,28 +39,43 @@ which proposal tools to use. Load whenever creating or editing cards.
 # Card authoring for this collection
 
 Edit this file to teach the assistant YOUR card taste. It ships as a
-starting template; everything below is yours to change.
+starting template aimed at an experienced Anki user; everything below is
+yours to change, and the assistant treats it as the house rules.
 
-## Style
+## Before writing anything
 
-- One focused fact per card; prefer several small cards over one dense card.
-- Front asks exactly one question; the shortest unambiguous phrasing wins.
-- Back leads with the answer, then at most one line of context.
-- Match the deck's existing conventions before inventing new ones - read a
-  few similar notes first (search_notes / get_note).
+1. **Calibrate against existing cards.** Search the target deck
+   (search_notes, get_note) and read a handful of the user's own recent
+   cards: note type, field usage, phrasing style, tag shape. Match what
+   you find; do not invent a new style when the deck already has one.
+2. **Check the note type's fields** with get_note_type before proposing.
+3. **Respect pins** (deck, note type, tags, field defaults) when set.
+
+## Card quality rules
+
+- **One atomic fact per card.** Several small cards beat one dense card;
+  never pack multiple independent facts into one note via c1/c2/c3.
+- **Minimum information, maximum retrievability**: the front asks exactly
+  one thing; the shortest unambiguous phrasing wins.
+- **Answers are short.** Lead with the core answer; push nice-to-know
+  context into the note's extra/back-context field, visually secondary.
+- **No list-length hints in questions** ("name the X", not "name the
+  three X"), and no yes/no questions without an appended "Explain."
+- **Cloze cards**: one {{c1::...}} deletion per card unless the facts are
+  genuinely inseparable; never cloze a single mid-sentence word that
+  could be guessed from grammar alone.
+- **Formatting**: plain HTML, <b> for the key term, <ul> for enumerations,
+  italics only for untested context. No decorative styling.
 
 ## Workflow
 
-- Use propose_note for single cards; check the note type's fields with
-  get_note_type first.
-- For many similar cards, still propose them individually unless the user
-  asked for a sweep - then use a change set.
-- Respect the user's pinned deck, note type, tags, and field defaults.
-
-## Formatting
-
-- Plain HTML in fields: <b> for the key term, no inline styles.
-- Cloze cards: one {{c1::...}} per card unless the facts are inseparable.
+- Single cards: propose_note, one focused proposal per concept.
+- Reworking existing cards: propose_note_edit with only the fields that
+  change.
+- Sweeps across many notes: open_change_set / add_to_change_set /
+  close_change_set so the user reviews one batch, not fifty cards.
+- If a card has sources (URIs in fields - get_card_sources), ground your
+  edits in the source rather than guessing.
 """
 
 

@@ -23,12 +23,14 @@
 - `suggested_questions` (default `true`): show a context-aware suggested
   question as gray ghost text in the empty composer; Tab accepts it, typing
   dismisses it.
+- `source_fields` (default `{}` = look everywhere): optional per-note-type
+  restriction of which fields may contain card sources, e.g.
+  `{"0 Cloze": ["Extra"]}`. By default any URI in any field is treated as a
+  potential source the assistant may open (web via fetch, local PDFs via
+  read).
 - `web_access` (default `true`): allow the assistant to use web search and
   page fetching (useful for sourcing card content). Set `false` to keep the
   agent strictly inside your collection.
-- `compact_tool_descriptions` (default `true`): advertise one-line tool
-  summaries to the agent (full docs available on demand via its tool_help
-  tool) to save context. Schemas are always complete.
 - `anthropic_api_key` / `openai_api_key` (default empty): paste an API key to
   bill usage to it instead of the agent's own login. Stored in Anki's
   plain-text add-on config - the less-secure option.

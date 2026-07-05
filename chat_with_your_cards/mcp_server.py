@@ -188,17 +188,12 @@ def _error(request_id: Any, code: int, message: str) -> dict[str, Any]:
     }
 
 
-def tool_specs_for_mcp(specs: list[Any], *, compact: bool = False) -> list[dict[str, Any]]:
-    """Convert registry ToolSpecs into MCP tools/list entries.
-
-    compact=True advertises one-line briefs instead of full docs (schemas
-    stay complete - the model needs them to form valid calls); the
-    tool_help tool serves the full documentation on demand.
-    """
+def tool_specs_for_mcp(specs: list[Any]) -> list[dict[str, Any]]:
+    """Convert registry ToolSpecs into MCP tools/list entries."""
     return [
         {
             "name": spec.name,
-            "description": spec.brief if compact else spec.description,
+            "description": spec.description,
             "inputSchema": spec.input_schema,
         }
         for spec in specs

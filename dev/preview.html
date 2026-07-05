@@ -265,6 +265,28 @@
             } else if (msg.type === "toggle_float") {
                 window.__floating = !window.__floating;
                 window.chatUI.dispatch({ type: "dock_state", floating: window.__floating });
+            } else if (msg.type === "run_doctor") {
+                window.chatUI.dispatch({ type: "doctor", results: [
+                    { label: "Claude Code", status: "ok", detail: "2.1.197 — /Users/x/.local/bin/claude" },
+                    { label: "Codex CLI (future backend)", status: "broken", detail: "codex exists but --version failed: ENOENT", link: "https://developers.openai.com/codex/cli/" },
+                    { label: "Pi (future backend)", status: "missing", detail: "not found on PATH", link: "https://pi.dev/" },
+                    { label: "Permission mode", status: "ok", detail: "default, web access on" },
+                ] });
+            } else if (msg.type === "list_history") {
+                window.chatUI.dispatch({ type: "history", sessions: [
+                    { id: "h1", title: "Explain this card to me — I forgot", updated_at: Date.now()/1000 - 3600, events: 12 },
+                    { id: "h2", title: "Propose cards about the Twelve", updated_at: Date.now()/1000 - 90000, events: 31 },
+                ] });
+            } else if (msg.type === "load_history") {
+                window.chatUI.dispatch({ type: "reset" });
+                window.chatUI.dispatch({ type: "history_load", events: [
+                    { type: "user_message", text: "Explain this card to me — I forgot" },
+                    { type: "assistant_text", text: "It is about the **epsilon-delta** definition." },
+                    { type: "tool_call_started", call_id: "h-1", tool: "mcp__anki__search_notes", summary: '{"query":"limit"}' },
+                    { type: "tool_call_finished", call_id: "h-1", ok: true },
+                    { type: "proposal", proposal: createProposal("hp1", "Old pending proposal?", "From a previous session.") },
+                    { type: "usage", cost_usd: 0.12, input_tokens: 30000, output_tokens: 2000 },
+                ] });
             } else if (msg.type === "set_permission_mode") {
                 window.chatUI.dispatch({ type: "agent", backend: "claude", model: "", effort: "", mode: msg.mode });
             } else if (msg.type === "set_agent") {

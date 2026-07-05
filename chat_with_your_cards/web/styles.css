@@ -1263,3 +1263,115 @@ body {
 #cwyc-usage-chip[hidden] {
     display: none;
 }
+
+/* ---------- header icon buttons (history / open-cc / doctor) ---------- */
+
+#cwyc-history-toggle,
+#cwyc-open-cc,
+#cwyc-doctor-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--fg);
+    padding: 4px 7px;
+    margin-left: 6px;
+    cursor: pointer;
+}
+
+#cwyc-history-toggle:hover,
+#cwyc-open-cc:hover,
+#cwyc-doctor-toggle:hover {
+    background: var(--cwyc-bubble-user);
+}
+
+/* ---------- doctor + history panels ---------- */
+
+#cwyc-doctor-panel[hidden],
+#cwyc-history-panel[hidden] {
+    display: none;
+}
+
+#cwyc-doctor-panel,
+#cwyc-history-panel {
+    flex: 0 0 auto;
+    border-bottom: 1px solid var(--border-subtle, var(--border));
+    background: var(--canvas-elevated, var(--canvas));
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 12px;
+    max-height: 45vh;
+    overflow-y: auto;
+}
+
+.cwyc-panel-title {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+    color: var(--fg-subtle, var(--fg));
+}
+
+.cwyc-doctor-row {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+}
+
+.cwyc-doctor-status {
+    flex: 0 0 14px;
+    font-weight: 700;
+}
+
+.cwyc-doctor-ok .cwyc-doctor-status { color: #34a853; }
+.cwyc-doctor-warn .cwyc-doctor-status { color: #b8860b; }
+.cwyc-doctor-missing .cwyc-doctor-status,
+.cwyc-doctor-broken .cwyc-doctor-status { color: #ea4335; }
+
+.cwyc-doctor-label {
+    font-weight: 600;
+}
+
+.cwyc-doctor-detail {
+    color: var(--fg-subtle, var(--fg));
+    font-size: 11.5px;
+    overflow-wrap: anywhere;
+}
+
+.cwyc-doctor-link {
+    font-size: 11.5px;
+    color: var(--cwyc-accent);
+}
+
+.cwyc-history-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: 1px solid var(--border-subtle, var(--border));
+    border-radius: 8px;
+    background: var(--canvas);
+    color: var(--fg);
+    padding: 6px 9px;
+    cursor: pointer;
+}
+
+.cwyc-history-item:hover {
+    border-color: var(--cwyc-accent);
+}
+
+.cwyc-history-title {
+    font-size: 12.5px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cwyc-history-sub {
+    font-size: 11px;
+    color: var(--fg-subtle, var(--fg));
+}

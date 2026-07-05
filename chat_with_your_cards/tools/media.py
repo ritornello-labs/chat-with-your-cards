@@ -93,7 +93,76 @@ def get_card_images(ctx: ToolContext, args: dict[str, Any]) -> list[dict[str, An
     return [{"type": "text", "text": header}, *blocks]
 
 
+_URI_RE = re.compile(
+    r"""(?:href=["']([^"']+)["'])|((?:https?|file)://[^\s"'<>]+)|(/[^\s"'<>]*?\.pdf\b)""",
+    re.IGNORECASE,
+)
+
+
+def extract_sources(
+    fields: dict[str, str], allowed_fields: list[str] | None = None
+) -> list[dict[str, str]]:
+    """Source references in a note's fields (user decision 2026-07-05):
+    any URI is a potential source; an optional per-note-type field
+    restriction narrows where we look, default is all fields."""
+    seen: set[str] = set()
+    out: list[dict[str, str]] = []
+    for name, value in fields.items():
+        if allowed_fields and name not in allowed_fields:
+            continue
+        for match in _URI_RE.finditer(value):
+            uri = next(g for g in match.groups() if g)
+            uri = uri.strip().rstrip(".,;:)")
+            if uri in seen or uri.lower().startswith("data:"):
+                continue
+            seen.add(uri)
+            kind = "web"
+            if uri.lower().startswith("file://") or uri.startswith("/"):
+                kind = "pdf" if uri.lower().endswith(".pdf") else "file"
+            elif uri.lower().endswith(".pdf"):
+                kind = "pdf-url"
+            out.append({"uri": uri, "field": name, "kind": kind})
+    return out
+
+
+def get_card_sources(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    note = _note_from_args(ctx, args)
+    fields = dict(note.items())
+    note_type = note.note_type()["name"]
+    restriction = None
+    config = getattr(ctx, "config", None) or {}
+    source_fields = config.get("source_fields") or {}
+    if isinstance(source_fields, dict) and source_fields.get(note_type):
+        restriction = [str(f) for f in source_fields[note_type]]
+    sources = extract_sources(fields, restriction)
+    return {
+        "note_id": note.id,
+        "sources": sources,
+        "note": "Open web sources with WebFetch; open local files (PDFs "
+        "included) with the Read tool. A renamed/moved local file simply "
+        "won't resolve - report that rather than guessing.",
+    }
+
+
 def register_media_tools(registry: ToolRegistry) -> None:
+    registry.register(
+        ToolSpec(
+            "get_card_sources",
+            "Find the sources a card came from: any URI in its fields (web "
+            "links, file:// links, absolute .pdf paths). Use when the user "
+            "asks about the material behind a card or wants new cards from "
+            "the same source - then open web sources with WebFetch and local "
+            "files with Read.",
+            {
+                "type": "object",
+                "properties": {
+                    "card_id": {"type": "integer"},
+                    "note_id": {"type": "integer"},
+                },
+            },
+            get_card_sources,
+        )
+    )
     registry.register(
         ToolSpec(
             "get_card_images",

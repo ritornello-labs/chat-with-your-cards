@@ -211,10 +211,11 @@ def build_cli_args(
     effort: str = "",
     web_access: bool = True,
 ) -> list[str]:
-    # The agent lives in collection-land: its own file/shell tools stay off.
+    # The agent lives in collection-land: its own shell/write tools stay off.
     # Skill is allowed so the user's system-wide skills and our card-authoring
-    # template work; WebSearch/WebFetch are on by default (config web_access).
-    allowed = ["mcp__anki", "Skill"]
+    # template work; Read is allowed so local card sources (PDFs) open;
+    # WebSearch/WebFetch are on by default (config web_access).
+    allowed = ["mcp__anki", "Skill", "Read"]
     disallowed = ["Bash", "Edit", "Write", "NotebookEdit"]
     if web_access:
         allowed += ["WebSearch", "WebFetch"]
@@ -278,6 +279,7 @@ class ClaudeCliSession:
         effort: str = "",
         web_access: bool = True,
         extra_env: dict[str, str] | None = None,
+        resume_session_id: str | None = None,
     ) -> None:
         self._cli_path = cli_path
         self._system_prompt = system_prompt
@@ -295,6 +297,10 @@ class ClaudeCliSession:
         self._process: subprocess.Popen[str] | None = None
         self._reader: threading.Thread | None = None
         self._state = ParserState()
+        if resume_session_id:
+            # History resume: the first spawn continues the old conversation
+            # via --resume instead of starting fresh.
+            self._state.session_id = resume_session_id
         self._generation = 0
         self._streaming = False
         self._on_event: EventCallback | None = None
@@ -515,4 +521,5 @@ class ClaudeCliBackend:
             effort=effort,
             web_access=self._web_access,
             extra_env=self._extra_env,
+            resume_session_id=(context or {}).get("resume_session_id"),
         )

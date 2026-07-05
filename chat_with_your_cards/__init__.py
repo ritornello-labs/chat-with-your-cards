@@ -27,7 +27,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "model": "",
     "effort": "",
     "web_access": True,
-    "compact_tool_descriptions": True,
     "suggested_questions": True,
     "anthropic_api_key": "",
     "anthropic_api_key_op": "",
@@ -55,6 +54,7 @@ class AddonState:
     stats_cache: Optional[StatsCache] = None
     mcp: Optional[McpServer] = None
     proposals: Optional[ProposalManager] = None
+    transcripts: Any = None
     shortcuts: list[Any] = field(default_factory=list)
     web_ready: bool = False
     config: dict[str, Any] = field(default_factory=dict)
@@ -103,9 +103,22 @@ def _setup() -> None:
 
     state.dock = dock_mod.create_dock(dock_width=int(config["dock_width"]))
 
+    from .transcripts import TranscriptStore
+
+    state.transcripts = TranscriptStore(USER_FILES / "transcripts")
+
+    dock = state.dock
+
+    def recording_push(payload: dict[str, Any]) -> None:
+        # One pipe to the webview that also feeds the chat transcript
+        # (TranscriptStore ignores payload types not worth replaying).
+        if state.transcripts is not None:
+            state.transcripts.record(payload)
+        dock.bridge.push(payload)
+
     state.proposals = ProposalManager(
         get_col=lambda: mw.col,
-        push=state.dock.bridge.push,
+        push=recording_push,
         config=config,
         save_pins=_save_pins,
         after_write=_refresh_reviewer,
@@ -130,12 +143,13 @@ def _setup() -> None:
         )
 
     state.controller = ChatController(
-        push=state.dock.bridge.push,
+        push=recording_push,
         config=config,
         system_prompt_builder=system_prompt,
         ensure_mcp=_ensure_mcp,
         workdir=USER_FILES / "agent-home",
         proposals=state.proposals,
+        transcripts=state.transcripts,
     )
     _wire_bridge()
     shortcuts_mod.register_shortcuts(state)
@@ -161,6 +175,10 @@ class _ToolCtx:
     @property
     def proposals(self) -> Any:
         return state.proposals
+
+    @property
+    def config(self) -> dict[str, Any]:
+        return state.config
 
 
 def _ensure_mcp() -> tuple[str, str]:
@@ -214,13 +232,42 @@ def _ensure_mcp() -> tuple[str, str]:
 
         state.mcp = McpServer(
             tool_specs=tool_specs_for_mcp(
-                registry.specs(include_writes=not read_only, include_trusted=trusted),
-                compact=bool(state.config.get("compact_tool_descriptions", True)),
+                registry.specs(include_writes=not read_only, include_trusted=trusted)
             ),
             execute_tool=execute_tool,
         )
         state.mcp.start()
+        _write_project_mcp_json(state.mcp.url, state.mcp.token)
     return state.mcp.url, state.mcp.token
+
+
+def _write_project_mcp_json(url: str, token: str) -> None:
+    """Write agent-home/.mcp.json so a terminal Claude Code opened in that
+    directory (the open-in-Claude-Code flow) discovers the anki tools too.
+    Rewritten each Anki run because the port and token rotate."""
+    import json as _json
+
+    path = USER_FILES / "agent-home" / ".mcp.json"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            _json.dumps(
+                {
+                    "mcpServers": {
+                        "anki": {
+                            "type": "http",
+                            "url": url,
+                            "headers": {"Authorization": f"Bearer {token}"},
+                        }
+                    }
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        path.chmod(0o600)  # carries the bearer token
+    except OSError:
+        pass
 
 
 def _wire_bridge() -> None:
@@ -248,6 +295,10 @@ def _wire_bridge() -> None:
     bridge.on("undo_session", lambda _msg: proposals.undo_session())
     bridge.on("set_pins", lambda msg: proposals.set_pins(msg.get("pins") or {}))
     bridge.on("open_session_browser", lambda _msg: _open_session_browser())
+    bridge.on("open_in_claude", lambda _msg: _open_in_claude_code())
+    bridge.on("list_history", lambda _msg: controller.push_history_list())
+    bridge.on("load_history", lambda msg: controller.load_history(str(msg.get("id", ""))))
+    bridge.on("run_doctor", lambda _msg: _run_doctor())
     bridge.on("set_agent", _set_agent)
     bridge.on("set_permission_mode", _set_permission_mode)
     bridge.on("toggle_float", lambda _msg: state.dock.toggle_float() if state.dock else None)
@@ -359,6 +410,87 @@ def _refresh_reviewer(note_ids: list[int]) -> None:
     except Exception:
         # Best-effort: a private-API drift shouldn't break the write itself.
         pass
+
+
+def _run_doctor() -> None:
+    """Gather the setup report off the main thread (version subprocesses can
+    take a second each) and push it to the doctor panel."""
+    from .backends.claude_cli import find_claude_cli
+    from .doctor import gather_report
+
+    config = dict(state.config)
+    backend_kind = state.controller.backend_kind if state.controller else "unset"
+    mcp_url = state.mcp.url if state.mcp else None
+
+    def work() -> list[dict[str, Any]]:
+        return gather_report(
+            config=config,
+            backend_kind=backend_kind,
+            mcp_url=mcp_url,
+            agent_home=USER_FILES / "agent-home",
+            find_claude=find_claude_cli,
+        )
+
+    def done(future: Any) -> None:
+        try:
+            results = future.result()
+        except Exception as exc:
+            results = [{"label": "Doctor", "status": "broken", "detail": str(exc)}]
+        if state.dock is not None:
+            state.dock.bridge.push({"type": "doctor", "results": results})
+
+    mw.taskman.run_in_background(work, done)
+
+
+def _open_in_claude_code() -> None:
+    """Hand this chat to a full-power terminal Claude Code: same session id
+    (--resume), same cwd (agent-home, which carries .mcp.json for our anki
+    tools and the skills dir). The terminal instance runs with Claude Code's
+    normal defaults, so the user gets Bash/files/etc. there by choice."""
+    import shlex
+    import subprocess
+    import sys as _sys
+
+    agent_home = USER_FILES / "agent-home"
+    sid = state.controller.backend_session_id if state.controller else None
+    cmd = f"cd {shlex.quote(str(agent_home))} && claude"
+    if sid:
+        cmd += f" --resume {shlex.quote(str(sid))}"
+
+    def notice(text: str) -> None:
+        if state.dock is not None:
+            state.dock.bridge.push({"type": "notice", "text": text})
+
+    if _sys.platform == "darwin":
+        script = cmd.replace("\\", "\\\\").replace('"', '\\"')
+        try:
+            subprocess.run(
+                [
+                    "osascript",
+                    "-e", 'tell application "Terminal" to activate',
+                    "-e", f'tell application "Terminal" to do script "{script}"',
+                ],
+                check=True,
+                capture_output=True,
+                timeout=15,
+            )
+            notice(
+                "Opened this chat in Claude Code (Terminal). It has your anki "
+                "tools via .mcp.json plus Claude Code's full toolset."
+            )
+            return
+        except Exception:
+            pass
+    try:
+        from aqt.qt import QApplication
+
+        QApplication.clipboard().setText(cmd)
+        notice(
+            "Command copied to the clipboard - paste it into a terminal to "
+            "continue this chat in Claude Code."
+        )
+    except Exception:
+        notice(f"Run this in a terminal to continue in Claude Code: {cmd}")
 
 
 def _open_session_browser() -> None:

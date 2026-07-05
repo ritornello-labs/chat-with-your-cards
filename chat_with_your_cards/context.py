@@ -116,9 +116,11 @@ def build_system_prompt(
         "\"Analysis:\", shared tags, same deck), and get_card_images (view a "
         "card's actual images, not just their filenames). Reads are allowed "
         "without asking. When looking for related material, prefer "
-        "find_related first, then refine with search_notes. Tool listings "
-        "show one-line summaries; call tool_help before using an unfamiliar "
-        "tool.",
+        "find_related first, then refine with search_notes. Cards may record "
+        "where they came from as URIs in their fields: get_card_sources "
+        "finds them; open web sources with WebFetch and local files (PDFs) "
+        "with Read - useful for grounding explanations and proposing more "
+        "cards from the same source.",
         "",
         "When a <current-card> block is present in a message, that is the "
         "card the user is looking at right now; treat it as the default "

@@ -7,6 +7,29 @@
             </svg>
             New chat
         </button>
+        <button id="cwyc-history-toggle" type="button" title="Chat history">
+            <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+                <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4" fill="none"/>
+                <path d="M8 5v3.2l2.2 1.4" stroke="currentColor" stroke-width="1.4"
+                      stroke-linecap="round" fill="none"/>
+            </svg>
+        </button>
+        <button id="cwyc-open-cc" type="button"
+                title="Open this chat in Claude Code (terminal) for full-power work">
+            <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+                <rect x="1.5" y="2.5" width="13" height="11" rx="1.5"
+                      stroke="currentColor" stroke-width="1.3" fill="none"/>
+                <path d="M4 6.2l2.4 2-2.4 2M8 10.5h4" stroke="currentColor"
+                      stroke-width="1.3" stroke-linecap="round" fill="none"/>
+            </svg>
+        </button>
+        <button id="cwyc-doctor-toggle" type="button" title="Doctor: check the agent setup">
+            <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+                <path d="M8 2v6M8 8c0 3 2 5 4.5 5M8 8c0 3-2 5-4.5 5"
+                      stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/>
+                <circle cx="8" cy="2" r="1.2" fill="currentColor"/>
+            </svg>
+        </button>
         <button id="cwyc-dock-toggle" type="button" title="Detach panel">
             <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
                 <rect x="2.5" y="2.5" width="11" height="11" rx="1.5"
@@ -96,6 +119,17 @@
         <div class="cwyc-pins-actions">
             <span class="cwyc-pins-hint">Saved automatically.</span>
             <button id="cwyc-pins-clear" type="button">Clear all</button>
+        </div>
+    </section>
+    <section id="cwyc-doctor-panel" hidden>
+        <div class="cwyc-panel-title">Agent setup</div>
+        <div id="cwyc-doctor-results"></div>
+    </section>
+    <section id="cwyc-history-panel" hidden>
+        <div class="cwyc-panel-title">Chat history</div>
+        <div id="cwyc-history-list"></div>
+        <div class="cwyc-pins-hint" id="cwyc-history-empty" hidden>
+            No saved chats yet - finished chats appear here.
         </div>
     </section>
     <main id="cwyc-transcript" aria-live="polite"></main>
