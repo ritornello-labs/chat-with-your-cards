@@ -133,7 +133,7 @@ class ProposalManager:
         config: dict[str, Any],
         save_pins: Callable[[dict[str, Any]], None] | None = None,
         after_write: Callable[[list[int]], None] | None = None,
-        checkpoint: Callable[[str], None] | None = None,
+        checkpoint: Callable[[str, bool], None] | None = None,
     ) -> None:
         self._get_col = get_col
         self._push = push
@@ -144,7 +144,9 @@ class ProposalManager:
         self._after_write = after_write or (lambda _ids: None)
         # Called before bulk/delete/change-set applies; the add-on glue makes
         # an Anki backup so even non-ledger-revertible ops have a way back.
-        self._checkpoint = checkpoint or (lambda _reason: None)
+        # Second arg = critical: True forces a SYNCHRONOUS backup (on disk
+        # before the op proceeds) for irreversible operations like delete.
+        self._checkpoint = checkpoint or (lambda _reason, _critical: None)
         self._proposals: dict[str, Proposal] = {}
         self._ledger: list[LedgerEntry] = []
         self._counter = 0
@@ -789,7 +791,7 @@ class ProposalManager:
 
     def _accept_bulk(self, proposal: Proposal) -> list[int]:
         col = self._col()
-        self._checkpoint(f"bulk {proposal.op}")
+        self._checkpoint(f"bulk {proposal.op}", False)  # ledger-revertible
         if proposal.op == "rename_tag":
             old = proposal.op_args["old_tag"]
             new = proposal.op_args["new_tag"]
@@ -838,7 +840,7 @@ class ProposalManager:
 
     def _accept_delete(self, proposal: Proposal) -> list[int]:
         col = self._col()
-        self._checkpoint("delete notes")
+        self._checkpoint("delete notes", True)  # irreversible: sync backup
         note_ids = [int(n) for n in proposal.op_args.get("note_ids", [])]
         existing = []
         for nid in note_ids:
@@ -864,7 +866,7 @@ class ProposalManager:
 
     def _accept_change_set(self, proposal: Proposal) -> list[int]:
         col = self._col()
-        self._checkpoint(f"change set: {proposal.title}")
+        self._checkpoint(f"change set: {proposal.title}", False)
         before = self._counts(col)
         applied, skipped = self._apply_items(col, proposal)
         after = self._counts(col)

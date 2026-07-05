@@ -190,7 +190,11 @@ def make_manager(
         push=pushed.append,
         config=config if config is not None else {},
         after_write=(writes.append if writes is not None else None),
-        checkpoint=(checkpoints.append if checkpoints is not None else None),
+        checkpoint=(
+            (lambda reason, critical: checkpoints.append((reason, critical)))
+            if checkpoints is not None
+            else None
+        ),
     )
     return manager, col, pushed
 
@@ -631,7 +635,9 @@ class BulkOpsTests(unittest.TestCase):
         self.assertEqual("pending_user_review", result["status"])
         self.assertEqual(3, result["affected"])
         manager.accept({"id": result["proposal_id"]})
+        # A tag rename is ledger-revertible, so its backup is non-critical.
         self.assertTrue(checkpoints)  # backup before applying
+        self.assertEqual((False,), (checkpoints[-1][1],))
         self.assertEqual(3, len(col.find_notes('tag:"math"')))
         self.assertEqual(0, len(col.find_notes('tag:"analysis"')))
         manager.revert({"id": result["proposal_id"]})
@@ -699,7 +705,9 @@ class DeleteTests(unittest.TestCase):
 
         manager.accept({"id": result["proposal_id"]})
         self.assertEqual(1, len(col._notes))
+        # Delete is irreversible -> its checkpoint must be critical (sync).
         self.assertTrue(checkpoints)
+        self.assertTrue(checkpoints[-1][1], "delete checkpoint should be critical")
         resolved = pushes_of(pushed, "proposal_resolved")[-1]
         self.assertFalse(resolved["revertible"])
         # Ledger revert refuses.

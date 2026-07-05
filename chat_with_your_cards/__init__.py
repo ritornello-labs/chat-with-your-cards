@@ -56,6 +56,7 @@ class AddonState:
     proposals: Optional[ProposalManager] = None
     transcripts: Any = None
     approvals: Any = None
+    last_checkpoint: Any = None
     shortcuts: list[Any] = field(default_factory=list)
     web_ready: bool = False
     config: dict[str, Any] = field(default_factory=dict)
@@ -407,18 +408,42 @@ def _save_pins(pins: dict[str, Any]) -> None:
     mw.addonManager.writeConfig(__name__, config)
 
 
-def _backup_checkpoint(reason: str) -> None:
+def _log_line(message: str) -> None:
+    """Append one line to the shared backend log (best-effort)."""
+    try:
+        from .backends.claude_cli import BackendLog
+
+        BackendLog(USER_FILES / "logs" / "backend.log").write(message)
+    except Exception:
+        pass
+
+
+def _backup_checkpoint(reason: str, critical: bool = False) -> None:
     """Force an Anki backup before bulk/delete/change-set applies, so even
-    non-ledger-revertible operations have a way back."""
+    non-ledger-revertible operations have a way back.
+
+    critical=True (irreversible ops like delete) waits for the backup to
+    finish so it is on disk before the destructive change proceeds -
+    otherwise the "safety net" would be racing the delete. Reversible ops
+    (ledger-undoable) back up asynchronously to avoid stalling the UI, and
+    on a huge collection even that is best-effort insurance behind the
+    ledger."""
+    state.last_checkpoint = {"reason": reason, "critical": critical,
+                             "created": None, "error": None}
     if mw is None or mw.col is None:
         return
     try:
-        mw.col.create_backup(
-            backup_folder=mw.pm.backupFolder(), force=True, wait_for_completion=False
+        created = mw.col.create_backup(
+            backup_folder=mw.pm.backupFolder(),
+            force=True,
+            wait_for_completion=critical,
         )
-    except Exception:
-        # Backups are defense-in-depth; their failure must not block the op.
-        pass
+        state.last_checkpoint["created"] = bool(created)
+    except Exception as exc:
+        # Backups are defense-in-depth; a failure must not block the op, but
+        # it must be visible (backend log + doctor), not silently swallowed.
+        state.last_checkpoint["error"] = str(exc)
+        _log_line(f"backup checkpoint failed ({reason}): {exc}")
 
 
 def _refresh_reviewer(note_ids: list[int]) -> None:

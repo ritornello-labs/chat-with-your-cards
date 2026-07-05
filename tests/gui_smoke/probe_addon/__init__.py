@@ -66,6 +66,197 @@ def _shortcut_keys() -> list[str]:
     ]
 
 
+_PNG_1PX = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108020000009077"
+    "53de0000000c4944415478da63f8cfc000000301010018dd8db00000000049"
+    "454e44ae426082"
+)
+
+
+def _new_note(front: str, tags: Any = None, deck: str = "Default", back: str = "b") -> int:
+    """Seed a real note in the disposable collection."""
+    assert mw is not None
+    model = mw.col.models.by_name("Basic")
+    note = mw.col.new_note(model)
+    note["Front"] = front
+    note["Back"] = back
+    if tags:
+        note.tags = list(tags)
+    mw.col.add_note(note, mw.col.decks.id(deck))
+    return int(note.id)
+
+
+def _backup_count() -> int:
+    assert mw is not None
+    try:
+        folder = Path(mw.pm.backupFolder())
+        return len(list(folder.glob("*.colpkg")))
+    except Exception:
+        return -1
+
+
+def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]], Any]) -> None:
+    """Drive the REAL ProposalManager and collection tools against the real
+    disposable collection - the real-Anki equivalents of the fake-collection
+    unit tests (col.tags.rename, col.set_deck, col.remove_notes,
+    col.create_backup, col.update_note, media dir)."""
+    assert mw is not None
+    proposals = state.proposals
+
+    def _rename_tag() -> dict[str, Any]:
+        ids = [_new_note(f"rename {i}", tags=["probe-old"]) for i in range(2)]
+        result = proposals.submit_rename_tag({"old_tag": "probe-old", "new_tag": "probe-new"})
+        proposals.accept({"id": result["proposal_id"]})
+        if len(mw.col.find_notes('tag:"probe-new"')) != 2:
+            raise AssertionError("rename_tag did not apply on the real collection")
+        if mw.col.find_notes('tag:"probe-old"'):
+            raise AssertionError("old tag still present after rename")
+        proposals.revert({"id": result["proposal_id"]})
+        if len(mw.col.find_notes('tag:"probe-old"')) != 2:
+            raise AssertionError("rename_tag revert did not restore the old tag")
+        return {"notes": ids}
+
+    check("bulk rename_tag apply+revert (real col.tags.rename)", _rename_tag)
+
+    def _move_cards() -> dict[str, Any]:
+        nid = _new_note("move me", deck="Default")
+        cid = mw.col.get_note(nid).cards()[0].id
+        result = proposals.submit_move_cards({"query": f"nid:{nid}", "deck": "ProbeArchive"})
+        proposals.accept({"id": result["proposal_id"]})
+        archive = mw.col.decks.id("ProbeArchive")
+        if mw.col.get_card(cid).did != archive:
+            raise AssertionError("move_cards did not change the deck (real col.set_deck)")
+        proposals.revert({"id": result["proposal_id"]})
+        if mw.col.get_card(cid).did != mw.col.decks.id("Default"):
+            raise AssertionError("move_cards revert did not restore the deck")
+        return {"card": cid}
+
+    check("bulk move_cards apply+revert (real col.set_deck)", _move_cards)
+
+    def _change_set() -> dict[str, Any]:
+        ids = [_new_note(f"cs {i}", back="orig") for i in range(3)]
+        cs = proposals.open_change_set({"title": "probe sweep"})
+        cs_id = cs["change_set_id"]
+        for i, nid in enumerate(ids):
+            proposals.add_to_change_set(
+                {"change_set_id": cs_id, "note_id": nid, "field_changes": {"Back": f"swept {i}"}}
+            )
+        proposals.close_change_set({"change_set_id": cs_id, "summary": "s"})
+        proposals.accept({"id": cs_id})
+        for i, nid in enumerate(ids):
+            if mw.col.get_note(nid)["Back"] != f"swept {i}":
+                raise AssertionError("change set did not apply on the real collection")
+        proposals.revert({"id": cs_id})
+        if mw.col.get_note(ids[0])["Back"] != "orig":
+            raise AssertionError("change set revert did not restore fields")
+        return {"notes": len(ids)}
+
+    check("change set apply+revert (real col.update_note)", _change_set)
+
+    def _delete_with_backup() -> dict[str, Any]:
+        ids = [_new_note(f"del {i}", tags=["probe-del"]) for i in range(2)]
+        before = _backup_count()
+        result = proposals.submit_delete_notes({"note_ids": ids})
+        proposals.accept({"id": result["proposal_id"]})
+        if any(nid in mw.col.find_notes('tag:"probe-del"') for nid in ids):
+            raise AssertionError("delete_notes did not remove notes")
+        # The delete is irreversible, so its checkpoint is SYNCHRONOUS: by the
+        # time accept() returns, the real create_backup has run. Assert on its
+        # captured result (deterministic - no file-timing races) that the real
+        # Anki backup actually succeeded.
+        cp = getattr(state, "last_checkpoint", None)
+        if not cp or cp.get("error"):
+            raise AssertionError(f"delete checkpoint failed: {cp}")
+        if cp.get("critical") is not True:
+            raise AssertionError(f"delete checkpoint was not synchronous: {cp}")
+        if cp.get("created") is not True:
+            raise AssertionError(
+                f"real create_backup did not create a backup before delete: {cp}"
+            )
+        # create_backup returning True is the authoritative signal. The file
+        # COUNT is not a reliable check: Anki rotates backups, so a forced
+        # backup within the same time bucket replaces the previous one rather
+        # than adding (observed: was 1, still 1, created=True). Just assert a
+        # backup file exists on disk.
+        after = _backup_count()
+        if after == 0:
+            raise AssertionError("checkpoint reported success but no .colpkg on disk")
+        # Delete is not ledger-revertible.
+        proposals.revert({"id": result["proposal_id"]})
+        if any(_note_exists(nid) for nid in ids):
+            raise AssertionError("delete revert unexpectedly restored notes")
+        return {"checkpoint": cp, "backups_before": before, "backups_after": after}
+
+    check("delete notes + real synchronous backup checkpoint", _delete_with_backup)
+
+    def _trusted_writes() -> dict[str, Any]:
+        old_mode = state.config.get("permission_mode", "default")
+        state.config["permission_mode"] = "trusted-writes"
+        proposals.new_session()  # reset the write budget
+        try:
+            result = proposals.submit_create(
+                {"note_type": "Basic", "deck": "Default", "tags": ["probe-trusted"],
+                 "fields": {"Front": "trusted create", "Back": "b"}, "rationale": "t"}
+            )
+            if result.get("status") != "created":
+                raise AssertionError(f"trusted create not applied directly: {result}")
+            if not mw.col.find_notes('tag:"probe-trusted"'):
+                raise AssertionError("trusted create left no note in the collection")
+        finally:
+            state.config["permission_mode"] = old_mode
+            proposals.new_session()
+        return {"status": result.get("status")}
+
+    check("trusted-writes direct apply", _trusted_writes)
+
+    def _card_images() -> dict[str, Any]:
+        addon = importlib.import_module(ADDON_PACKAGE)
+        media_dir = Path(mw.col.media.dir())
+        (media_dir / "probe.png").write_bytes(_PNG_1PX)
+        nid = _new_note("has image", back='<img src="probe.png">')
+        from chat_with_your_cards.tools import build_registry
+
+        registry = build_registry()
+        blocks = registry.call(addon._ToolCtx(), "get_card_images", {"note_id": nid})
+        images = [b for b in blocks if b.get("type") == "image"]
+        if len(images) != 1 or images[0]["mimeType"] != "image/png":
+            raise AssertionError(f"get_card_images failed on real media: {blocks}")
+        return {"images": len(images)}
+
+    check("get_card_images against real media dir", _card_images)
+
+    def _reviewer_refresh() -> dict[str, Any]:
+        # Highest-value real-Anki path: edit the note under review and confirm
+        # the reviewer re-renders in place (private _showQuestion API).
+        nid = _new_note("review q", deck="ProbeReview", back="old back")
+        mw.col.decks.select(mw.col.decks.id("ProbeReview"))
+        mw.moveToState("review")
+        QTest.qWait(400)
+        reviewer = getattr(mw, "reviewer", None)
+        card = getattr(reviewer, "card", None) if reviewer else None
+        if card is None or card.nid != nid:
+            return {"attempted": True, "in_review": False, "note": "could not enter review"}
+        result = proposals.submit_edit({"note_id": nid, "field_changes": {"Front": "review q EDITED"}})
+        proposals.accept({"id": result["proposal_id"]})
+        QTest.qWait(300)
+        fresh = mw.reviewer.card.note()["Front"] if mw.reviewer.card else ""
+        mw.moveToState("deckBrowser")
+        if fresh != "review q EDITED":
+            raise AssertionError(f"reviewer did not refresh after edit: {fresh!r}")
+        return {"attempted": True, "in_review": True, "refreshed": True}
+
+    check("reviewer refresh after edit (real review state)", _reviewer_refresh)
+
+
+def _note_exists(note_id: int) -> bool:
+    assert mw is not None
+    try:
+        mw.col.get_note(note_id)
+        return True
+    except Exception:
+        return False
+
+
 def _run_checks() -> dict[str, Any]:
     assert mw is not None
     checks: list[dict[str, Any]] = []
@@ -299,6 +490,10 @@ def _run_checks() -> dict[str, Any]:
         return {"note_id": note_id, "card": card, "resolved": resolved}
 
     proposal_info = check("proposal accept round-trip", _proposal_round_trip)
+
+    # Real-collection stress tests: the collection-mutation paths driven
+    # against the real disposable collection, not the unit tests' fakes.
+    _collection_flow_checks(state, check)
 
     return {
         "ok": True,
