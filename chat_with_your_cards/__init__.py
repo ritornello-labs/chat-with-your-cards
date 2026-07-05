@@ -480,6 +480,10 @@ def _open_in_claude_code(target: str = "terminal") -> None:
     session by id (not supported upstream yet), so we open a NEW desktop
     session in agent-home with a prompt pointing at our transcript file -
     the agent reads it and picks the conversation up from there.
+
+    See DESIGN.md section 14 "Tracked upstream dependencies": when Claude
+    Desktop gains a resume-by-uuid deep link, replace the transcript
+    handoff below with a direct resume link.
     """
     import shlex
     import subprocess
