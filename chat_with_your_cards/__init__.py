@@ -41,8 +41,22 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "created_tag": "ai-created",
     "edited_tag": "ai-edited",
     "session_tag_prefix": "ai-chat-dock::session-",
+    "learning_nudge_threshold": 10,
+    "learning_nudge_days": 7,
     "pins": {},
 }
+
+# Visible kickoff message for the skill-review chat (the nudge chip and the
+# History note make it clear this starts a NEW chat; the previous one stays
+# resumable in History).
+SKILL_REVIEW_PROMPT = (
+    "I've been editing the cards you created or changed. Use "
+    "get_edit_observations to see what I changed, look for recurring "
+    "patterns across the observations (the skill-maintenance skill has the "
+    "ground rules), explain in plain language what you notice, then propose "
+    "an update to the card-authoring skill with propose_skill_update. If "
+    "there is no real pattern, just say so."
+)
 
 USER_FILES = Path(__file__).resolve().parent / "user_files"
 
@@ -56,6 +70,7 @@ class AddonState:
     proposals: Optional[ProposalManager] = None
     transcripts: Any = None
     approvals: Any = None
+    learning: Any = None
     last_checkpoint: Any = None
     shortcuts: list[Any] = field(default_factory=list)
     web_ready: bool = False
@@ -118,6 +133,13 @@ def _setup() -> None:
             state.transcripts.record(payload)
         dock.bridge.push(payload)
 
+    from .learning import LearningStore
+    from .skills import materialize_agent_skills
+
+    conventions = load_conventions(USER_FILES, str(config.get("conventions_prompt", "")))
+    card_skill_path = materialize_agent_skills(USER_FILES / "agent-home")
+    state.learning = LearningStore(USER_FILES / "learning", card_skill_path)
+
     state.proposals = ProposalManager(
         get_col=lambda: mw.col,
         push=recording_push,
@@ -125,12 +147,9 @@ def _setup() -> None:
         save_pins=_save_pins,
         after_write=_refresh_reviewer,
         checkpoint=_backup_checkpoint,
+        observe=_learning_observe,
+        apply_skill=_apply_skill_update,
     )
-
-    from .skills import materialize_agent_skills
-
-    conventions = load_conventions(USER_FILES, str(config.get("conventions_prompt", "")))
-    materialize_agent_skills(USER_FILES / "agent-home")
 
     def system_prompt() -> str:
         cache = state.stats_cache
@@ -181,6 +200,10 @@ class _ToolCtx:
     @property
     def config(self) -> dict[str, Any]:
         return state.config
+
+    @property
+    def learning(self) -> Any:
+        return state.learning
 
 
 def _ensure_mcp() -> tuple[str, str]:
@@ -325,6 +348,7 @@ def _wire_bridge() -> None:
     bridge.on("list_history", lambda _msg: controller.push_history_list())
     bridge.on("load_history", lambda msg: controller.load_history(str(msg.get("id", ""))))
     bridge.on("run_doctor", lambda _msg: _run_doctor())
+    bridge.on("start_skill_review", lambda _msg: _start_skill_review())
     bridge.on(
         "tool_approval_response",
         lambda msg: state.approvals.respond(msg) if state.approvals else None,
@@ -355,6 +379,7 @@ def _mark_web_ready() -> None:
     if state.controller is not None:
         state.controller.push_context_chip()
     _push_collection_meta()
+    _scan_learning()
 
 
 def _push_collection_meta() -> None:
@@ -406,6 +431,99 @@ def _save_pins(pins: dict[str, Any]) -> None:
     config = mw.addonManager.getConfig(__name__) or {}
     config["pins"] = pins
     mw.addonManager.writeConfig(__name__, config)
+
+
+def _learning_observe(event: dict[str, Any]) -> None:
+    """Capture hook the ProposalManager fires at content-write sites; feeds
+    the learning store (DESIGN.md section 15). Best-effort: learning must
+    never break a write."""
+    store = state.learning
+    if store is None or mw is None:
+        return
+    kind = str(event.get("event", ""))
+    try:
+        note_ids = [int(n) for n in (event.get("note_ids") or [])]
+        if kind == "applied":
+            store.snapshot_notes(mw.col, note_ids)
+        elif kind == "resync":
+            store.snapshot_notes(mw.col, note_ids, add=False)
+        elif kind == "reviewed":
+            recorded = store.record_review(
+                proposal_kind=str(event.get("proposal_kind", "")),
+                note_type=str(event.get("note_type", "")),
+                deck_before=str(event.get("deck_before", "")),
+                deck_after=str(event.get("deck_after", "")),
+                tags_before=event.get("tags_before"),
+                tags_after=event.get("tags_after"),
+                fields_before=event.get("fields_before"),
+                fields_after=event.get("fields_after"),
+                declined_fields=event.get("declined_fields"),
+            )
+            if recorded:
+                _push_learning_state()
+    except Exception as exc:
+        _log_line(f"learning capture failed ({kind}): {exc}")
+
+
+def _apply_skill_update(proposal: Any) -> list[str]:
+    """Accepted skill-update proposal: archive the prior skill, write the new
+    one, consume the observations it was based on."""
+    from .proposals import ProposalError
+
+    store = state.learning
+    if store is None:
+        raise ProposalError("the learning store is not available")
+    backup = store.write_skill(str(proposal.op_args.get("new_content", "")))
+    store.consume([str(i) for i in proposal.op_args.get("observation_ids") or []])
+    _push_learning_state()
+    if backup is not None:
+        return [
+            "Previous skill version archived as "
+            f"user_files/learning/skill-backups/{backup.name}"
+        ]
+    return []
+
+
+def _push_learning_state() -> None:
+    """Nudge chip state: pending observation count + whether to nudge."""
+    if state.dock is None or state.learning is None:
+        return
+    nudge = state.learning.nudge_state(
+        int(state.config.get("learning_nudge_threshold", 10)),
+        int(state.config.get("learning_nudge_days", 7)),
+    )
+    state.dock.bridge.push({"type": "learning", **nudge})
+
+
+def _scan_learning() -> None:
+    """Diff tracked notes against their snapshots (catches edits made in the
+    editor, the Browser, or on another device after sync). Cheap: one bulk
+    mod query, full reads only for changed notes."""
+    if state.learning is None or mw is None or mw.col is None:
+        return
+    try:
+        found = state.learning.scan(mw.col)
+        if found:
+            _log_line(f"learning scan: {found} new observation(s)")
+    except Exception as exc:
+        _log_line(f"learning scan failed: {exc}")
+    _push_learning_state()
+
+
+def _start_skill_review() -> None:
+    """Nudge chip clicked: fresh scan, then a NEW chat seeded with the
+    reflection prompt (the previous chat stays resumable in History)."""
+    if state.controller is None:
+        return
+    _scan_learning()
+    state.controller.new_chat()
+    if state.dock is not None:
+        # The webview normally renders the user bubble itself on send; this
+        # send originates in Python, so push it explicitly (transcripts get
+        # it from send_user_message - a plain bridge push avoids recording
+        # the message twice).
+        state.dock.bridge.push({"type": "user_message", "text": SKILL_REVIEW_PROMPT})
+    state.controller.send_user_message(SKILL_REVIEW_PROMPT)
 
 
 def _log_line(message: str) -> None:
@@ -475,6 +593,7 @@ def _run_doctor() -> None:
     config = dict(state.config)
     backend_kind = state.controller.backend_kind if state.controller else "unset"
     mcp_url = state.mcp.url if state.mcp else None
+    learning_stats = state.learning.stats() if state.learning else None
 
     def work() -> list[dict[str, Any]]:
         return gather_report(
@@ -483,6 +602,7 @@ def _run_doctor() -> None:
             mcp_url=mcp_url,
             agent_home=USER_FILES / "agent-home",
             find_claude=find_claude_cli,
+            learning=learning_stats,
         )
 
     def done(future: Any) -> None:

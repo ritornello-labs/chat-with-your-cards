@@ -65,6 +65,12 @@
   "review this session's notes in the Browser" and undo-session actions. Set to
   an empty string to disable session tagging (those actions then no-op). With
   `created_tag`, `edited_tag`, and this all empty, AI notes get no automatic tags.
+- `learning_nudge_threshold` (default `10`): how many edits to AI-written
+  cards accumulate before the dock suggests reviewing them for patterns and
+  updating the card-authoring skill (a new chat the assistant starts only
+  when you click; every skill change is confirmed on a proposal card).
+- `learning_nudge_days` (default `7`): also nudge when any unreviewed edit is
+  older than this many days, even below the threshold.
 - `pins` (managed from the dock's Pins panel, not edited here): pinned deck,
   note type, tags, and prefilled field defaults applied to every proposed note.
 - `stats_refresh_minutes` (default `30`): how often the collection overview

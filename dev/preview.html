@@ -239,6 +239,32 @@
             }) });
             dispatchLater(step(150), { type: "done" });
         }
+        function proposeSkillUpdate() {
+            var t = 0;
+            var step = function (ms) { t += ms; return t; };
+            var pre = "I looked across your 12 edits. Three patterns are consistent:\n\n";
+            pre.split(" ").forEach(function (w) {
+                dispatchLater(step(25), { type: "text_delta", text: w + " " });
+            });
+            var payload = {
+                id: "sk1", kind: "skill_update", status: "pending",
+                note_type: "", deck: "", tags: [], note_id: null, fields: [],
+                add_tags: [], remove_tags: [], warnings: [],
+                title: "Update the card-authoring skill",
+                rationale: "Teach the skill to keep answers to one line and stop bolding whole phrases.",
+                count: 12,
+                samples: [
+                    { text: "You shortened 7 answers to a single line, moving detail to the back-context field." },
+                    { text: "You removed <b> from full phrases 5 times, keeping it only on the key term." },
+                    { text: "You deleted both cards that asked yes/no questions." },
+                ],
+                op_args: { diff: "--- skill (current)\n+++ skill (proposed)\n@@ -12,7 +12,8 @@\n-- **Answers are short.** Lead with the core answer; push nice-to-know\n-  context into the note's extra/back-context field, visually secondary.\n+- **Answers are ONE line.** Lead with the core answer only; everything\n+  else goes to the extra/back-context field, visually secondary.\n+- Bold ONLY the single key term, never a whole phrase.\n" },
+                items: [], open: false,
+            };
+            demoProposals.sk1 = payload;
+            dispatchLater(step(400), { type: "proposal", proposal: payload });
+            dispatchLater(step(150), { type: "done" });
+        }
         function pushLedger() {
             window.chatUI.dispatch({
                 type: "ledger",
@@ -262,6 +288,13 @@
                 window.chatUI.dispatch({ type: "pins", pins: { deck: "", note_type: "", tags: [], fields: {} } });
                 window.chatUI.dispatch({ type: "agent", backend: "claude", model: "", effort: "", mode: "default" });
                 window.chatUI.dispatch({ type: "dock_state", floating: false });
+                window.chatUI.dispatch({ type: "learning", pending: 12, nudge: true });
+            } else if (msg.type === "start_skill_review") {
+                window.chatUI.dispatch({ type: "reset" });
+                window.chatUI.dispatch({ type: "learning", pending: 12, nudge: false });
+                window.chatUI.dispatch({ type: "user_message",
+                    text: "I've been editing the cards you created or changed. Review my edits and propose a skill update." });
+                proposeSkillUpdate();
             } else if (msg.type === "toggle_float") {
                 window.__floating = !window.__floating;
                 window.chatUI.dispatch({ type: "dock_state", floating: window.__floating });
@@ -318,6 +351,13 @@
                     after: { question: front, answer: front + "<hr id=answer>" + back, css: demoCss },
                 } });
             } else if (msg.type === "proposal_accept") {
+                if (demoProposals[msg.id] && demoProposals[msg.id].kind === "skill_update") {
+                    window.chatUI.dispatch({ type: "proposal_resolved", id: msg.id, status: "accepted",
+                        revertible: false,
+                        warnings: ["Previous skill version archived as user_files/learning/skill-backups/SKILL-1751700000.md"] });
+                    window.chatUI.dispatch({ type: "learning", pending: 0, nudge: false });
+                    return;
+                }
                 ledgerEntries.push({ id: msg.id, kind: "create", note_id: 424242, label: "demo note", undone: false });
                 window.chatUI.dispatch({ type: "proposal_resolved", id: msg.id, status: "accepted", note_id: 424242 });
                 pushLedger();

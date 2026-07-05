@@ -134,6 +134,8 @@ class ProposalManager:
         save_pins: Callable[[dict[str, Any]], None] | None = None,
         after_write: Callable[[list[int]], None] | None = None,
         checkpoint: Callable[[str, bool], None] | None = None,
+        observe: Callable[[dict[str, Any]], None] | None = None,
+        apply_skill: Callable[["Proposal"], list[str]] | None = None,
     ) -> None:
         self._get_col = get_col
         self._push = push
@@ -147,6 +149,15 @@ class ProposalManager:
         # Second arg = critical: True forces a SYNCHRONOUS backup (on disk
         # before the op proceeds) for irreversible operations like delete.
         self._checkpoint = checkpoint or (lambda _reason, _critical: None)
+        # Learning capture (DESIGN.md section 15): "applied" after content
+        # writes (snapshot what the system wrote), "resync" after reverts
+        # (refresh already-tracked notes only), "reviewed" with the diff
+        # between what the agent proposed and what the user accepted.
+        self._observe = observe or (lambda _event: None)
+        # Applies an accepted skill-update proposal (writes the skill file,
+        # archives the prior version, consumes observations); returns
+        # warnings/notes to show on the resolved card.
+        self._apply_skill = apply_skill
         self._proposals: dict[str, Proposal] = {}
         self._ledger: list[LedgerEntry] = []
         self._counter = 0
@@ -621,6 +632,60 @@ class ProposalManager:
             "note": "Deletion always requires explicit user confirmation.",
         }
 
+    def submit_skill_update(
+        self, args: dict[str, Any], *, old_content: str, observation_ids: list[str]
+    ) -> dict[str, Any]:
+        """Propose an update to the card-authoring skill from observed edit
+        patterns. ALWAYS user-confirmed, in every permission mode: a skill
+        change alters all future agent behavior, so the blast radius is high
+        and the confirmation is cheap."""
+        import difflib
+
+        summary = str(args.get("summary", "")).strip()
+        new_content = str(args.get("new_content", ""))
+        patterns = [str(p).strip() for p in (args.get("patterns") or []) if str(p).strip()]
+        if not summary or not patterns:
+            raise ProposalError(
+                "summary and patterns are required: the user reads them to "
+                "decide whether the update reflects their actual preferences"
+            )
+        if not new_content.strip():
+            raise ProposalError("new_content must be the full revised skill markdown")
+        if new_content.strip() == old_content.strip():
+            raise ProposalError("new_content is identical to the current skill")
+        diff = "".join(
+            difflib.unified_diff(
+                old_content.splitlines(keepends=True),
+                new_content.splitlines(keepends=True),
+                fromfile="skill (current)",
+                tofile="skill (proposed)",
+            )
+        )
+        proposal = Proposal(
+            id=self._next_id(),
+            kind="skill_update",
+            note_type="",
+            deck="",
+            tags=[],
+            fields={},
+            title="Update the card-authoring skill",
+            rationale=summary,
+            samples=[{"text": p} for p in patterns],
+            count=len(observation_ids),
+            op_args={
+                "new_content": new_content,
+                "diff": diff,
+                "observation_ids": list(observation_ids),
+            },
+        )
+        self._proposals[proposal.id] = proposal
+        self._push({"type": "proposal", "proposal": proposal.to_payload()})
+        return {
+            "status": "pending_user_review",
+            "proposal_id": proposal.id,
+            "note": "Skill updates always require explicit user confirmation.",
+        }
+
     # ---- change sets: many small edits reviewed as one unit ----
 
     def open_change_set(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -767,6 +832,11 @@ class ProposalManager:
                 touched = self._accept_delete(proposal)
             elif proposal.kind == "change_set":
                 touched = self._accept_change_set(proposal)
+            elif proposal.kind == "skill_update":
+                if self._apply_skill is None:
+                    raise ProposalError("skill updates are not available")
+                proposal.warnings = self._apply_skill(proposal)
+                proposal.status = ACCEPTED
             else:
                 raise ProposalError(f"unknown proposal kind {proposal.kind!r}")
             proposal.status = AUTO_ACCEPTED if direct else proposal.status
@@ -782,7 +852,7 @@ class ProposalManager:
                 "status": proposal.status,
                 "note_id": proposal.note_id,
                 "warnings": proposal.warnings,
-                "revertible": proposal.kind != "delete",
+                "revertible": proposal.kind not in ("delete", "skill_update"),
             }
         )
         self._push_ledger()
@@ -936,12 +1006,16 @@ class ProposalManager:
                 data={"items": priors},
             )
         )
+        self._observe({"event": "applied", "note_ids": list(applied)})
         return applied, skipped
 
     def _accept_create(
         self, proposal: Proposal, msg: dict[str, Any], final_fields: dict[str, str]
     ) -> None:
         col = self._col()
+        orig_fields = dict(proposal.fields)
+        orig_tags = list(proposal.tags)
+        orig_deck = proposal.deck
         proposal.deck = str(msg.get("deck") or proposal.deck)
         proposal.tags = [
             str(t).strip() for t in (msg.get("tags") or proposal.tags) if str(t).strip()
@@ -953,6 +1027,19 @@ class ProposalManager:
         proposal.fields = {name: final_fields.get(name, "") for name in field_names}
         proposal.note_id = self._apply_create(col, model, proposal)
         proposal.status = ACCEPTED
+        self._observe(
+            {
+                "event": "reviewed",
+                "proposal_kind": "create",
+                "note_type": proposal.note_type,
+                "deck_before": orig_deck,
+                "deck_after": proposal.deck,
+                "tags_before": orig_tags,
+                "tags_after": list(proposal.tags),
+                "fields_before": orig_fields,
+                "fields_after": dict(proposal.fields),
+            }
+        )
 
     def _accept_edit(
         self, proposal: Proposal, msg: dict[str, Any], final_fields: dict[str, str]
@@ -1010,6 +1097,17 @@ class ProposalManager:
                 prior_fields=prior_fields,
                 prior_tags=prior_tags,
             )
+        )
+        self._observe({"event": "applied", "note_ids": [int(proposal.note_id)]})
+        self._observe(
+            {
+                "event": "reviewed",
+                "proposal_kind": "edit",
+                "note_type": proposal.note_type,
+                "fields_before": dict(proposal.fields),
+                "fields_after": dict(apply_fields),
+                "declined_fields": [n for n in proposal.fields if n not in apply_fields],
+            }
         )
 
     def reject(self, msg: dict[str, Any]) -> None:
@@ -1069,6 +1167,9 @@ class ProposalManager:
                         prior_fields=prior_fields,
                         prior_tags=prior_tags,
                     )
+                )
+                self._observe(
+                    {"event": "applied", "note_ids": [int(proposal.note_id)]}
                 )
         except Exception as exc:  # ProposalError or collection trouble
             self._push(
@@ -1167,6 +1268,12 @@ class ProposalManager:
                 "this change cannot be reverted from the ledger; restore the "
                 "backup checkpoint instead (File > Switch Profile > Open Backup)"
             )
+        # A revert is the system writing, not the user editing: resync the
+        # learning snapshots of already-tracked notes so the post-revert state
+        # is the new baseline (a create-revert drops its snapshot).
+        resync: list[int] = [entry.note_id] if entry.note_id else []
+        if entry.kind == "change_set":
+            resync = [int(i["note_id"]) for i in entry.data.get("items", [])]
         if entry.kind == "create":
             try:
                 note = col.get_note(entry.note_id)
@@ -1217,6 +1324,8 @@ class ProposalManager:
                 note.tags = list(entry.prior_tags)
             col.update_note(note)
         entry.undone = True
+        if resync:
+            self._observe({"event": "resync", "note_ids": resync})
 
     def _push_ledger(self) -> None:
         self._push(
@@ -1343,6 +1452,7 @@ class ProposalManager:
                 label=_short_label(next(iter(proposal.fields.values()), "")),
             )
         )
+        self._observe({"event": "applied", "note_ids": [int(note.id)]})
         return int(note.id)
 
     # ---- card previews (best-effort; None when rendering unavailable) ----

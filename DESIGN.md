@@ -283,3 +283,65 @@ Flow: agent calls `propose_note` → ProposalManager validates (note type exists
    - Docs to re-verify: https://code.claude.com/docs/en/deep-links and https://support.claude.com/en/articles/14729294-open-claude-desktop-with-a-link (current scheme is `claude://code/new` with `q`, `folder`, `file`).
 2. **Pi has no built-in MCP.** The Pi adapter (deferred) will need a pi TypeScript extension bridging its tool calls to our MCP HTTP endpoint. Re-check whether Pi has added native MCP support before writing that bridge.
 3. **Codex local install was broken** during the 2026-07-05 probe (volta package missing the platform vendor binary → spawn ENOENT). Re-check before building the Codex adapter; also a live test case for the doctor panel.
+
+## 15. Learning from the user's edits (skill reflection loop)
+
+The agent gets better by watching how the user changes AI-written cards
+and folding confirmed patterns back into the card-authoring skill. The
+loop is capture -> batch -> reflect -> confirm; nothing changes agent
+behavior without an explicit user accept.
+
+- **Capture, channel 1 (accept-time diffs).** When a proposal is accepted,
+  the diff between what the agent proposed and what the user accepted
+  (fields, tags, deck, declined field changes) is recorded as a `reviewed`
+  observation. Verbatim accepts record nothing.
+- **Capture, channel 2 (snapshot diffs).** Every content write the system
+  makes stores a per-note snapshot (the last state the system left the
+  note in) in `user_files/learning/snapshots.json`. On dock open, a scan
+  compares tracked notes against their snapshots: field/tag changes become
+  `edited_later` observations, deletions become `deleted_later` (the
+  strongest rejection signal). Because it is snapshot-based rather than
+  hook-based, it catches edits made in the Browser, the editor, or on
+  AnkiDroid/AnkiMobile after a sync. The scan is one bulk `notes.mod`
+  query; full note reads happen only for changed notes. Same-second edits
+  can hide behind the 1s `mod` granularity (accepted; a later edit or any
+  other change re-exposes them). Reverts emit a `resync` (refresh tracked
+  snapshots only) so system writes are never mistaken for user edits.
+- **No cap, by design (decision 2026-07-05).** One snapshot per AI-touched
+  note means the store is a constant factor of the AI-touched slice of the
+  collection itself (~1 KB/note); a cap (and its config + resource-meter
+  UI) would solve a problem that cannot occur. The doctor panel reports
+  snapshots / pending observations / bytes.
+- **Batch + nudge.** Observations accumulate in
+  `user_files/learning/observations.jsonl` (append-only, replayed on
+  load; consumption is an event). A footer nudge appears at
+  `learning_nudge_threshold` pending observations (default 10) or when
+  any observation is older than `learning_nudge_days` (default 7).
+  Dismissing hides it until MORE observations accumulate. The nudge states
+  explicitly that reviewing starts a new chat and the current one stays in
+  History.
+- **Reflection chat.** Clicking the nudge starts a new chat seeded with a
+  visible kickoff message (pushed as a `user_message` event, since the
+  webview normally renders user bubbles itself). The agent calls
+  `get_edit_observations` (pending observations + current skill), reasons
+  about patterns per the `skill-maintenance` meta-skill, and calls
+  `propose_skill_update` with a summary, plain-language pattern
+  statements, and the full revised skill markdown.
+- **Meta-skill, not hardcoded structure (decision 2026-07-05).** HOW the
+  skill gets updated is itself a user-editable skill
+  (`skill-maintenance/SKILL.md`). The default instructs arbitrary inline
+  edits - sharpen/merge/delete bullets where they belong, no separate
+  "learned preferences" section; users who want a different organization
+  edit the meta-skill, not the code.
+- **Always gated.** `skill_update` proposals require explicit user
+  confirmation in EVERY permission mode (including trusted-writes) and are
+  excluded from bulk accept-all: a skill edit changes all future agent
+  behavior. The card shows the pattern statements and a unified diff of
+  the skill. Accepting writes the skill, archives the prior version to
+  `user_files/learning/skill-backups/`, and consumes the observations it
+  was based on; there is no ledger revert (restore = copy the archive
+  back).
+- Deterministic coverage: `tests/test_learning.py` + observe/skill-update
+  tests in `tests/test_proposals.py` (fake collection, field-compare scan
+  path) and a real-collection GUI-smoke check (bulk-mod scan path, real
+  SKILL.md write/archive/consume). Only pattern *quality* is manual QA.

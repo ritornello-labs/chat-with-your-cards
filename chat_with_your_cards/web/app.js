@@ -369,6 +369,7 @@
         bulk: "Bulk operation",
         delete: "Delete notes",
         change_set: "Change set",
+        skill_update: "Skill update",
     };
 
     function bulkOpLabel(data) {
@@ -408,6 +409,41 @@
                 body.appendChild(el("div", "cwyc-bulk-sample-text", sample.text));
             }
         });
+    }
+
+    function renderSkillUpdateBody(record, body) {
+        // Pattern statements the user judges, then the skill diff to audit.
+        var data = record.data;
+        if ((data.samples || []).length) {
+            var list = el("ul", "cwyc-skill-patterns");
+            data.samples.forEach(function (sample) {
+                if (sample.text) {
+                    list.appendChild(el("li", "", sample.text));
+                }
+            });
+            body.appendChild(list);
+        }
+        if (data.count) {
+            body.appendChild(
+                el("div", "cwyc-skill-basis",
+                    "Based on " + data.count + " observation(s) of your edits. " +
+                    "Accepting updates the card-authoring skill and clears them; " +
+                    "the previous version is archived.")
+            );
+        }
+        var diff = (data.op_args || {}).diff || "";
+        if (diff) {
+            var details = document.createElement("details");
+            details.className = "cwyc-cs-details";
+            var summary = document.createElement("summary");
+            summary.textContent = "Skill diff";
+            details.appendChild(summary);
+            var pre = document.createElement("pre");
+            pre.className = "cwyc-skill-diff";
+            pre.textContent = diff;
+            details.appendChild(pre);
+            body.appendChild(details);
+        }
     }
 
     function renderChangeSetBody(record, body) {
@@ -566,6 +602,8 @@
                 (data.kind === "edit" && data.deck ? " · " + data.deck : "");
         } else if (data.kind === "change_set") {
             where = data.title || "";
+        } else if (data.kind === "skill_update") {
+            where = data.title || "Card-authoring skill";
         }
         head.appendChild(el("span", "cwyc-proposal-where", where));
         var pill = el("span", "cwyc-proposal-status", proposalStatusLabel(data.status));
@@ -590,6 +628,8 @@
             renderCreateFields(record, body);
         } else if (data.kind === "change_set") {
             renderChangeSetBody(record, body);
+        } else if (data.kind === "skill_update") {
+            renderSkillUpdateBody(record, body);
         } else {
             renderBulkBody(record, body); // bulk + delete
         }
@@ -659,7 +699,8 @@
             reject.addEventListener("click", function () {
                 post({ type: "proposal_reject", id: data.id });
             });
-            var acceptLabel = data.kind === "delete" ? "Delete" : "Accept";
+            var acceptLabel = data.kind === "delete" ? "Delete"
+                : data.kind === "skill_update" ? "Update skill" : "Accept";
             var acceptCls = "cwyc-btn-accept cwyc-primary" +
                 (data.kind === "delete" ? " cwyc-btn-danger" : "");
             var accept = el("button", acceptCls, acceptLabel);
@@ -1549,9 +1590,44 @@
                 uiConfig.suggested_questions = payload.suggested_questions !== false;
                 refreshSuggestion();
                 break;
+            case "learning":
+                renderLearning(payload);
+                break;
+            case "user_message":
+                // Python-initiated send (the skill-review kickoff): render the
+                // user bubble + streaming state the composer normally handles.
+                addUserMessage(payload.text || "");
+                startAssistantMessage();
+                setStreaming(true);
+                break;
             default:
                 // Unknown event types are ignored on purpose.
                 break;
+        }
+    }
+
+    /* ---- learning nudge ---- */
+
+    // Dismiss hides the nudge until MORE observations accumulate (not
+    // forever): re-nudging on the same count would just nag.
+    var learningDismissedAt = -1;
+    var learningPending = 0;
+
+    function renderLearning(payload) {
+        learningPending = payload.pending || 0;
+        var banner = document.getElementById("cwyc-learning-nudge");
+        if (!banner) {
+            return;
+        }
+        var show = Boolean(payload.nudge) && learningPending > learningDismissedAt;
+        banner.hidden = !show;
+        if (show) {
+            var text = document.getElementById("cwyc-learning-nudge-text");
+            if (text) {
+                text.textContent =
+                    "You’ve made " + learningPending + " edit(s) to AI-written " +
+                    "cards since the last skill review.";
+            }
         }
     }
 
@@ -1716,6 +1792,14 @@
         document.getElementById("cwyc-pin-tags").addEventListener("click", function () {
             tagEntry.focus();
         });
+        document.getElementById("cwyc-learning-review").addEventListener("click", function () {
+            document.getElementById("cwyc-learning-nudge").hidden = true;
+            post({ type: "start_skill_review" });
+        });
+        document.getElementById("cwyc-learning-dismiss").addEventListener("click", function () {
+            learningDismissedAt = learningPending;
+            document.getElementById("cwyc-learning-nudge").hidden = true;
+        });
         document.getElementById("cwyc-ledger-undo").addEventListener("click", function () {
             post({ type: "undo_session" });
         });
@@ -1723,7 +1807,13 @@
             post({ type: "open_session_browser" });
         });
         document.getElementById("cwyc-bulk-accept").addEventListener("click", function () {
-            pendingProposalIds().forEach(acceptProposal);
+            // Skill updates never ride along a bulk accept: a change to all
+            // future agent behavior deserves its own deliberate click.
+            pendingProposalIds().forEach(function (id) {
+                if (proposals[id].data.kind !== "skill_update") {
+                    acceptProposal(id);
+                }
+            });
         });
         document.getElementById("cwyc-bulk-reject").addEventListener("click", function () {
             pendingProposalIds().forEach(function (id) {

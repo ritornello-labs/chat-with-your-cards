@@ -225,6 +225,65 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
 
     check("get_card_images against real media dir", _card_images)
 
+    def _learning_flow() -> dict[str, Any]:
+        # The edit-pattern learning loop end-to-end on the real collection:
+        # accept-time diff -> snapshot -> direct col edit found by scan (real
+        # notes.mod bulk query) -> skill-update proposal writes the real
+        # SKILL.md, archives the old one, consumes the observations.
+        store = state.learning
+        if store is None:
+            raise AssertionError("learning store missing from add-on state")
+        store.consume(store.pending_ids())  # isolate from earlier checks
+        result = proposals.submit_create(
+            {"note_type": "Basic", "deck": "Default", "tags": [],
+             "fields": {"Front": "learn front", "Back": "agent answer"},
+             "rationale": "t"}
+        )
+        proposals.accept(
+            {"id": result["proposal_id"],
+             "fields": {"Front": "learn front", "Back": "user answer"}}
+        )
+        reviewed = [o for o in store.pending() if o.get("kind") == "reviewed"]
+        if not reviewed:
+            raise AssertionError("accept-time edit produced no reviewed observation")
+        nid = proposals._proposals[result["proposal_id"]].note_id
+        if str(nid) not in store._snapshots:
+            raise AssertionError("accepted creation was not snapshotted")
+        # notes.mod has 1s granularity; cross the boundary so the real edit
+        # is visible to the bulk-mod fast path (real users edit much later).
+        QTest.qWait(1100)
+        note = mw.col.get_note(nid)
+        note["Back"] = "user improved this later"
+        mw.col.update_note(note)
+        found = store.scan(mw.col)
+        if found < 1:
+            raise AssertionError("scan missed a direct collection edit")
+        edited = [o for o in store.pending() if o.get("kind") == "edited_later"]
+        if not edited or edited[-1]["note_id"] != nid:
+            raise AssertionError(f"edited_later observation wrong: {edited}")
+
+        old_skill = store.read_skill()
+        if not old_skill:
+            raise AssertionError("card-authoring skill not materialized on disk")
+        upd = proposals.submit_skill_update(
+            {"summary": "Probe learned preferences.",
+             "patterns": ["probe pattern"],
+             "new_content": old_skill + "\n- probe learned rule\n"},
+            old_content=old_skill,
+            observation_ids=store.pending_ids(),
+        )
+        proposals.accept({"id": upd["proposal_id"]})
+        if "- probe learned rule" not in store.read_skill():
+            raise AssertionError("accepted skill update did not write SKILL.md")
+        if store.pending():
+            raise AssertionError("observations not consumed after skill update")
+        if not list(store._backups_dir.glob("*.md")):
+            raise AssertionError("previous skill version was not archived")
+        store.write_skill(old_skill)  # leave the skill as we found it
+        return {"reviewed": len(reviewed), "scan_found": found}
+
+    check("learning loop: capture -> scan -> skill update (real col)", _learning_flow)
+
     def _reviewer_refresh() -> dict[str, Any]:
         # Highest-value real-Anki path: edit the note under review and confirm
         # the reviewer re-renders in place (private _showQuestion API).

@@ -182,6 +182,8 @@ def make_manager(
     config: dict[str, Any] | None = None,
     writes: list | None = None,
     checkpoints: list | None = None,
+    observes: list | None = None,
+    apply_skill=None,
 ):
     col = FakeCol()
     pushed: list[dict[str, Any]] = []
@@ -195,6 +197,8 @@ def make_manager(
             if checkpoints is not None
             else None
         ),
+        observe=(observes.append if observes is not None else None),
+        apply_skill=apply_skill,
     )
     return manager, col, pushed
 
@@ -842,6 +846,136 @@ class TrustedWritesTests(unittest.TestCase):
         result = manager.close_change_set({"change_set_id": cs["change_set_id"]})
         self.assertEqual("applied", result["status"])
         self.assertEqual("swept", col.get_note(ids[0])["Back"])
+
+
+class LearningObserveTests(unittest.TestCase):
+    """The capture hooks the learning store hangs off (DESIGN.md 15)."""
+
+    def test_create_accept_emits_applied_and_reviewed_diff(self) -> None:
+        observes: list[dict[str, Any]] = []
+        manager, col, _ = make_manager(observes=observes)
+        result = manager.submit_create(dict(CREATE_ARGS))
+        manager.accept(
+            {
+                "id": result["proposal_id"],
+                "fields": {"Front": "Q?", "Back": "Shorter."},
+                "tags": ["analysis", "verified"],
+            }
+        )
+        (applied,) = [e for e in observes if e["event"] == "applied"]
+        self.assertEqual(1, len(applied["note_ids"]))
+        (reviewed,) = [e for e in observes if e["event"] == "reviewed"]
+        self.assertEqual("create", reviewed["proposal_kind"])
+        self.assertEqual("A.", reviewed["fields_before"]["Back"])
+        self.assertEqual("Shorter.", reviewed["fields_after"]["Back"])
+        self.assertIn("verified", reviewed["tags_after"])
+
+    def test_verbatim_direct_accept_produces_empty_diff(self) -> None:
+        observes: list[dict[str, Any]] = []
+        manager, _, _ = make_manager(
+            config={"permission_mode": "trusted-writes"}, observes=observes
+        )
+        manager.submit_create(dict(CREATE_ARGS))
+        reviewed = [e for e in observes if e["event"] == "reviewed"]
+        # Trusted-writes applies without user review: any reviewed event must
+        # carry no differences (the store filters it to nothing).
+        for event in reviewed:
+            self.assertEqual(event["fields_before"], event["fields_after"])
+
+    def test_edit_accept_reports_declined_fields(self) -> None:
+        observes: list[dict[str, Any]] = []
+        manager, col, _ = make_manager(observes=observes)
+        create = manager.submit_create(dict(CREATE_ARGS))
+        manager.accept({"id": create["proposal_id"]})
+        note_id = next(iter(col._notes))
+        edit = manager.submit_edit(
+            {
+                "note_id": note_id,
+                "field_changes": {"Front": "New Q?", "Back": "New A."},
+            }
+        )
+        manager.accept({"id": edit["proposal_id"], "accepted_fields": ["Front"]})
+        reviewed = [e for e in observes if e["event"] == "reviewed"][-1]
+        self.assertEqual("edit", reviewed["proposal_kind"])
+        self.assertEqual(["Back"], reviewed["declined_fields"])
+
+    def test_revert_emits_resync_not_applied(self) -> None:
+        observes: list[dict[str, Any]] = []
+        manager, _, _ = make_manager(observes=observes)
+        result = manager.submit_create(dict(CREATE_ARGS))
+        manager.accept({"id": result["proposal_id"]})
+        observes.clear()
+        manager.revert({"id": result["proposal_id"]})
+        kinds = [e["event"] for e in observes]
+        self.assertIn("resync", kinds)
+        self.assertNotIn("applied", kinds)
+
+
+SKILL_UPDATE_ARGS = {
+    "summary": "Keep answers to one line.",
+    "patterns": ["You shortened 7 answers."],
+    "new_content": "---\nname: t\n---\n\nnew body\n",
+}
+
+
+class SkillUpdateTests(unittest.TestCase):
+    def test_always_pending_even_under_trusted_writes(self) -> None:
+        manager, _, pushed = make_manager(
+            config={"permission_mode": "trusted-writes"},
+            apply_skill=lambda _p: [],
+        )
+        result = manager.submit_skill_update(
+            dict(SKILL_UPDATE_ARGS), old_content="old", observation_ids=["a", "b"]
+        )
+        self.assertEqual("pending_user_review", result["status"])
+        (proposal,) = pushes_of(pushed, "proposal")
+        self.assertEqual("skill_update", proposal["proposal"]["kind"])
+        self.assertEqual(2, proposal["proposal"]["count"])
+        self.assertIn("diff", proposal["proposal"]["op_args"])
+
+    def test_accept_applies_via_callable_and_is_not_revertible(self) -> None:
+        applied: list[Any] = []
+
+        def apply_skill(proposal: Any) -> list[str]:
+            applied.append(proposal.op_args["new_content"])
+            return ["archived as SKILL-1.md"]
+
+        manager, _, pushed = make_manager(apply_skill=apply_skill)
+        result = manager.submit_skill_update(
+            dict(SKILL_UPDATE_ARGS), old_content="old", observation_ids=["a"]
+        )
+        manager.accept({"id": result["proposal_id"]})
+        self.assertEqual([SKILL_UPDATE_ARGS["new_content"]], applied)
+        (resolved,) = pushes_of(pushed, "proposal_resolved")
+        self.assertEqual("accepted", resolved["status"])
+        self.assertFalse(resolved["revertible"])
+        self.assertEqual(["archived as SKILL-1.md"], resolved["warnings"])
+        # Skill updates never enter the note ledger.
+        self.assertEqual([], pushes_of(pushed, "ledger")[-1]["entries"])
+
+    def test_validation_requires_summary_patterns_and_real_change(self) -> None:
+        manager, _, _ = make_manager(apply_skill=lambda _p: [])
+        with self.assertRaises(ProposalError):
+            manager.submit_skill_update(
+                {"summary": "", "patterns": [], "new_content": "x"},
+                old_content="old",
+                observation_ids=[],
+            )
+        with self.assertRaises(ProposalError):
+            manager.submit_skill_update(
+                dict(SKILL_UPDATE_ARGS, new_content="old"),
+                old_content="old",
+                observation_ids=[],
+            )
+
+    def test_accept_without_apply_callable_reports_error(self) -> None:
+        manager, _, pushed = make_manager()
+        result = manager.submit_skill_update(
+            dict(SKILL_UPDATE_ARGS), old_content="old", observation_ids=[]
+        )
+        manager.accept({"id": result["proposal_id"]})
+        (error,) = pushes_of(pushed, "proposal_error")
+        self.assertIn("not available", error["message"])
 
 
 if __name__ == "__main__":

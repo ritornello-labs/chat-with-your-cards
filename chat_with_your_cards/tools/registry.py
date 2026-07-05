@@ -26,6 +26,9 @@ class ToolContext(Protocol):
     @property
     def config(self) -> dict[str, Any]: ...  # live add-on config
 
+    @property
+    def learning(self) -> Any: ...  # learning.LearningStore or None
+
 
 ToolFunc = Callable[[ToolContext, dict[str, Any]], Any]
 

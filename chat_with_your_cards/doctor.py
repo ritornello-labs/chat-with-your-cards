@@ -64,6 +64,7 @@ def gather_report(
     mcp_url: str | None,
     agent_home: Path,
     find_claude: Callable[[str], str | None],
+    learning: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for label, binary, link in HARNESSES:
@@ -98,6 +99,18 @@ def gather_report(
             "detail": str(skills) if skills.exists() else "not materialized yet",
         }
     )
+    if learning is not None:
+        kb = learning.get("bytes", 0) / 1024
+        rows.append(
+            {
+                "label": "Edit-pattern learning",
+                "status": "ok",
+                "detail": f"{learning.get('snapshots', 0)} AI-written note(s) "
+                f"watched, {learning.get('pending', 0)} pending observation(s), "
+                f"{kb:.0f} KB on disk (uncapped by design - grows only with "
+                "AI-written notes)",
+            }
+        )
     key_source = "harness login (no API key configured)"
     if str(config.get("anthropic_api_key_op", "")).strip():
         key_source = "1Password reference (op://)"

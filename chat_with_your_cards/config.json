@@ -22,5 +22,7 @@
     "created_tag": "ai-created",
     "edited_tag": "ai-edited",
     "session_tag_prefix": "ai-chat-dock::session-",
+    "learning_nudge_threshold": 10,
+    "learning_nudge_days": 7,
     "pins": {}
 }

@@ -83,19 +83,65 @@ yours to change, and the assistant treats it as the house rules.
 """
 
 
+SKILL_MAINTENANCE_TEMPLATE = """---
+name: skill-maintenance
+description: How to review the user's edits to AI-written cards and update \
+the anki-card-authoring skill from them. Load when reviewing edit \
+observations or proposing a skill update.
+---
+
+# Learning from the user's edits
+
+This file is the user's to edit: it controls HOW the assistant folds
+observed preferences back into the card-authoring skill.
+
+## Reading observations
+
+- get_edit_observations returns everything the user changed since the
+  last skill review: proposal-card edits made before accepting
+  ('reviewed', including declined field changes), later edits to
+  accepted notes from the editor/Browser/another device
+  ('edited_later'), and deletions of AI-written notes ('deleted_later').
+- Look for patterns ACROSS observations. A one-off factual correction is
+  not a preference; the same kind of change made repeatedly is.
+- Deletions are the strongest signal: the user rejected that card
+  entirely - ask what property those cards shared.
+- Weigh recent observations over old ones if they conflict.
+
+## Updating the skill
+
+- Propose ONE update via propose_skill_update with the full revised
+  skill markdown. Never edit the skill file any other way.
+- Integrate new guidance inline where it naturally belongs: sharpen an
+  existing bullet, add one next to related rules, or delete guidance the
+  user's edits contradict. Do not create a separate "learned
+  preferences" section (unless the user rewrites this instruction).
+- Keep the skill concise. Prefer revising and merging over appending;
+  a skill that only ever grows stops being read.
+- summary and patterns are what the user reads on the confirmation
+  card: short, plain language, no tool jargon.
+- If the observations show no real pattern, say so in chat and do not
+  propose an update.
+"""
+
+
 def materialize_agent_skills(agent_home: Path) -> Path:
     """Seed the conventional skills directory the harness picks up.
 
     The agent runs with cwd = agent_home, so project-level skills live in
     agent_home/.claude/skills/ (system-wide user skills load as usual from
-    the user's home). The card-authoring template is written once and then
-    left alone - it is the user's file to edit to their taste.
+    the user's home). Templates are written once and then left alone -
+    they are the user's files to edit to their taste.
     """
-    skill_dir = agent_home / ".claude" / "skills" / "anki-card-authoring"
-    skill_path = skill_dir / "SKILL.md"
+    skills_root = agent_home / ".claude" / "skills"
+    skill_path = skills_root / "anki-card-authoring" / "SKILL.md"
     if not skill_path.exists():
-        skill_dir.mkdir(parents=True, exist_ok=True)
+        skill_path.parent.mkdir(parents=True, exist_ok=True)
         skill_path.write_text(CARD_SKILL_TEMPLATE, encoding="utf-8")
+    maintenance_path = skills_root / "skill-maintenance" / "SKILL.md"
+    if not maintenance_path.exists():
+        maintenance_path.parent.mkdir(parents=True, exist_ok=True)
+        maintenance_path.write_text(SKILL_MAINTENANCE_TEMPLATE, encoding="utf-8")
     return skill_path
 
 

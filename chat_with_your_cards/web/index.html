@@ -138,6 +138,18 @@
     </section>
     <main id="cwyc-transcript" aria-live="polite"></main>
     <footer id="cwyc-footer">
+        <div id="cwyc-learning-nudge" hidden>
+            <div id="cwyc-learning-nudge-body">
+                <span id="cwyc-learning-nudge-text"></span>
+                <span class="cwyc-learning-nudge-hint">Reviewing starts a new chat
+                    &mdash; this one stays in History.</span>
+            </div>
+            <button id="cwyc-learning-review" type="button" class="cwyc-primary"
+                    title="Have the assistant look for patterns in your edits and propose a skill update">
+                Review patterns</button>
+            <button id="cwyc-learning-dismiss" type="button" aria-label="Not now"
+                    title="Hide until more edits accumulate">&times;</button>
+        </div>
         <div id="cwyc-bulk" hidden>
             <span id="cwyc-bulk-label"></span>
             <button id="cwyc-bulk-reject" type="button">Reject all</button>
