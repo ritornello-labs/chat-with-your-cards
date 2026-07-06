@@ -239,6 +239,39 @@
             }) });
             dispatchLater(step(150), { type: "done" });
         }
+        function proposeDeckOps() {
+            var t = 0;
+            var step = function (ms) { t += ms; return t; };
+            emitProposal(step(200), {
+                id: "dk1", kind: "deck_op", op: "set_deck_options",
+                op_args: { deck: "Math::Analysis", options: { "new.perDay": 40, "rev.perDay": 300 } },
+                status: "pending", note_type: "", deck: "Math::Analysis", tags: [],
+                fields: [], add_tags: [], remove_tags: [], items: [], open: false,
+                rationale: "You asked to get through the backlog faster this month.",
+                count: 2,
+                samples: [
+                    { text: "new.perDay: 20 → 40" },
+                    { text: "rev.perDay: 200 → 300" },
+                ],
+                warnings: ['options preset "Default" is shared by 4 decks - changes affect all of them'],
+                previews: null, note_id: null, title: "",
+            });
+            emitProposal(step(250), {
+                id: "dk2", kind: "deck_op", op: "create_filtered_deck",
+                op_args: { name: "Cram::Analysis due", terms: [["deck:\"Math::Analysis\" is:due", 100, 6]], resched: true },
+                status: "pending", note_type: "", deck: "Cram::Analysis due", tags: [],
+                fields: [], add_tags: [], remove_tags: [], items: [], open: false,
+                rationale: "A focused session over everything due in Analysis.",
+                count: 0,
+                samples: [
+                    { text: 'Create filtered deck "Cram::Analysis due"' },
+                    { text: 'Gather: deck:"Math::Analysis" is:due (limit 100, order due) — ≈57 card(s) match now' },
+                    { text: "Reviews reschedule cards normally" },
+                ],
+                warnings: [], previews: null, note_id: null, title: "",
+            });
+            dispatchLater(step(150), { type: "done" });
+        }
         function proposeSkillUpdate() {
             var t = 0;
             var step = function (ms) { t += ms; return t; };
@@ -335,6 +368,7 @@
                         tool: "mcp__anki__search_notes", summary: '{"query":"deck:current"}' });
                     dispatchLater(400, { type: "done" });
                 }
+                else if (text.indexOf("deck") !== -1) { proposeDeckOps(); }
                 else if (text.indexOf("bulk") !== -1) { proposeBulk(); }
                 else if (text.indexOf("sweep") !== -1 || text.indexOf("change set") !== -1) { proposeChangeSet(); }
                 else if (text.indexOf("shorter") !== -1 || text.indexOf("revise") !== -1 || text.indexOf("please") !== -1) { proposeRevision(); }

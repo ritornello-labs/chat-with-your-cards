@@ -30,6 +30,7 @@ class FakeCard:
         self.reps = reps
         self.id = cid
         self.nid = 0
+        self.odid = 0  # home deck while the card sits in a filtered deck
 
 
 class FakeNote:
@@ -59,8 +60,9 @@ class FakeNote:
 
 
 class _NamedId:
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, id_: int = 0) -> None:
         self.name = name
+        self.id = id_
 
 
 class FakeModels:
@@ -75,24 +77,118 @@ class FakeModels:
 
 
 class FakeDecks:
-    def __init__(self, names: list[str]) -> None:
-        self._by_name = {name: i + 1 for i, name in enumerate(names)}
+    """Deck dicts mirroring the legacy DeckManager surface the deck ops use:
+    get/save (rename renames children, like the Rust backend), remove
+    (filtered removal returns cards home), config presets, new_filtered."""
+
+    def __init__(self, names: list[str], col: "FakeCol | None" = None) -> None:
+        self._col = col
+        self._decks: dict[int, dict[str, Any]] = {}
+        self._next = 1
+        for name in names:
+            self._add(name)
+        self._configs: dict[int, dict[str, Any]] = {
+            1: {
+                "id": 1,
+                "name": "Default",
+                "new": {"perDay": 20, "delays": [1.0, 10.0]},
+                "rev": {"perDay": 200, "maxIvl": 36500},
+            }
+        }
+
+    def _add(self, name: str, dyn: bool = False) -> int:
+        did = self._next
+        self._next += 1
+        deck: dict[str, Any] = {"id": did, "name": name, "dyn": 1 if dyn else 0}
+        if dyn:
+            deck["terms"] = [["", 100, 6]]
+            deck["resched"] = True
+        else:
+            deck["conf"] = 1
+        self._decks[did] = deck
+        return did
 
     def id_for_name(self, name: str) -> int:
-        if name not in self._by_name:
-            raise KeyError(name)
-        return self._by_name[name]
+        for deck in self._decks.values():
+            if deck["name"] == name:
+                return deck["id"]
+        raise KeyError(name)
 
     def id(self, name: str) -> int:
-        if name not in self._by_name:
-            self._by_name[name] = max(self._by_name.values(), default=0) + 1
-        return self._by_name[name]
+        try:
+            return self.id_for_name(name)
+        except KeyError:
+            return self._add(name)
 
     def name(self, did: int) -> str:
-        for name, deck_id in self._by_name.items():
-            if deck_id == did:
-                return name
-        return ""
+        deck = self._decks.get(did)
+        return deck["name"] if deck else ""
+
+    def get(self, did: int) -> dict[str, Any] | None:
+        deck = self._decks.get(did)
+        return dict(deck) if deck else None
+
+    def save(self, deck: dict[str, Any]) -> None:
+        stored = self._decks[deck["id"]]
+        old, new = stored["name"], deck["name"]
+        self._decks[deck["id"]] = dict(deck)
+        if old != new:
+            for other in self._decks.values():
+                if other["name"].startswith(old + "::"):
+                    other["name"] = new + other["name"][len(old):]
+
+    def remove(self, dids: list[int]) -> None:
+        for did in list(dids):
+            deck = self._decks.pop(did, None)
+            if deck and deck.get("dyn") and self._col is not None:
+                self._col.sched._return_home(did)
+
+    def all_names_and_ids(self) -> list[_NamedId]:
+        return [_NamedId(d["name"], d["id"]) for d in self._decks.values()]
+
+    def all(self) -> list[dict[str, Any]]:
+        return [dict(d) for d in self._decks.values()]
+
+    def config_dict_for_deck_id(self, did: int) -> dict[str, Any]:
+        import copy
+
+        return copy.deepcopy(self._configs[self._decks[did].get("conf", 1)])
+
+    def update_config(self, conf: dict[str, Any]) -> None:
+        import copy
+
+        self._configs[conf["id"]] = copy.deepcopy(conf)
+
+    def new_filtered(self, name: str) -> int:
+        return self._add(name, dyn=True)
+
+
+class FakeSched:
+    def __init__(self, col: "FakeCol") -> None:
+        self._col = col
+
+    def rebuild_filtered_deck(self, did: int) -> int:
+        self._return_home(did)
+        deck = self._col.decks._decks[did]
+        moved = 0
+        for search, limit, _order in deck.get("terms", []):
+            for cid in list(self._col.find_cards(search))[: int(limit)]:
+                card = self._col._cards[cid]
+                if card.did == did or card.odid:
+                    continue
+                card.odid = card.did
+                card.did = did
+                moved += 1
+        return moved
+
+    def empty_filtered_deck(self, did: int) -> None:
+        self._return_home(did)
+
+    def _return_home(self, did: int) -> None:
+        for card in self._col._cards.values():
+            if card.did == did and card.odid:
+                card.did = card.odid
+                card.odid = 0
 
 
 class FakeTags:
@@ -108,7 +204,8 @@ class FakeTags:
 class FakeCol:
     def __init__(self) -> None:
         self.models = FakeModels([BASIC])
-        self.decks = FakeDecks(["Default"])
+        self.decks = FakeDecks(["Default"], col=self)
+        self.sched = FakeSched(self)
         self.tags = FakeTags(self)
         self._notes: dict[int, FakeNote] = {}
         self._cards: dict[int, FakeCard] = {}
@@ -133,10 +230,21 @@ class FakeCol:
         return len(self._cards)
 
     def find_cards(self, query: str) -> list[int]:
-        # Supports the deck:"X" shape used by move_cards tests.
+        # Supports the deck:"X" / tag:"X" shapes the deck ops and move_cards
+        # tests use; anything else matches everything.
         if query.startswith('deck:"') and query.endswith('"'):
-            did = self.decks.id(query[6:-1])
+            try:
+                did = self.decks.id_for_name(query[6:-1])
+            except KeyError:
+                return []
             return [cid for cid, c in self._cards.items() if c.did == did]
+        if query.startswith('tag:"') and query.endswith('"'):
+            tag = query[5:-1]
+            return [
+                cid
+                for cid, c in self._cards.items()
+                if c.nid in self._notes and tag in self._notes[c.nid].tags
+            ]
         return list(self._cards)
 
     def get_card(self, card_id: int) -> FakeCard:
@@ -976,6 +1084,236 @@ class SkillUpdateTests(unittest.TestCase):
         manager.accept({"id": result["proposal_id"]})
         (error,) = pushes_of(pushed, "proposal_error")
         self.assertIn("not available", error["message"])
+
+
+class DeckOpTests(unittest.TestCase):
+    def _accept_last(self, manager, pushed) -> str:
+        pid = pushes_of(pushed, "proposal")[-1]["proposal"]["id"]
+        manager.accept({"id": pid})
+        return pid
+
+    def _last_resolved(self, pushed) -> dict[str, Any]:
+        return pushes_of(pushed, "proposal_resolved")[-1]
+
+    def test_create_deck_accept_and_revert(self) -> None:
+        manager, col, pushed = make_manager()
+        result = manager.submit_create_deck({"name": "Math::Series"})
+        self.assertEqual("pending_user_review", result["status"])
+        pid = self._accept_last(manager, pushed)
+        self.assertTrue(col.decks.id_for_name("Math::Series"))
+        self.assertTrue(self._last_resolved(pushed)["revertible"])
+        manager.revert({"id": pid})
+        with self.assertRaises(KeyError):
+            col.decks.id_for_name("Math::Series")
+
+    def test_create_deck_existing_rejected(self) -> None:
+        manager, _col, _pushed = make_manager()
+        with self.assertRaises(ProposalError):
+            manager.submit_create_deck({"name": "Default"})
+
+    def test_create_deck_revert_refuses_when_cards_arrived(self) -> None:
+        manager, col, pushed = make_manager()
+        manager.submit_create_deck({"name": "Inbox"})
+        pid = self._accept_last(manager, pushed)
+        manager.submit_create({**CREATE_ARGS, "deck": "Inbox"})
+        self._accept_last(manager, pushed)
+        manager.revert({"id": pid})
+        notices = pushes_of(pushed, "notice")
+        self.assertIn("contains cards", notices[-1]["text"])
+        self.assertTrue(col.decks.id_for_name("Inbox"))  # still there
+
+    def test_rename_deck_renames_children_and_reverts(self) -> None:
+        manager, col, pushed = make_manager()
+        col.decks.id("Spanish")
+        col.decks.id("Spanish::Verbs")
+        result = manager.submit_rename_deck(
+            {"deck": "Spanish", "new_name": "Español"}
+        )
+        self.assertEqual("pending_user_review", result["status"])
+        warnings = pushes_of(pushed, "proposal")[-1]["proposal"]["warnings"]
+        self.assertIn("1 subdeck(s)", warnings[0])
+        pid = self._accept_last(manager, pushed)
+        self.assertTrue(col.decks.id_for_name("Español::Verbs"))
+        with self.assertRaises(KeyError):
+            col.decks.id_for_name("Spanish")
+        manager.revert({"id": pid})
+        self.assertTrue(col.decks.id_for_name("Spanish::Verbs"))
+
+    def test_rename_deck_validation(self) -> None:
+        manager, col, _pushed = make_manager()
+        col.decks.id("A")
+        col.decks.id("B")
+        with self.assertRaises(ProposalError):  # collision
+            manager.submit_rename_deck({"deck": "A", "new_name": "B"})
+        with self.assertRaises(ProposalError):  # under itself
+            manager.submit_rename_deck({"deck": "A", "new_name": "A::sub"})
+        with self.assertRaises(ProposalError):  # missing source
+            manager.submit_rename_deck({"deck": "Nope", "new_name": "C"})
+
+    def test_set_deck_options_apply_and_revert(self) -> None:
+        checkpoints: list = []
+        manager, col, pushed = make_manager(checkpoints=checkpoints)
+        manager.submit_set_deck_options(
+            {"deck": "Default", "options": {"new.perDay": 40}}
+        )
+        payload = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertEqual(1, payload["count"])
+        self.assertIn("new.perDay", payload["samples"][0]["text"])
+        pid = self._accept_last(manager, pushed)
+        did = col.decks.id_for_name("Default")
+        self.assertEqual(40, col.decks.config_dict_for_deck_id(did)["new"]["perDay"])
+        self.assertIn(("deck options", False), checkpoints)
+        manager.revert({"id": pid})
+        self.assertEqual(20, col.decks.config_dict_for_deck_id(did)["new"]["perDay"])
+
+    def test_set_deck_options_validation(self) -> None:
+        manager, _col, _pushed = make_manager()
+        with self.assertRaises(ProposalError):  # unknown dot path
+            manager.submit_set_deck_options(
+                {"deck": "Default", "options": {"new.bogus": 1}}
+            )
+        with self.assertRaises(ProposalError):  # type mismatch
+            manager.submit_set_deck_options(
+                {"deck": "Default", "options": {"new.perDay": "forty"}}
+            )
+        with self.assertRaises(ProposalError):  # no effective change
+            manager.submit_set_deck_options(
+                {"deck": "Default", "options": {"new.perDay": 20}}
+            )
+        with self.assertRaises(ProposalError):  # empty options
+            manager.submit_set_deck_options({"deck": "Default", "options": {}})
+
+    def test_set_deck_options_shared_preset_warns(self) -> None:
+        manager, col, pushed = make_manager()
+        col.decks.id("Other")  # second deck on the Default preset
+        manager.submit_set_deck_options(
+            {"deck": "Default", "options": {"rev.perDay": 300}}
+        )
+        warnings = pushes_of(pushed, "proposal")[-1]["proposal"]["warnings"]
+        self.assertIn("shared by 2 decks", warnings[0])
+
+    def test_filtered_deck_lifecycle(self) -> None:
+        manager, col, pushed = make_manager()
+        _seed_notes(manager, col, pushed)  # 3 notes / 3 cards in Default
+        manager.submit_create_filtered_deck(
+            {
+                "name": "Cram",
+                "terms": [{"search": 'deck:"Default"', "limit": 10, "order": 6}],
+            }
+        )
+        create_pid = self._accept_last(manager, pushed)
+        resolved = self._last_resolved(pushed)
+        self.assertIn("gathered 3 card(s)", resolved["warnings"][0])
+        cram = col.decks.id_for_name("Cram")
+        self.assertEqual(3, len([c for c in col._cards.values() if c.did == cram]))
+
+        # Empty: cards return home; not ledger-revertible, no ledger entry.
+        ledger_before = len(manager._ledger)
+        manager.submit_filtered_deck_action({"deck": "Cram", "action": "empty"})
+        self._accept_last(manager, pushed)
+        self.assertFalse(self._last_resolved(pushed)["revertible"])
+        self.assertEqual(ledger_before, len(manager._ledger))
+        self.assertEqual(0, len([c for c in col._cards.values() if c.did == cram]))
+
+        # Rebuild gathers again.
+        manager.submit_filtered_deck_action({"deck": "Cram", "action": "rebuild"})
+        self._accept_last(manager, pushed)
+        self.assertEqual(3, len([c for c in col._cards.values() if c.did == cram]))
+
+        # Update narrows the gather; revert restores terms and rebuilds.
+        manager.submit_update_filtered_deck(
+            {
+                "deck": "Cram",
+                "terms": [{"search": 'tag:"analysis"', "limit": 1, "order": 1}],
+            }
+        )
+        update_pid = self._accept_last(manager, pushed)
+        self.assertEqual(1, len([c for c in col._cards.values() if c.did == cram]))
+        manager.revert({"id": update_pid})
+        deck = col.decks.get(cram)
+        self.assertEqual([['deck:"Default"', 10, 6]], deck["terms"])
+        self.assertEqual(3, len([c for c in col._cards.values() if c.did == cram]))
+
+        # Reverting the create removes the deck and sends every card home.
+        manager.revert({"id": create_pid})
+        with self.assertRaises(KeyError):
+            col.decks.id_for_name("Cram")
+        default_did = col.decks.id_for_name("Default")
+        self.assertEqual(
+            3, len([c for c in col._cards.values() if c.did == default_did])
+        )
+        self.assertTrue(all(c.odid == 0 for c in col._cards.values()))
+
+    def test_filtered_term_validation(self) -> None:
+        manager, _col, _pushed = make_manager()
+        with self.assertRaises(ProposalError):  # no terms
+            manager.submit_create_filtered_deck({"name": "X", "terms": []})
+        with self.assertRaises(ProposalError):  # bad order
+            manager.submit_create_filtered_deck(
+                {"name": "X", "terms": [{"search": "a", "order": 9}]}
+            )
+        with self.assertRaises(ProposalError):  # bad limit
+            manager.submit_create_filtered_deck(
+                {"name": "X", "terms": [{"search": "a", "limit": 0}]}
+            )
+        with self.assertRaises(ProposalError):  # empty search
+            manager.submit_create_filtered_deck(
+                {"name": "X", "terms": [{"search": "  "}]}
+            )
+        with self.assertRaises(ProposalError):  # existing name
+            manager.submit_create_filtered_deck(
+                {"name": "Default", "terms": [{"search": "a"}]}
+            )
+
+    def test_ops_reject_wrong_deck_type(self) -> None:
+        manager, col, _pushed = make_manager()
+        col.decks.new_filtered("Cram")
+        with self.assertRaises(ProposalError):  # options on a filtered deck
+            manager.submit_set_deck_options(
+                {"deck": "Cram", "options": {"new.perDay": 1}}
+            )
+        with self.assertRaises(ProposalError):  # action on a normal deck
+            manager.submit_filtered_deck_action(
+                {"deck": "Default", "action": "rebuild"}
+            )
+        with self.assertRaises(ProposalError):  # update on a normal deck
+            manager.submit_update_filtered_deck(
+                {"deck": "Default", "terms": [{"search": "a"}]}
+            )
+        with self.assertRaises(ProposalError):  # nothing to change
+            manager.submit_update_filtered_deck({"deck": "Cram"})
+        with self.assertRaises(ProposalError):  # unknown action
+            manager.submit_filtered_deck_action({"deck": "Cram", "action": "x"})
+
+    def test_trusted_writes_applies_directly_within_budget(self) -> None:
+        manager, col, _pushed = make_manager(
+            {"permission_mode": "trusted-writes", "write_budget": 2}
+        )
+        result = manager.submit_create_deck({"name": "X"})
+        self.assertEqual("applied", result["status"])
+        self.assertTrue(col.decks.id_for_name("X"))
+        result = manager.submit_rename_deck({"deck": "X", "new_name": "Y"})
+        self.assertEqual("applied", result["status"])
+        # Budget exhausted: falls back to a gated proposal card.
+        result = manager.submit_create_deck({"name": "Z"})
+        self.assertEqual("pending_user_review", result["status"])
+
+    def test_deck_op_after_deck_change_fires(self) -> None:
+        calls: list[int] = []
+        col = FakeCol()
+        pushed: list[dict[str, Any]] = []
+        manager = ProposalManager(
+            get_col=lambda: col,
+            push=pushed.append,
+            config={},
+            after_deck_change=lambda: calls.append(1),
+        )
+        manager.submit_create_deck({"name": "X"})
+        pid = pushes_of(pushed, "proposal")[-1]["proposal"]["id"]
+        manager.accept({"id": pid})
+        self.assertEqual(1, len(calls))
+        manager.revert({"id": pid})
+        self.assertEqual(2, len(calls))
 
 
 if __name__ == "__main__":

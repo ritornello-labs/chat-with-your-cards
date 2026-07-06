@@ -136,6 +136,7 @@ Write (proposal-gated):
 - `propose_note(note_type, deck, tags, fields, rationale)` — never writes directly; creates a proposal card in the UI (see §8).
 - `propose_note_edit(note_id, field_changes, add_tags, remove_tags, rationale)` — same gate; `field_changes` maps field name → new value. Validation includes a **staleness guard**: the proposal carries the field values the agent last read, and if the note changed underneath (user edited mid-chat, sync), the proposal is flagged for re-review instead of applying blind.
 - (later) `propose_tag_change(...)`, `propose_deck_move(...)` — same pattern.
+- Deck management (create/rename/options) and filtered decks: see §16.
 
 Permission modes (per-profile setting + per-session override in the dock header):
 - **Default**: reads always allowed, writes via proposals.
@@ -345,3 +346,51 @@ behavior without an explicit user accept.
   tests in `tests/test_proposals.py` (fake collection, field-compare scan
   path) and a real-collection GUI-smoke check (bulk-mod scan path, real
   SKILL.md write/archive/consume). Only pattern *quality* is manual QA.
+
+## 16. Deck management and filtered decks (2026-07-06)
+
+The agent can manage deck structure and study configuration, not just
+note content: create/rename decks, change deck options, move cards
+(already a bulk op), and create/reconfigure/rebuild/empty filtered
+decks. Every operation is a `deck_op` proposal — one confirmation card
+with plain-language sample lines — flowing through the same
+`_finish_submission` machinery as the bulk ops (direct apply under
+trusted-writes within the write budget; deck ops cost 1 budget unit).
+
+- **Tools.** Read: `get_deck_info` (card count, subdecks, options preset
+  with full config + how many decks share it, or filtered terms).
+  Write: `create_deck`, `rename_deck`, `set_deck_options`,
+  `create_filtered_deck`, `update_filtered_deck`,
+  `filtered_deck_action` (rebuild | empty).
+- **Options are dot paths into the real preset dict** (`new.perDay`,
+  `rev.perDay`, ...), validated against the CURRENT config: only
+  existing keys with type-compatible values are accepted, so a typo
+  cannot plant a garbage key Anki silently ignores. Presets are shared
+  objects; the proposal card warns "shared by N decks" (counted via
+  `col.decks.all()`), and `set_deck_options` is the one deck op that
+  takes a backup checkpoint before applying.
+- **Filtered decks** use the stable legacy surface: `decks.new_filtered`
+  + `deck["terms"] = [[search, limit, order]]` (1-2 terms, order codes
+  0-8) + `decks.save` + `sched.rebuild_filtered_deck`. Term searches are
+  validated with `find_cards` at submit time and the card shows an
+  approximate match count (approximate because gather excludes suspended
+  cards and cards already in another filtered deck). The gathered count
+  is reported on the resolved card.
+- **Reverts.** create_deck → remove (REFUSED if the deck acquired cards
+  or subdecks); rename_deck → rename back, children follow (looked up by
+  the NEW name, never by stored id — legacy `decks.get(did)` falls back
+  to the Default deck for a missing id, and a revert must never touch
+  the wrong deck); set_deck_options → restore prior values;
+  create_filtered_deck → remove the deck (Anki returns its cards home
+  with scheduling intact); update_filtered_deck → restore prior
+  terms/resched and rebuild. Rebuild/empty are NOT ledger-revertible
+  (nothing restorable is stored) and create no ledger entry.
+- **UI plumbing.** deck_op cards render through the bulk-card body
+  (badge "Deck change", accept button "Apply"); after any deck op
+  applies or reverts, an injected `after_deck_change` callback refreshes
+  the deck browser / overview, since deck ops touch no note ids and the
+  reviewer-refresh path never fires for them.
+- Renaming a deck via `deck["name"] = new; col.decks.save(deck)` renames
+  child decks in the Rust backend; the Docker smoke asserts this against
+  a real subdeck (plus the full filtered lifecycle and both revert
+  refusal paths).

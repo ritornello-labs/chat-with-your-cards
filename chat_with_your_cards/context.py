@@ -159,6 +159,14 @@ def build_system_prompt(
             "Notes that change while a batch is open are skipped, never "
             "overwritten blind."
         )
+        parts.append(
+            "\nYou can also manage decks: create_deck, rename_deck (subdecks "
+            "follow), set_deck_options (presets may be shared by several "
+            "decks - get_deck_info shows the config and who shares it), and "
+            "filtered decks via create_filtered_deck / update_filtered_deck / "
+            "filtered_deck_action (rebuild or empty). Each is one "
+            "confirmation card, like the bulk tools."
+        )
         if permission_mode == "trusted-writes":
             parts.append(
                 "\nTrusted-writes is on: your creations, edits, bulk operations "

@@ -369,6 +369,7 @@
         bulk: "Bulk operation",
         delete: "Delete notes",
         change_set: "Change set",
+        deck_op: "Deck change",
         skill_update: "Skill update",
     };
 
@@ -388,6 +389,25 @@
         }
         if (op === "move_cards") {
             return "Move " + data.count + ' card(s) → "' + a.deck + '"';
+        }
+        if (op === "create_deck") {
+            return 'Create deck "' + a.name + '"';
+        }
+        if (op === "rename_deck") {
+            return 'Rename deck "' + a.old + '" → "' + a["new"] + '"';
+        }
+        if (op === "set_deck_options") {
+            return 'Change ' + data.count + ' option(s) for deck "' + a.deck + '"';
+        }
+        if (op === "create_filtered_deck") {
+            return 'Create filtered deck "' + a.name + '"';
+        }
+        if (op === "update_filtered_deck") {
+            return 'Reconfigure filtered deck "' + a.deck + '"';
+        }
+        if (op === "filtered_deck_action") {
+            return (a.action === "empty" ? "Empty" : "Rebuild") +
+                ' filtered deck "' + a.deck + '"';
         }
         return data.count + " item(s)";
     }
@@ -602,6 +622,8 @@
                 (data.kind === "edit" && data.deck ? " · " + data.deck : "");
         } else if (data.kind === "change_set") {
             where = data.title || "";
+        } else if (data.kind === "deck_op") {
+            where = data.deck || "";
         } else if (data.kind === "skill_update") {
             where = data.title || "Card-authoring skill";
         }
@@ -700,7 +722,8 @@
                 post({ type: "proposal_reject", id: data.id });
             });
             var acceptLabel = data.kind === "delete" ? "Delete"
-                : data.kind === "skill_update" ? "Update skill" : "Accept";
+                : data.kind === "skill_update" ? "Update skill"
+                : data.kind === "deck_op" ? "Apply" : "Accept";
             var acceptCls = "cwyc-btn-accept cwyc-primary" +
                 (data.kind === "delete" ? " cwyc-btn-danger" : "");
             var accept = el("button", acceptCls, acceptLabel);

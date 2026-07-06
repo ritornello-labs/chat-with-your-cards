@@ -149,6 +149,7 @@ def _setup() -> None:
         checkpoint=_backup_checkpoint,
         observe=_learning_observe,
         apply_skill=_apply_skill_update,
+        after_deck_change=_refresh_deck_ui,
     )
 
     def system_prompt() -> str:
@@ -582,6 +583,20 @@ def _refresh_reviewer(note_ids: list[int]) -> None:
     except Exception:
         # Best-effort: a private-API drift shouldn't break the write itself.
         pass
+
+
+def _refresh_deck_ui() -> None:
+    """Redraw the deck list / overview after a deck operation, so a created,
+    renamed, or rebuilt deck shows without the user switching screens."""
+    if mw is None:
+        return
+    try:
+        if mw.state == "deckBrowser":
+            mw.deckBrowser.refresh()
+        elif mw.state == "overview":
+            mw.overview.refresh()
+    except Exception:
+        pass  # cosmetic refresh; never let it break the write
 
 
 def _run_doctor() -> None:

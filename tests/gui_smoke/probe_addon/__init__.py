@@ -284,6 +284,126 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
 
     check("learning loop: capture -> scan -> skill update (real col)", _learning_flow)
 
+    def _deck_ops_flow() -> dict[str, Any]:
+        # Deck management on the real backend - this is where the modern
+        # decks/sched API surface the deck ops assume gets validated:
+        # decks.save renames children, config_dict_for_deck_id/update_config
+        # round-trip, new_filtered + terms + rebuild gather, removal of a
+        # filtered deck returns cards home.
+        col = mw.col
+
+        def _did(name: str) -> Any:
+            try:
+                return col.decks.id_for_name(name)
+            except Exception:
+                return None
+
+        res = proposals.submit_create_deck({"name": "ZZProbeDecks"})
+        create_pid = res["proposal_id"]
+        proposals.accept({"id": create_pid})
+        if not _did("ZZProbeDecks"):
+            raise AssertionError("create_deck did not create the deck")
+        col.decks.id("ZZProbeDecks::Child")
+
+        res = proposals.submit_rename_deck(
+            {"deck": "ZZProbeDecks", "new_name": "ZZProbeDecksR"}
+        )
+        proposals.accept({"id": res["proposal_id"]})
+        if not _did("ZZProbeDecksR::Child"):
+            raise AssertionError(
+                "rename_deck did not carry the child (real col.decks.save)"
+            )
+        if _did("ZZProbeDecks"):
+            raise AssertionError("old deck name still present after rename")
+        proposals.revert({"id": res["proposal_id"]})
+        if not _did("ZZProbeDecks::Child"):
+            raise AssertionError("rename revert did not restore the child deck")
+
+        did = _did("ZZProbeDecks")
+        conf = col.decks.config_dict_for_deck_id(did)
+        old_per_day = int(conf["new"]["perDay"])
+        res = proposals.submit_set_deck_options(
+            {"deck": "ZZProbeDecks", "options": {"new.perDay": old_per_day + 7}}
+        )
+        proposals.accept({"id": res["proposal_id"]})
+        now = int(col.decks.config_dict_for_deck_id(did)["new"]["perDay"])
+        if now != old_per_day + 7:
+            raise AssertionError(
+                f"set_deck_options did not apply (real update_config): {now}"
+            )
+        proposals.revert({"id": res["proposal_id"]})
+        now = int(col.decks.config_dict_for_deck_id(did)["new"]["perDay"])
+        if now != old_per_day:
+            raise AssertionError(f"options revert did not restore the value: {now}")
+
+        nids = [_new_note(f"deckops {i}", deck="ZZProbeDecks") for i in range(2)]
+        res = proposals.submit_create_filtered_deck(
+            {
+                "name": "ZZProbeCram",
+                "terms": [
+                    {"search": 'deck:"ZZProbeDecks"', "limit": 10, "order": 5}
+                ],
+            }
+        )
+        filter_pid = res["proposal_id"]
+        proposals.accept({"id": filter_pid})
+        cram_did = _did("ZZProbeCram")
+        if not cram_did or not col.decks.get(cram_did).get("dyn"):
+            raise AssertionError("create_filtered_deck did not create a dyn deck")
+        gathered = len(col.find_cards('deck:"ZZProbeCram"'))
+        if gathered != 2:
+            raise AssertionError(f"filtered rebuild gathered {gathered}, expected 2")
+
+        res = proposals.submit_filtered_deck_action(
+            {"deck": "ZZProbeCram", "action": "empty"}
+        )
+        proposals.accept({"id": res["proposal_id"]})
+        if col.find_cards('deck:"ZZProbeCram"'):
+            raise AssertionError("empty action left cards in the filtered deck")
+
+        res = proposals.submit_update_filtered_deck(
+            {
+                "deck": "ZZProbeCram",
+                "terms": [
+                    {"search": 'deck:"ZZProbeDecks"', "limit": 1, "order": 5}
+                ],
+            }
+        )
+        proposals.accept({"id": res["proposal_id"]})
+        regathered = len(col.find_cards('deck:"ZZProbeCram"'))
+        if regathered != 1:
+            raise AssertionError(
+                f"update_filtered_deck re-gathered {regathered}, expected 1"
+            )
+
+        proposals.revert({"id": filter_pid})
+        if _did("ZZProbeCram"):
+            raise AssertionError("reverting create_filtered_deck did not remove it")
+        parent_did = _did("ZZProbeDecks")
+        home = [
+            cid
+            for cid in col.find_cards('deck:"ZZProbeDecks"')
+            if col.get_card(cid).did == parent_did
+        ]
+        if len(home) != 2:
+            raise AssertionError(
+                f"cards did not return home after filtered removal: {len(home)}"
+            )
+
+        # The created deck now holds cards: the ledger revert must REFUSE.
+        proposals.revert({"id": create_pid})
+        if not _did("ZZProbeDecks"):
+            raise AssertionError("create_deck revert removed a deck holding cards")
+
+        col.remove_notes(nids)
+        col.decks.remove([_did("ZZProbeDecks::Child"), _did("ZZProbeDecks")])
+        return {"gathered": gathered, "per_day": old_per_day}
+
+    check(
+        "deck ops: create/rename/options/filtered lifecycle + reverts (real col)",
+        _deck_ops_flow,
+    )
+
     def _reviewer_refresh() -> dict[str, Any]:
         # Highest-value real-Anki path: edit the note under review and confirm
         # the reviewer re-renders in place (private _showQuestion API).

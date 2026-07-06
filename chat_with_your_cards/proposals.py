@@ -25,6 +25,19 @@ MAX_SAMPLES = 5
 
 PENDING = "pending"
 ACCEPTED = "accepted"
+
+# Filtered-deck gather order codes (Anki's DYN_* constants).
+FILTERED_ORDER_NAMES = {
+    0: "oldest seen first",
+    1: "random",
+    2: "increasing intervals",
+    3: "decreasing intervals",
+    4: "most lapses",
+    5: "order added",
+    6: "order due",
+    7: "latest added first",
+    8: "relative overdueness",
+}
 AUTO_ACCEPTED = "auto-accepted"
 REJECTED = "rejected"
 UNDONE = "undone"
@@ -38,7 +51,7 @@ class ProposalError(Exception):
 @dataclass
 class Proposal:
     id: str
-    kind: str  # "create" | "edit" | "bulk" | "delete" | "change_set"
+    kind: str  # "create" | "edit" | "bulk" | "delete" | "change_set" | "deck_op" | "skill_update"
     note_type: str
     deck: str
     tags: list[str]
@@ -136,6 +149,7 @@ class ProposalManager:
         checkpoint: Callable[[str, bool], None] | None = None,
         observe: Callable[[dict[str, Any]], None] | None = None,
         apply_skill: Callable[["Proposal"], list[str]] | None = None,
+        after_deck_change: Callable[[], None] | None = None,
     ) -> None:
         self._get_col = get_col
         self._push = push
@@ -158,6 +172,10 @@ class ProposalManager:
         # archives the prior version, consumes observations); returns
         # warnings/notes to show on the resolved card.
         self._apply_skill = apply_skill
+        # Called after a deck operation applies or reverts, so the add-on can
+        # refresh the deck browser / overview (deck ops touch no note ids, so
+        # the after_write reviewer-refresh path never fires for them).
+        self._after_deck_change = after_deck_change or (lambda: None)
         self._proposals: dict[str, Proposal] = {}
         self._ledger: list[LedgerEntry] = []
         self._counter = 0
@@ -632,6 +650,280 @@ class ProposalManager:
             "note": "Deletion always requires explicit user confirmation.",
         }
 
+    # ---- deck operations (create/rename/options + filtered decks) ----
+
+    def _deck_by_name(self, col: Any, name: str) -> tuple[int, dict[str, Any]]:
+        did = self._find_deck_id(col, name)
+        deck = col.decks.get(did) if did is not None else None
+        if did is None or deck is None:
+            raise ProposalError(f"deck {name!r} not found")
+        return int(did), deck
+
+    @staticmethod
+    def _deck_names(col: Any) -> list[str]:
+        return [d.name for d in col.decks.all_names_and_ids()]
+
+    @staticmethod
+    def _decks_sharing_config(col: Any, conf_id: Any) -> int:
+        try:
+            return sum(1 for d in col.decks.all() if d.get("conf") == conf_id)
+        except Exception:
+            return 1
+
+    @staticmethod
+    def _resolve_option(conf: dict[str, Any], path: str) -> tuple[dict[str, Any], str]:
+        """Resolve a dot path like 'new.perDay' inside a deck-options dict.
+        Only existing keys are addressable, so a typo cannot plant a garbage
+        key that Anki silently ignores."""
+        node: Any = conf
+        parts = path.split(".")
+        for part in parts[:-1]:
+            node = node.get(part) if isinstance(node, dict) else None
+            if node is None:
+                break
+        leaf = parts[-1]
+        if not isinstance(node, dict) or leaf not in node:
+            raise ProposalError(
+                f"unknown option {path!r}; check get_deck_info for the "
+                "preset's actual keys (dot paths like 'new.perDay')"
+            )
+        return node, leaf
+
+    @staticmethod
+    def _check_option_type(path: str, old: Any, new: Any) -> None:
+        ok = (
+            (isinstance(old, bool) and isinstance(new, bool))
+            or (
+                isinstance(old, (int, float))
+                and not isinstance(old, bool)
+                and isinstance(new, (int, float))
+                and not isinstance(new, bool)
+            )
+            or (isinstance(old, str) and isinstance(new, str))
+            or (isinstance(old, list) and isinstance(new, list))
+        )
+        if not ok:
+            raise ProposalError(
+                f"option {path!r} holds {type(old).__name__} "
+                f"({old!r}); got {type(new).__name__} ({new!r})"
+            )
+
+    def _parse_filtered_terms(
+        self, col: Any, raw: Any
+    ) -> tuple[list[list[Any]], list[str]]:
+        """Validate filtered-deck search terms; returns (terms, sample lines)."""
+        if not isinstance(raw, list) or not 1 <= len(raw) <= 2:
+            raise ProposalError("terms must be a list of 1 or 2 search terms")
+        terms: list[list[Any]] = []
+        lines: list[str] = []
+        for t in raw:
+            if not isinstance(t, dict):
+                raise ProposalError("each term is an object {search, limit, order}")
+            search = str(t.get("search", "")).strip()
+            if not search:
+                raise ProposalError("each term needs a non-empty search")
+            limit = int(t.get("limit", 100))
+            if limit < 1:
+                raise ProposalError("term limit must be at least 1")
+            order = int(t.get("order", 6))
+            if order not in FILTERED_ORDER_NAMES:
+                raise ProposalError(
+                    f"order must be 0-8: {FILTERED_ORDER_NAMES}"
+                )
+            try:
+                approx = len(list(col.find_cards(search)))
+            except Exception as exc:
+                raise ProposalError(f"bad search {search!r}: {exc}") from None
+            terms.append([search, limit, order])
+            lines.append(
+                f"Gather: {search} (limit {limit}, {FILTERED_ORDER_NAMES[order]}) "
+                f"— ≈{approx} card(s) match now"
+            )
+        return terms, lines
+
+    def _deck_op_proposal(
+        self,
+        *,
+        op: str,
+        op_args: dict[str, Any],
+        deck: str,
+        rationale: str,
+        samples: list[str],
+        count: int = 0,
+        warnings: list[str] | None = None,
+    ) -> dict[str, Any]:
+        proposal = Proposal(
+            id=self._next_id(),
+            kind="deck_op",
+            op=op,
+            op_args=op_args,
+            note_type="",
+            deck=deck,
+            tags=[],
+            fields={},
+            rationale=rationale,
+            count=count,
+            samples=[{"text": line} for line in samples],
+            warnings=warnings or [],
+        )
+        return self._finish_submission(proposal, 1)
+
+    def submit_create_deck(self, args: dict[str, Any]) -> dict[str, Any]:
+        col = self._col()
+        name = str(args.get("name", "")).strip()
+        if not name:
+            raise ProposalError("create_deck needs a name")
+        if self._find_deck_id(col, name) is not None:
+            raise ProposalError(f"deck {name!r} already exists")
+        return self._deck_op_proposal(
+            op="create_deck",
+            op_args={"name": name},
+            deck=name,
+            rationale=str(args.get("rationale", "")),
+            samples=[f'Create deck "{name}"'],
+        )
+
+    def submit_rename_deck(self, args: dict[str, Any]) -> dict[str, Any]:
+        col = self._col()
+        old = str(args.get("deck", "")).strip()
+        new = str(args.get("new_name", "")).strip()
+        if not old or not new:
+            raise ProposalError("rename_deck needs deck and new_name")
+        if old == new:
+            raise ProposalError("new_name matches the current name")
+        self._deck_by_name(col, old)
+        if new.startswith(old + "::"):
+            raise ProposalError("cannot move a deck under itself")
+        if self._find_deck_id(col, new) is not None:
+            raise ProposalError(f"deck {new!r} already exists")
+        children = [n for n in self._deck_names(col) if n.startswith(old + "::")]
+        warnings = (
+            [f"{len(children)} subdeck(s) are renamed with it"] if children else []
+        )
+        return self._deck_op_proposal(
+            op="rename_deck",
+            op_args={"old": old, "new": new},
+            deck=old,
+            rationale=str(args.get("rationale", "")),
+            samples=[f'Rename deck "{old}" → "{new}"'],
+            warnings=warnings,
+        )
+
+    def submit_set_deck_options(self, args: dict[str, Any]) -> dict[str, Any]:
+        col = self._col()
+        deck_name = str(args.get("deck", "")).strip()
+        did, deck = self._deck_by_name(col, deck_name)
+        if deck.get("dyn"):
+            raise ProposalError(
+                "filtered decks have no options preset; use update_filtered_deck"
+            )
+        options = args.get("options")
+        if not isinstance(options, dict) or not options:
+            raise ProposalError(
+                "options must map dot paths (e.g. 'new.perDay') to new values"
+            )
+        conf = col.decks.config_dict_for_deck_id(did)
+        changes: dict[str, Any] = {}
+        samples: list[str] = []
+        for path, new in options.items():
+            path = str(path)
+            node, leaf = self._resolve_option(conf, path)
+            old = node[leaf]
+            self._check_option_type(path, old, new)
+            if old == new:
+                continue
+            changes[path] = new
+            samples.append(f"{path}: {old!r} → {new!r}")
+        if not changes:
+            raise ProposalError(
+                "no effective changes: every value matches the current options"
+            )
+        shared = self._decks_sharing_config(col, conf.get("id"))
+        warnings = []
+        if shared > 1:
+            warnings.append(
+                f'options preset "{conf.get("name", "")}" is shared by '
+                f"{shared} decks - changes affect all of them"
+            )
+        return self._deck_op_proposal(
+            op="set_deck_options",
+            op_args={"deck": deck_name, "options": changes},
+            deck=deck_name,
+            rationale=str(args.get("rationale", "")),
+            samples=samples,
+            count=len(changes),
+            warnings=warnings,
+        )
+
+    def submit_create_filtered_deck(self, args: dict[str, Any]) -> dict[str, Any]:
+        col = self._col()
+        name = str(args.get("name", "")).strip()
+        if not name:
+            raise ProposalError("create_filtered_deck needs a name")
+        if self._find_deck_id(col, name) is not None:
+            raise ProposalError(f"deck {name!r} already exists")
+        terms, lines = self._parse_filtered_terms(col, args.get("terms"))
+        resched = bool(args.get("reschedule", True))
+        lines.append(
+            "Reviews reschedule cards normally"
+            if resched
+            else "Reviews do NOT affect normal scheduling"
+        )
+        return self._deck_op_proposal(
+            op="create_filtered_deck",
+            op_args={"name": name, "terms": terms, "resched": resched},
+            deck=name,
+            rationale=str(args.get("rationale", "")),
+            samples=[f'Create filtered deck "{name}"'] + lines,
+        )
+
+    def submit_update_filtered_deck(self, args: dict[str, Any]) -> dict[str, Any]:
+        col = self._col()
+        deck_name = str(args.get("deck", "")).strip()
+        did, deck = self._deck_by_name(col, deck_name)
+        if not deck.get("dyn"):
+            raise ProposalError(f"{deck_name!r} is not a filtered deck")
+        op_args: dict[str, Any] = {"deck": deck_name}
+        lines: list[str] = []
+        if args.get("terms") is not None:
+            terms, lines = self._parse_filtered_terms(col, args.get("terms"))
+            op_args["terms"] = terms
+        if "reschedule" in args and args.get("reschedule") is not None:
+            resched = bool(args.get("reschedule"))
+            op_args["resched"] = resched
+            lines.append(
+                "Reviews reschedule cards normally"
+                if resched
+                else "Reviews do NOT affect normal scheduling"
+            )
+        if "terms" not in op_args and "resched" not in op_args:
+            raise ProposalError("nothing to change: pass terms and/or reschedule")
+        return self._deck_op_proposal(
+            op="update_filtered_deck",
+            op_args=op_args,
+            deck=deck_name,
+            rationale=str(args.get("rationale", "")),
+            samples=[f'Reconfigure and rebuild filtered deck "{deck_name}"'] + lines,
+        )
+
+    def submit_filtered_deck_action(self, args: dict[str, Any]) -> dict[str, Any]:
+        col = self._col()
+        deck_name = str(args.get("deck", "")).strip()
+        action = str(args.get("action", "")).strip()
+        if action not in ("rebuild", "empty"):
+            raise ProposalError("action must be 'rebuild' or 'empty'")
+        _did, deck = self._deck_by_name(col, deck_name)
+        if not deck.get("dyn"):
+            raise ProposalError(f"{deck_name!r} is not a filtered deck")
+        verb = "Rebuild" if action == "rebuild" else "Empty"
+        return self._deck_op_proposal(
+            op="filtered_deck_action",
+            op_args={"deck": deck_name, "action": action},
+            deck=deck_name,
+            rationale=str(args.get("rationale", "")),
+            samples=[f'{verb} filtered deck "{deck_name}"'],
+        )
+
     def submit_skill_update(
         self, args: dict[str, Any], *, old_content: str, observation_ids: list[str]
     ) -> dict[str, Any]:
@@ -832,6 +1124,8 @@ class ProposalManager:
                 touched = self._accept_delete(proposal)
             elif proposal.kind == "change_set":
                 touched = self._accept_change_set(proposal)
+            elif proposal.kind == "deck_op":
+                touched = self._accept_deck_op(proposal)
             elif proposal.kind == "skill_update":
                 if self._apply_skill is None:
                     raise ProposalError("skill updates are not available")
@@ -852,7 +1146,7 @@ class ProposalManager:
                 "status": proposal.status,
                 "note_id": proposal.note_id,
                 "warnings": proposal.warnings,
-                "revertible": proposal.kind not in ("delete", "skill_update"),
+                "revertible": self._kind_revertible(proposal),
             }
         )
         self._push_ledger()
@@ -907,6 +1201,172 @@ class ProposalManager:
                 ]
             return applied
         raise ProposalError(f"unknown bulk op {proposal.op!r}")
+
+    @staticmethod
+    def _kind_revertible(proposal: Proposal) -> bool:
+        if proposal.kind in ("delete", "skill_update"):
+            return False
+        # Rebuild/empty leave nothing to restore: the previous queue content
+        # is not stored anywhere, and re-running them is one chat message.
+        if proposal.kind == "deck_op" and proposal.op == "filtered_deck_action":
+            return False
+        return True
+
+    @staticmethod
+    def _rebuild_filtered(col: Any, did: int) -> int | None:
+        """Rebuild a filtered deck; returns the gathered card count when the
+        scheduler reports one (int in older APIs, .count on newer OpChanges)."""
+        result = col.sched.rebuild_filtered_deck(did)
+        if isinstance(result, bool):
+            return None
+        if isinstance(result, int):
+            return result
+        return getattr(result, "count", None)
+
+    def _gather_note(self, count: int | None) -> list[str]:
+        if count is None:
+            return []
+        note = f"gathered {count} card(s)"
+        if count == 0:
+            note += (
+                " - nothing matched; suspended cards and cards already in "
+                "another filtered deck are never gathered"
+            )
+        return [note]
+
+    def _accept_deck_op(self, proposal: Proposal) -> list[int]:
+        col = self._col()
+        a = proposal.op_args
+        try:
+            if proposal.op == "create_deck":
+                name = a["name"]
+                if self._find_deck_id(col, name) is not None:
+                    raise ProposalError(f"deck {name!r} already exists")
+                col.decks.id(name)
+                self._ledger.append(
+                    LedgerEntry(
+                        id=proposal.id,
+                        kind="deck_op",
+                        note_id=0,
+                        label=f'create deck "{name}"',
+                        data={"op": "create_deck", "name": name},
+                    )
+                )
+            elif proposal.op == "rename_deck":
+                old, new = a["old"], a["new"]
+                did, deck = self._deck_by_name(col, old)
+                if self._find_deck_id(col, new) is not None:
+                    raise ProposalError(f"deck {new!r} already exists")
+                deck["name"] = new
+                col.decks.save(deck)
+                self._ledger.append(
+                    LedgerEntry(
+                        id=proposal.id,
+                        kind="deck_op",
+                        note_id=0,
+                        label=f'rename deck "{old}" → "{new}"',
+                        data={"op": "rename_deck", "old": old, "new": new},
+                    )
+                )
+            elif proposal.op == "set_deck_options":
+                did, deck = self._deck_by_name(col, a["deck"])
+                if deck.get("dyn"):
+                    raise ProposalError("filtered decks have no options preset")
+                conf = col.decks.config_dict_for_deck_id(did)
+                # Shared presets have collection-wide blast radius: checkpoint.
+                self._checkpoint("deck options", False)
+                priors: dict[str, Any] = {}
+                for path, new in a["options"].items():
+                    node, leaf = self._resolve_option(conf, path)
+                    priors[path] = node[leaf]
+                    node[leaf] = new
+                col.decks.update_config(conf)
+                self._ledger.append(
+                    LedgerEntry(
+                        id=proposal.id,
+                        kind="deck_op",
+                        note_id=0,
+                        label=f'deck options for "{a["deck"]}" '
+                        f"({len(priors)} change(s))",
+                        data={
+                            "op": "set_deck_options",
+                            "deck": a["deck"],
+                            "priors": priors,
+                        },
+                    )
+                )
+            elif proposal.op == "create_filtered_deck":
+                name = a["name"]
+                if self._find_deck_id(col, name) is not None:
+                    raise ProposalError(f"deck {name!r} already exists")
+                did = int(col.decks.new_filtered(name))
+                deck = col.decks.get(did)
+                deck["terms"] = [list(t) for t in a["terms"]]
+                deck["resched"] = bool(a["resched"])
+                col.decks.save(deck)
+                proposal.warnings = self._gather_note(
+                    self._rebuild_filtered(col, did)
+                )
+                self._ledger.append(
+                    LedgerEntry(
+                        id=proposal.id,
+                        kind="deck_op",
+                        note_id=0,
+                        label=f'create filtered deck "{name}"',
+                        data={"op": "create_filtered_deck", "name": name},
+                    )
+                )
+            elif proposal.op == "update_filtered_deck":
+                did, deck = self._deck_by_name(col, a["deck"])
+                if not deck.get("dyn"):
+                    raise ProposalError(f'{a["deck"]!r} is not a filtered deck')
+                priors = {
+                    "terms": [list(t) for t in deck.get("terms") or []],
+                    "resched": bool(deck.get("resched", True)),
+                }
+                if a.get("terms") is not None:
+                    deck["terms"] = [list(t) for t in a["terms"]]
+                if a.get("resched") is not None:
+                    deck["resched"] = bool(a["resched"])
+                col.decks.save(deck)
+                proposal.warnings = self._gather_note(
+                    self._rebuild_filtered(col, did)
+                )
+                self._ledger.append(
+                    LedgerEntry(
+                        id=proposal.id,
+                        kind="deck_op",
+                        note_id=0,
+                        label=f'reconfigure filtered deck "{a["deck"]}"',
+                        data={
+                            "op": "update_filtered_deck",
+                            "deck": a["deck"],
+                            "priors": priors,
+                        },
+                    )
+                )
+            elif proposal.op == "filtered_deck_action":
+                did, deck = self._deck_by_name(col, a["deck"])
+                if not deck.get("dyn"):
+                    raise ProposalError(f'{a["deck"]!r} is not a filtered deck')
+                if a["action"] == "rebuild":
+                    proposal.warnings = self._gather_note(
+                        self._rebuild_filtered(col, did)
+                    )
+                else:
+                    col.sched.empty_filtered_deck(did)
+                # No ledger entry: nothing restorable (see _kind_revertible).
+            else:
+                raise ProposalError(f"unknown deck op {proposal.op!r}")
+        except ProposalError:
+            raise
+        except Exception as exc:
+            # Real backend errors (invalid name, backend invariants) surface
+            # as a proposal error on the card instead of a stuck UI.
+            raise ProposalError(str(exc)) from None
+        proposal.status = ACCEPTED
+        self._after_deck_change()
+        return []
 
     def _accept_delete(self, proposal: Proposal) -> list[int]:
         col = self._col()
@@ -1134,6 +1594,15 @@ class ProposalManager:
         proposal = self._proposals.get(str(msg.get("id", "")))
         if proposal is None or proposal.status != UNDONE:
             return
+        if proposal.kind not in ("create", "edit"):
+            self._push(
+                {
+                    "type": "proposal_error",
+                    "id": proposal.id,
+                    "message": "re-apply this by asking the assistant again",
+                }
+            )
+            return
         col = self._col()
         try:
             if proposal.kind == "create":
@@ -1292,6 +1761,8 @@ class ProposalManager:
                 by_deck.setdefault(int(did), []).append(int(cid))
             for did, cids in by_deck.items():
                 col.set_deck(cids, did)
+        elif entry.kind == "deck_op":
+            self._revert_deck_op(col, entry)
         elif entry.kind == "change_set":
             missing = 0
             for item in entry.data.get("items", []):
@@ -1326,6 +1797,62 @@ class ProposalManager:
         entry.undone = True
         if resync:
             self._observe({"event": "resync", "note_ids": resync})
+
+    def _revert_deck_op(self, col: Any, entry: LedgerEntry) -> None:
+        """Deck-op reverts always look decks up BY NAME, never by stored id:
+        legacy DeckManager.get(did) falls back to the Default deck for a
+        missing id, and a revert must never touch the wrong deck."""
+        op = entry.data.get("op")
+        try:
+            if op == "create_deck":
+                name = entry.data["name"]
+                did = self._find_deck_id(col, name)
+                if did is None:
+                    raise ProposalError("deck already removed")
+                if any(
+                    n.startswith(name + "::") for n in self._deck_names(col)
+                ):
+                    raise ProposalError(
+                        "deck now has subdecks; remove it in Anki if intended"
+                    )
+                if list(col.find_cards(f'deck:"{name}"')):
+                    raise ProposalError(
+                        "deck now contains cards; remove it in Anki if intended"
+                    )
+                col.decks.remove([did])
+            elif op == "rename_deck":
+                old, new = entry.data["old"], entry.data["new"]
+                did, deck = self._deck_by_name(col, new)
+                if self._find_deck_id(col, old) is not None:
+                    raise ProposalError(f"a deck named {old!r} exists again")
+                deck["name"] = old
+                col.decks.save(deck)
+            elif op == "set_deck_options":
+                did, _deck = self._deck_by_name(col, entry.data["deck"])
+                conf = col.decks.config_dict_for_deck_id(did)
+                for path, prior in entry.data["priors"].items():
+                    node, leaf = self._resolve_option(conf, path)
+                    node[leaf] = prior
+                col.decks.update_config(conf)
+            elif op == "create_filtered_deck":
+                # Removing a filtered deck returns its cards to their home
+                # decks with scheduling intact - the safe inverse of create.
+                did, _deck = self._deck_by_name(col, entry.data["name"])
+                col.decks.remove([did])
+            elif op == "update_filtered_deck":
+                did, deck = self._deck_by_name(col, entry.data["deck"])
+                priors = entry.data["priors"]
+                deck["terms"] = [list(t) for t in priors["terms"]]
+                deck["resched"] = bool(priors["resched"])
+                col.decks.save(deck)
+                self._rebuild_filtered(col, did)
+            else:
+                raise ProposalError(f"unknown deck op {op!r}")
+        except ProposalError:
+            raise
+        except Exception as exc:
+            raise ProposalError(str(exc)) from None
+        self._after_deck_change()
 
     def _push_ledger(self) -> None:
         self._push(
