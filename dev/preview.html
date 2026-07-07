@@ -432,12 +432,18 @@
     </script>
     <script src="../chat_with_your_cards/web/vendor/marked.min.js"></script>
     <script>
-        fetch("../chat_with_your_cards/web/index.html")
+        // Cache-bust the web assets so iterating on styles.css / index.html /
+        // app.js always reflects the latest edit (browsers otherwise serve the
+        // dynamically-injected script and fetched HTML from cache).
+        var cacheBust = "?v=" + Date.now();
+        var cssLink = document.querySelector('link[rel="stylesheet"]');
+        cssLink.href = cssLink.getAttribute("href") + cacheBust;
+        fetch("../chat_with_your_cards/web/index.html" + cacheBust)
             .then(function (r) { return r.text(); })
             .then(function (html) {
                 document.getElementById("preview-frame").innerHTML = html;
                 var s = document.createElement("script");
-                s.src = "../chat_with_your_cards/web/app.js";
+                s.src = "../chat_with_your_cards/web/app.js" + cacheBust;
                 document.body.appendChild(s);
             });
     </script>

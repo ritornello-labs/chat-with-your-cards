@@ -264,6 +264,12 @@ class ProposalManager:
                 {"type": "proposal_resolved", "id": prev.id, "status": SUPERSEDED}
             )
 
+    def supersede(self, args: dict[str, Any]) -> None:
+        """Set a pending proposal aside because the user asked for a revision
+        ("Suggest change" + send). Restorable like any superseded card. A no-op
+        if it was already resolved, so a stale click can't corrupt state."""
+        self._maybe_supersede(args.get("id"))
+
     # ---- agent-facing submission (tool entry points) ----
 
     def submit_create(self, args: dict[str, Any]) -> dict[str, Any]:

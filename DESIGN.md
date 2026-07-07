@@ -205,7 +205,7 @@ Flow: agent calls `propose_note` → ProposalManager validates (note type exists
 
 ## 9. UI / UX
 
-- **Dock**: right-side `QDockWidget`, collapsible, floatable, width persisted. Header: new-chat, a dock/undock toggle (floating a `QDockWidget` otherwise strands the user with no obvious way back — the toggle calls `setFloating` and the header button re-labels from a `dock_state` event), model/effort picker, and the Pins panel. Permission-mode chip is planned.
+- **Dock**: right-side `QDockWidget`, collapsible, **docked-only** (movable between the left/right edges but not floatable — a torn-off floating panel strands the user and steals focus; user-decided 2026-07-06), width persisted. The top header is chat-management only: new-chat, history, open-in-Claude-Code (a split button with a caret opening a Desktop-app / Terminal chooser), and doctor. Following Claude Code, the **permission-mode chip and model/effort picker live in a control row inside the composer** (mode + Pins bottom-left, model/effort + send bottom-right), not the header. The permission-mode chip opens a dropdown to pick a mode directly (Shift+Tab still cycles). Model/effort and Pins open as cards floating just above the composer. **Tools menu**: a "Chat With Your Cards" submenu with verb-labeled entries and their shortcuts ("Open / focus chat" · Ctrl+J, "New chat" · Ctrl+Shift+J) that call the same actions as the chords — replacing the old bare checkable dock-title toggle, which was confusing (just the add-on name, and its show/hide semantics diverged from the focus-aware chord).
 - **Look — copy the vernacular, don't innovate (decided 2026-07-02)**: the chat surface deliberately mimics Claude Code / ChatGPT conventions, because users (including the author) already have that muscle memory and those UIs are good enough in a worse-is-better sense. Concretely: bottom-pinned rounded composer with send button inside it; stop button replaces send while streaming; streaming markdown with code blocks + copy buttons; tool calls as collapsed, expandable rows inline in the assistant turn (query + result count visible); new-chat control at the top; history as a plain session list. The novelty budget is spent only on Anki-specific surfaces: the context chip and proposal cards. CSS custom properties keyed to Anki's palette; obeys light/dark and night-mode hooks. Design pass via workbench screenshots (see §11).
 - **Shortcuts** (all configurable in config UI, registered as `QShortcut` on the main window). Proposed defaults:
   - **`Cmd+J` / `Ctrl+J` — toggle chat focus**: if dock hidden → show + focus input; if focus in dock → return focus to reviewer/deck browser; if focus elsewhere and dock visible → focus input. One chord, three context-aware behaviors. Home-row, one-handed, unused by stock Anki (reviewer, deck browser, or editor). The webview forwards the chord back to Python when the input has focus (Qt shortcuts don't fire inside webviews reliably — known sharp edge).
@@ -218,7 +218,7 @@ Flow: agent calls `propose_note` → ProposalManager validates (note type exists
   - Fallback chords if `J` clashes with another add-on: `Cmd+;` (home row, essentially never taken) or `Cmd+K` (familiar from launcher/chat UIs, but collides with "insert link" muscle memory in many editors).
   - Config UI warns on known conflicts with reviewer keys (space, 1–4, `u`, `e`, `*`, `-`, `!`, etc.) and stock main-window shortcuts (`a`, `b`, `y`, `t`, `s`, `d`).
 - **States**: the chat itself always starts empty — **no assistant preamble, no auto-greeting**; the conversation begins when the user sends the first message. Context (card block or collection overview) is assembled lazily at first send; the CLI process pre-warms when the chat gains focus, so spawn latency is hidden well before the first send (a hidden/unfocused dock spawns nothing). The only pre-chat chrome is a subtle context chip showing *what the agent will see* ("Context: card 'define limits' in Math::Analysis" / "Context: collection overview") — trust through transparency, not a message in the transcript. The chip updates as the user moves between reviewer, deck browser, and overview.
-- **Chat history**: sessions persisted per-profile as **our own event-sourced JSON transcripts** in `user_files/` — every rendered event (user/assistant messages, tool calls + results, proposal cards and their outcomes, permission decisions, context-chip state) is the source of truth for display and history. Each transcript stores the backend's session id, so "continue this chat" maps to the backend's native resume (`claude --resume <id>`) while pixels come from our file. CLI session files are deliberately *not* parsed: their formats are internal and version-unstable, the BYOK backend has none, and they lack our UI-level events.
+- **Chat history**: sessions persisted per-profile as **our own event-sourced JSON transcripts** in `user_files/` — every rendered event (user/assistant messages, tool calls + results, proposal cards and their outcomes, permission decisions, context-chip state) is the source of truth for display and history. Each transcript stores the backend's session id, so "continue this chat" maps to the backend's native resume (`claude --resume <id>`) while pixels come from our file. CLI session files are deliberately *not* parsed: their formats are internal and version-unstable, the BYOK backend has none, and they lack our UI-level events. Reopening Anki starts a fresh chat by default (the previous one is in History); the opt-in `restore_last_chat` config reopens the most recent chat automatically (same replay + `--resume` path as picking it from History).
 
 ## 10. Packaging & compatibility
 
@@ -269,7 +269,8 @@ Flow: agent calls `propose_note` → ProposalManager validates (note type exists
 12. **Workspace-decision tension**: the 2026-06-24 note prefers Claude Code-only workflows over bespoke software. This project is bespoke, but the CLI-first backend is aligned in spirit — it *wraps* Claude Code rather than replacing it. Recorded so the contradiction is conscious.
 13. **Resolved 2026-07-02**: chats lead with nothing — no preamble; context assembly is lazy at first message, CLI process pre-warms when the chat gains focus (once per session, not per review). Chords **user-confirmed**: `Cmd+J` context-aware toggle (returns focus when in dock), `Cmd+Shift+J` new chat keeping focus in composer, `Esc` stop-or-leave. Chat UX copies Claude Code / ChatGPT conventions verbatim (§9). Transcripts: own event-sourced JSON with embedded backend session id for native resume (§9) — CLI session files never parsed, so the only CLI-format maintenance surface is the documented stream-json interface (§2).
 14. **M2 implementation notes (2026-07-03).** The ProposalManager is the single write path; agent tools submit to it, the webview's proposal cards accept/reject through it, and everything runs on Anki's main thread (tool calls are already marshaled there). The staleness guard snapshots the changed fields at *submit* time and re-checks at *accept* time; on mismatch the proposal refreshes its baseline and re-renders for re-review instead of applying. Per-field acceptance ships in v1 (checkbox per changed field); granular per-field reject-with-comment did not. Previews render via `Note.ephemeral_card()` + `render_output()` with the model CSS, shipped as HTML into a sandboxed iframe (best-effort: proposals degrade gracefully to fields-only when rendering fails). Demo/smoke coverage uses a `ProposalRequest` backend event that only the ScriptedBackend emits; the controller routes it into the real ProposalManager, so the Docker GUI smoke accepts a scripted proposal and asserts the real note (with `ai-created` + session tags) exists in the collection. The session ledger is in-memory per chat session (per-change revert, undo-session, Browser jump via the session tag); persisting it across restarts is deferred to the M3 transcript work. Keyboard review: `Cmd+Enter` accept / `Cmd+Backspace` reject target the focused (else earliest) pending proposal, `Cmd+Up/Down` cycle pending proposals. Auto-accept: creations only, per-session cap, pause notice when the cap trips, then manual proposals.
-15. **Display name — resolved 2026-07-02: "Chat With Your Cards".** Rationale: AnkiWeb search is primitive substring matching, and an add-on has no marketing muscle — the title *is* the marketing, and a descriptive one transmits the value proposition in a single utterance. Keep "AI" in the AnkiWeb subtitle for search. Avoid "Copilot" (trademark) and model-vendor names (backend-plural by design). Repo renamed to `chat-with-your-cards`. Earlier brand-style candidates (Deskmate, Marginalia, Sidekick, Socratic) and the "Chat With Your Collection" variant kept for the record but rejected. SVG icon designed later; it need not derive from the name.
+15. **Display name — resolved 2026-07-02: "Chat With Your Cards".** Rationale: AnkiWeb search is primitive substring matching, and an add-on has no marketing muscle — the title *is* the marketing, and a descriptive one transmits the value proposition in a single utterance. Keep "AI" in the AnkiWeb subtitle for search. Avoid "Copilot" (trademark) and model-vendor names (backend-plural by design). Repo renamed to `chat-with-your-cards`. Earlier brand-style candidates (Deskmate, Marginalia, Sidekick, Socratic) and the "Chat With Your Collection" variant kept for the record but rejected. SVG icon designed later; it need not derive from the name. **Display-name plumbing (2026-07-06):** Anki's Add-ons pane shows `meta.json`'s `name` key, falling back to the module/folder name when it is absent — it does *not* read `manifest.json` at display time. A packaged `.ankiaddon` install copies `manifest.json`'s `name` into `meta.json` automatically, but a **dev symlink install** (addons21 → this repo) never runs that step, so its `meta.json` (gitignored, Anki-managed) needs `"name": "Chat With Your Cards"` added by hand or it displays `chat_with_your_cards`. Both `manifest.json` and the local `meta.json` now carry the name.
+16. **Dogfooding polish (2026-07-06, from real use).** Ten fixes: (1) the CLI stream parser now inserts a paragraph break between consecutive text blocks/messages in a turn (`_text_separator` in `claude_cli.py`), so two assistant messages with no tool call between them no longer glue as "…style.Let me…"; a leading break in a fresh UI bubble is trimmed by the renderer, so it is harmless after a tool chip. (2) Tool chips are collapsible: the header row toggles an expandable detail area showing the tool's input args and result (`SUMMARY_CHARS`/`RESULT_CHARS` raised to feed it; the collapsed row still shows only a short hint). (3) "Suggest change" + send now sets the revised-away proposal aside as **superseded** (restorable) via the new `ProposalManager.supersede` + `proposal_supersede` bridge message, instead of leaving it dangling as pending. (4) Optional `restore_last_chat` config (default off) reopens the last chat on launch. (5) The dock is docked-only (no `DockWidgetFloatable`; the detach button and `toggle_float`/`dock_state` plumbing are gone). (6) The permission-mode chip and open-in-Claude-Code button are now caret dropdowns (pick a mode directly / choose Desktop-app vs Terminal). (7) Claude-Code-style layout: permission-mode + model/effort + Pins moved out of the top header into a control row inside the composer. (8) The Tools-menu entry became a labeled "Chat With Your Cards" submenu ("Open / focus chat", "New chat", each with its shortcut) instead of a bare add-on-title checkbox whose show/hide toggle diverged from the Ctrl+J focus chord. (9) The dock now has a `MIN_DOCK_WIDTH` (320px) floor with `setMinimumWidth` + a load-time clamp — the persisted width had let an accidental drag reopen the panel as an unusable ~70px sliver; the composer control row also gained `flex-wrap` so long labels wrap instead of overflowing at narrow widths. (10) "Open in Claude Code" is now a prominent accent-styled **split button**: the main part opens with the current target (shown in the label — Terminal / Desktop), the caret picks it, and the choice persists (`open_in_claude_target` config). The terminal handoff honors a new `terminal_app` config (empty = Apple Terminal via AppleScript; any other app name launches a temp `.command` via `open -a`, covering iTerm/Warp/Ghostty/…).
 
 ## 14. Tracked upstream dependencies (re-check when resuming)
 
@@ -394,3 +395,232 @@ trusted-writes within the write budget; deck ops cost 1 budget unit).
   child decks in the Rust backend; the Docker smoke asserts this against
   a real subdeck (plus the full filtered lifecycle and both revert
   refusal paths).
+
+## 17. LLM-graded long-recall cards + capstone gating (2026-07-06)
+
+Design captured from a brainstorming pass. Status: **agreed direction, not
+yet built.** The Layer-1 server component may end up living outside this
+repo; the agent-driven Layer-2 parts belong to CWYC.
+
+### 17.1 Components: always-on server + desktop add-on
+
+The graded card must reach an LLM from **any** device, and the user's
+laptop is not always on — so grading runs on an **always-on HTTP server**,
+hosted inside the user's **VPN**, NOT in the desktop add-on. Only the
+progress bubble (§17.8) is desktop-first; everything else is
+cross-platform.
+
+- **Always-on server (in the VPN).** The grader / interactive-tutor
+  endpoint. The big card's **template JS** POSTs the recall answer,
+  renders the back-and-forth, and shows feedback — works on AnkiMobile /
+  AnkiDroid / desktop because it talks to the server, not the laptop. The
+  server records per-atomic verdicts **and full conversations** (§17.9).
+- **Chat With Your Cards add-on (desktop).** The single *writer* for
+  scheduling: reads the server's grading events and applies the
+  consequences to the collection — fail missed atomics, gate the
+  capstone, promote related cards (§17.5–17.7). Also builds/maintains the
+  dependency graph and renders the desktop bubble. Deliberately **not**
+  the grader (the laptop isn't always on).
+- **Reconciler add-on.** Consistency checks (§17.3, §17.7).
+
+A "big card" is a *capstone / integration test* over a set of atomic
+cards. Net split: **the server grades (all platforms) and records; the
+desktop add-on writes scheduling and shows the bubble.**
+
+**VPN — what it does and doesn't buy.** Solves **auth** (the VPN is the
+boundary; no public endpoint, no shared secret). **CORS** becomes a
+one-line permissive header (webview-origin policy, network-independent).
+Does **not** solve **offline** — a card off-VPN / offline still can't
+reach the grader, so it must degrade gracefully. Still needs a **TLS**
+story (Anki mobile webviews resist plaintext even to a private host; e.g.
+Tailscale certs).
+
+### 17.2 First card (the proving ground)
+
+"List the members of a fixed canonical sequence, in order." Chosen because it dodges
+both hard problems: the atomic cards **already exist** in such a deck
+("given a member, what comes after it"), the composition is a *declared*
+fixed set (no graph discovery, never goes stale), and every mechanism it
+needs is FSRS-native. Build this before anything semantic.
+
+### 17.3 Graphs: two kinds, very different difficulty
+
+- **Authored composition** — the big card *is* a known fixed set of
+  atomics. Declared, not discovered; the agent writes the dependency set
+  on the user's instruction ("I have these atomic cards, wire them up").
+  Never drifts. This is the easy, high-value majority case.
+- **Discovered semantic** (e.g. a linear-algebra topic) — the agent
+  sweeps the collection for related cards. Kept cheap by **incremental
+  sweeps**: track the last-sweep datetime and only scan cards added
+  since. Run as a desktop batch a few days before the big card is due;
+  update the big card's stored reference set as needed. Believed
+  tractable and inexpensive per the user's experience with search agents.
+
+The big card **stores references to its related cards by both `nid` and
+`guid`** — `nid` for fast local lookup (survives retag/move), `guid` to
+survive export/re-import across collections. A periodic reconciler add-on
+walks the reference set (a handful to a few dozen cards) and notifies the
+user on inconsistency: missing / deleted / edited / newly-relevant notes.
+Per-card config decides which of those conditions merely warn vs. trigger
+a user review. Explicit goal: **most cards need no manual intervention;**
+the review path is the exception, not the norm. If the big card *itself*
+is edited, that can invalidate and rebuild the graph.
+
+**One relevant-cards set; usage is the LLM's call.** A big card hangs off
+a single set of **relevant cards** (the graph). There is *no* structural
+split between "cards to test" and "cards for hints" — the LLM decides, per
+card per session, how to use each: test it (→ per-card verdict → maybe
+fail it), draw a hint from it, or both. The set spans note types and
+concepts (the "what comes next" adjacency cards *and* a "Pastorals"
+concept card), and a single recall miss can fail any subset of them —
+e.g. an adjacency card *and* the Pastorals card, if the user genuinely
+can't recall those books. So the "enumerate the New Testament books" card
+is not defined solely by its adjacency cards. The capstone's gate (§17.5)
+is defined over this one set (or over whatever it has recently failed) —
+not over a pre-declared sub-partition.
+
+### 17.4 Config in a card field
+
+Per-card behaviour (gate rule, timing lead-time, missing-note handling,
+etc.) lives as **human-readable YAML/JSON in a card field**, written and
+maintained by the CWYC agent (not hand-edited by the user, though
+readable). Deliberately *not* base64/opaque-encoded: human-readability
+wins; the `{{ }}` template-collision risk is minor and avoidable without
+sacrificing legibility.
+
+### 17.5 Gating the capstone
+
+The capstone is **suspended/unsuspended** based on atomic state — an
+availability control, not interval math, so FSRS never sees a rewritten
+interval. The rule is per-card configurable. Default candidate: show the
+capstone when **nothing in its set is currently lapsed/relearning**
+(softer than "all mature", which would rarely fire with ~38 atomics).
+This is the knob that decides whether the capstone resurfaces monthly vs.
+never.
+
+### 17.6 Rescheduling: mostly FSRS-native, one thing to avoid
+
+1. **Fail the atomics the LLM judged wrong** = record honest **Again**
+   ratings on those cards. FSRS-legit (the exact button the user would
+   press). Applied via the collection API with Anki closed (the same
+   lib-with-Anki-closed primitive used for filtered decks).
+2. **Short-interval re-drilling** = *free.* An Again drops the card into
+   FSRS relearning steps automatically — that IS "practice a few times at
+   short intervals, then graduate." No custom interval logic.
+3. **Cross-card promotion** = a **filtered deck with "Reschedule cards
+   based on my answers" ON.** The related cards surface for *real* review
+   and FSRS updates them from genuine ratings — this is FSRS-native, not a
+   fight. Reuses the filtered-deck machinery in §16. (Minor caveat:
+   early-review distortion, which FSRS handles gracefully.)
+4. **Avoid:** blind `setDueDate` surgery to move cards earlier without a
+   review — that lies to the scheduler. Rescheduling-OFF cram is only for
+   "don't disturb my schedule" exam prep, which is not this use case.
+
+### 17.7 Single-writer discipline & the sync facts
+
+Grading happens on the always-on server from any device, but **all
+collection writes happen in one place: the desktop add-on** (batch, or
+next desktop open, via the collection API). The server is the
+record/brain; the add-on is the single writer. Mobile never writes
+scheduling directly — it grades via the server, and the add-on later
+applies the consequences.
+
+**Correction to an earlier draft:** Anki does **not** force a one-way /
+full sync when you review on two devices before syncing. Per the manual,
+"reviews and note edits can be merged, so if you review or edit on two
+different devices before syncing, Anki will preserve your changes from
+both locations," and if the same card was reviewed in two places "both
+reviews will be marked in the revision history, and the card will be kept
+in the state it was when it was most recently answered." A one-way sync
+is triggered only by **structural / schema changes** (adding a field,
+removing a card template, …), never by reviews. So the "fail on one
+device, good on another before syncing" case is benign last-writer-wins
+on that single card, with both reviews logged — no data loss, no forced
+full sync.
+
+Residual discipline that still matters: the apply path is **keyed to a
+grading-event id + collection revision** and **idempotent** (a re-run
+must never double-fail a card). The reconciler add-on surfaces any
+divergence between the server's recorded events, the add-on's applied
+state, and the actual collection.
+
+### 17.8 Progress bubble — desktop-only, add-on-rendered
+
+Decision: render the bubble **only on desktop, injected by the add-on**
+into the reviewer (CWYC already hooks the reviewer webview). No card-
+template JS, no ping, no server. Because the add-on has full collection
+access, the count is **precise and always up to date** (modulo a pending
+sync from another device) — and it can show true **maturity** ("17/20
+mature"), not merely "seen." (The earlier seen-vs-mature limitation was
+purely the *webview* being blind to scheduling; an add-on is not, so
+desktop-only unlocks the better metric for free.) Mobile shows no bubble
+for now; revisit only if the feature earns it (§17.1 deferred bucket).
+
+### 17.9 Grading contract & the tutor loop
+
+Developed **by examples**, not spec-first, and expected to carry **bespoke
+per-card logic.** The interaction is an escalating-hint tutor loop, not a
+single grade:
+
+1. User does one long active-recall pass (typed or voice-transcribed,
+   possibly self-correcting: "actually, earlier I meant…").
+2. The LLM either grades immediately or gives a **hint** about what was
+   forgotten/wrong ("you got some of the first five out of order — try
+   again?").
+3. User retries; hints get **progressively easier** each round until the
+   user succeeds or gives up.
+4. Hints can be **derived from the collection graph** — e.g. "you forgot
+   three books" → user still fails → "those three are all the Pastorals",
+   generated by noticing the user *has* a Pastorals card. The hint
+   generator reads the relevant-cards set (§17.3), not just the answer.
+5. Hints can also be **generic** ("the book starts with F___"). The tutor
+   should just be as good a tutor as possible, mixing graph-derived and
+   generic hints.
+
+The judge decomposes the whole session into **per-atomic verdicts**. A
+reviewable UI reveals each verdict and lets the user override unfair ones
+— **load-bearing**, because mapping a ramble to "which adjacencies
+failed" is ambiguous (a single transposition looks like two broken
+adjacencies). Seed the contract with real transcripts including a
+self-correction and a transposition.
+
+**Capture everything.** The server records full conversations, not just
+verdicts, as a corpus for improving the tutor over time (how exactly —
+eval set, few-shot exemplars, fine-tuning — is open; committing to the
+capture now is the point).
+
+**Drafted contract:** see [`GRADING_CONTRACT.md`](GRADING_CONTRACT.md) —
+the server API (provision / session / turn / finalize), the verdict
+schema (with a graded `grade_map`: hint depth → FSRS rating), the
+escalating-hint ladder, and three worked transcripts (clean pass;
+self-correction + transposition + disputed verdict; multi-turn hints with
+give-up).
+
+### 17.10 Operational timing
+
+**One nightly desktop sweep** processes big cards due within their
+**per-card lead-time** window. Per-card lead time: yes (cheap, no
+inefficiency). Per-card independent cron/frequency: no (over-engineering
+for no gain).
+
+### 17.11 Open questions
+
+- Grading-contract schema and per-card bespoke logic — fall out of the
+  seed transcripts.
+- Exact gate-policy thresholds — empirical, tune by use.
+- Precise keying/idempotency of the apply path and the reconciler's
+  divergence UX.
+- **Server deployment in the VPN** — approach known, mostly execution:
+  TLS via Tailscale MagicDNS certs (or Caddy + a domain); CORS is a
+  one-line header. Offline is *not* a design item — SotA grading needs
+  the network, so a card that can't reach the grader just shows a
+  graceful "can't grade offline" message.
+- How the **relevant-cards set** (§17.3) is declared/maintained per card,
+  and how the gate is defined over it (whole set vs. recently-failed
+  subset).
+- How captured conversations are actually used to improve the tutor
+  (eval set / exemplars / fine-tuning).
+
+**Deferred (out of near-term scope):** a **mobile** progress bubble
+(desktop-only for now, §17.8). The cross-platform server itself is core,
+not deferred.

@@ -628,6 +628,27 @@ class SupersedeTests(unittest.TestCase):
         self.assertEqual([], superseded)
         self.assertGreaterEqual(len(pushes_of(pushed, "proposal_resolved")), before)
 
+    def test_public_supersede_sets_aside_pending(self) -> None:
+        # The "Suggest change" + send flow calls this directly (bridge
+        # proposal_supersede) to set the revised-away card aside.
+        manager, _col, pushed = make_manager()
+        first = manager.submit_create(dict(CREATE_ARGS))
+        manager.supersede({"id": first["proposal_id"]})
+        superseded = [
+            p for p in pushes_of(pushed, "proposal_resolved") if p["status"] == "superseded"
+        ]
+        self.assertEqual([first["proposal_id"]], [p["id"] for p in superseded])
+
+    def test_public_supersede_noop_when_resolved(self) -> None:
+        manager, _col, pushed = make_manager()
+        first = manager.submit_create(dict(CREATE_ARGS))
+        manager.reject({"id": first["proposal_id"]})
+        manager.supersede({"id": first["proposal_id"]})
+        superseded = [
+            p for p in pushes_of(pushed, "proposal_resolved") if p["status"] == "superseded"
+        ]
+        self.assertEqual([], superseded)
+
 
 class RestoreTests(unittest.TestCase):
     def test_restore_superseded_returns_to_pending(self) -> None:

@@ -23,6 +23,17 @@
 - `suggested_questions` (default `true`): show a context-aware suggested
   question as gray ghost text in the empty composer; Tab accepts it, typing
   dismisses it.
+- `restore_last_chat` (default `false`): when `true`, reopening Anki restores
+  your most recent chat in the dock (replayed from its saved transcript, with
+  the agent resumed) instead of starting empty. Older chats remain in History
+  either way.
+- `open_in_claude_target` (default `"terminal"`): the default target the "Open
+  in Claude Code" split button acts on — `"terminal"` or `"gui"` (desktop app).
+  Changing it from the button's dropdown persists here.
+- `terminal_app` (default `""` = Apple Terminal): which macOS terminal the
+  terminal handoff opens. Empty uses Terminal.app via AppleScript; any other
+  app name (e.g. `"iTerm"`, `"Warp"`, `"Ghostty"`) is launched with a temporary
+  `.command` script via `open -a`.
 - `source_fields` (default `{}` = look everywhere): optional per-note-type
   restriction of which fields may contain card sources, e.g.
   `{"0 Cloze": ["Extra"]}`. By default any URI in any field is treated as a

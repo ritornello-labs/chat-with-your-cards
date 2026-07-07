@@ -463,11 +463,22 @@ def _run_checks() -> dict[str, Any]:
     check("dock exists and starts hidden", _dock_exists)
 
     def _tools_action() -> None:
-        texts = [a.text().replace("&", "") for a in mw.form.menuTools.actions()]
-        if MENU_LABEL not in texts:
+        actions = mw.form.menuTools.actions()
+        entry = next(
+            (a for a in actions if a.text().replace("&", "") == MENU_LABEL), None
+        )
+        if entry is None:
+            texts = [a.text().replace("&", "") for a in actions]
             raise AssertionError(f"Tools menu is missing {MENU_LABEL!r}: {texts}")
+        submenu = entry.menu()
+        if submenu is None:
+            raise AssertionError("Tools entry should be a submenu, not a bare toggle")
+        items = [a.text().replace("&", "").split("\t")[0] for a in submenu.actions()]
+        for expected in ("Open / focus chat", "New chat"):
+            if expected not in items:
+                raise AssertionError(f"submenu missing {expected!r}: {items}")
 
-    check("Tools menu action present", _tools_action)
+    check("Tools submenu present with labeled actions", _tools_action)
 
     def _shortcuts_registered() -> None:
         keys = _shortcut_keys()

@@ -128,9 +128,83 @@ class ParseStreamLineTest(unittest.TestCase):
         }
         parse_stream_line(streamed, self.state)
         self.assertEqual([], parse_stream_line(full_1, self.state))
+        # A second message's text in the same turn is separated from the first
+        # by a paragraph break, not glued ("part one" + "synthetic follow-up").
         self.assertEqual(
-            [TextDelta("synthetic follow-up")], parse_stream_line(full_2, self.state)
+            [TextDelta("\n\nsynthetic follow-up")],
+            parse_stream_line(full_2, self.state),
         )
+
+    def test_second_streamed_message_gets_paragraph_break(self) -> None:
+        # Two assistant messages stream in one turn with no tool call between;
+        # without a separator their text glued as "…style.Let me…" (2026-07-06).
+        first_delta = {
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "…to match style."},
+            },
+        }
+        first_full = {
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": "…to match style."}]},
+        }
+        second_delta = {
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "Let me look."},
+            },
+        }
+        self.assertEqual(
+            [TextDelta("…to match style.")],
+            parse_stream_line(first_delta, self.state),
+        )
+        self.assertEqual([], parse_stream_line(first_full, self.state))
+        self.assertEqual(
+            [TextDelta("\n\nLet me look.")],
+            parse_stream_line(second_delta, self.state),
+        )
+
+    def test_new_content_block_in_one_message_separates(self) -> None:
+        # Two text content blocks in a single streamed message (index 0 then 1)
+        # must not run together.
+        block0 = {
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "First para."},
+            },
+        }
+        block1 = {
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "index": 1,
+                "delta": {"type": "text_delta", "text": "Second para."},
+            },
+        }
+        self.assertEqual([TextDelta("First para.")], parse_stream_line(block0, self.state))
+        self.assertEqual(
+            [TextDelta("\n\nSecond para.")], parse_stream_line(block1, self.state)
+        )
+
+    def test_first_text_of_turn_has_no_leading_break(self) -> None:
+        # After a turn ends, the next turn's opening text is not prefixed.
+        delta = {
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "Hi."},
+            },
+        }
+        parse_stream_line(delta, self.state)
+        parse_stream_line({"type": "result", "subtype": "success"}, self.state)
+        self.assertEqual([TextDelta("Hi.")], parse_stream_line(delta, self.state))
 
     def test_user_tool_result(self) -> None:
         events = parse_stream_line(

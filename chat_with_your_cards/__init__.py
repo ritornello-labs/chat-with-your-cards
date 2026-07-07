@@ -28,6 +28,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "effort": "",
     "web_access": True,
     "suggested_questions": True,
+    "restore_last_chat": False,
+    "open_in_claude_target": "terminal",
+    "terminal_app": "",
     "anthropic_api_key": "",
     "anthropic_api_key_op": "",
     "openai_api_key": "",
@@ -95,6 +98,27 @@ def new_chat() -> None:
     from . import shortcuts as shortcuts_mod
 
     shortcuts_mod.new_chat(state)
+
+
+def _install_tools_menu(config: dict[str, Any]) -> None:
+    """Add a clearly-labeled 'Chat With Your Cards' submenu to Anki's Tools
+    menu, with verbs and their shortcuts — instead of a bare add-on-title
+    checkbox that silently toggled dock visibility (which also diverged from
+    what the Ctrl+J chord does). Both entries drive the same actions as the
+    chords, so the menu and the keyboard agree."""
+    from aqt.qt import QAction, QKeySequence, QMenu
+
+    def hint(seq: str) -> str:
+        return QKeySequence(seq).toString(QKeySequence.SequenceFormat.NativeText)
+
+    menu = QMenu("Chat With Your Cards", mw)
+    open_action = QAction(f"Open / focus chat\t{hint(config['toggle_shortcut'])}", mw)
+    open_action.triggered.connect(lambda *_a: toggle_chat_focus())
+    new_action = QAction(f"New chat\t{hint(config['new_chat_shortcut'])}", mw)
+    new_action.triggered.connect(lambda *_a: new_chat())
+    menu.addAction(open_action)
+    menu.addAction(new_action)
+    mw.form.menuTools.addMenu(menu)
 
 
 def _setup() -> None:
@@ -175,6 +199,7 @@ def _setup() -> None:
     )
     _wire_bridge()
     shortcuts_mod.register_shortcuts(state)
+    _install_tools_menu(config)
 
     # Live context chip: refresh as the user moves between screens/cards.
     def _chip(*_args: Any) -> None:
@@ -335,6 +360,7 @@ def _wire_bridge() -> None:
     assert proposals is not None
     bridge.on("proposal_accept", proposals.accept)
     bridge.on("proposal_reject", proposals.reject)
+    bridge.on("proposal_supersede", proposals.supersede)
     bridge.on("proposal_revert", proposals.revert)
     bridge.on("proposal_readd", proposals.readd)
     bridge.on("proposal_restore", proposals.restore)
@@ -346,6 +372,10 @@ def _wire_bridge() -> None:
         "open_in_claude",
         lambda msg: _open_in_claude_code(str(msg.get("target", "terminal"))),
     )
+    bridge.on(
+        "set_open_in_claude_target",
+        lambda msg: _set_open_target(str(msg.get("target", "terminal"))),
+    )
     bridge.on("list_history", lambda _msg: controller.push_history_list())
     bridge.on("load_history", lambda msg: controller.load_history(str(msg.get("id", ""))))
     bridge.on("run_doctor", lambda _msg: _run_doctor())
@@ -356,7 +386,6 @@ def _wire_bridge() -> None:
     )
     bridge.on("set_agent", _set_agent)
     bridge.on("set_permission_mode", _set_permission_mode)
-    bridge.on("toggle_float", lambda _msg: state.dock.toggle_float() if state.dock else None)
 
 
 def _mark_web_ready() -> None:
@@ -368,12 +397,14 @@ def _mark_web_ready() -> None:
     if state.controller is not None:
         state.controller.push_agent_state()
     if state.dock is not None:
-        state.dock.push_dock_state()
         state.dock.bridge.push(
             {
                 "type": "ui_config",
                 "suggested_questions": bool(
                     state.config.get("suggested_questions", True)
+                ),
+                "open_in_claude_target": str(
+                    state.config.get("open_in_claude_target", "terminal")
                 ),
             }
         )
@@ -381,6 +412,10 @@ def _mark_web_ready() -> None:
         state.controller.push_context_chip()
     _push_collection_meta()
     _scan_learning()
+    # Optionally reopen the last chat where the user left off (default off:
+    # a fresh chat each launch). Runs after the initial UI state is pushed.
+    if state.controller is not None and bool(state.config.get("restore_last_chat")):
+        state.controller.restore_last_chat()
 
 
 def _push_collection_meta() -> None:
@@ -425,6 +460,17 @@ def _set_agent(msg: dict[str, Any]) -> None:
     config = mw.addonManager.getConfig(__name__) or {}
     config["model"] = state.config.get("model", "")
     config["effort"] = state.config.get("effort", "")
+    mw.addonManager.writeConfig(__name__, config)
+
+
+def _set_open_target(target: str) -> None:
+    """Persist the default 'Open in Claude Code' target (terminal / gui) the
+    split button acts on, so it survives restarts."""
+    if target not in ("terminal", "gui"):
+        return
+    state.config["open_in_claude_target"] = target
+    config = mw.addonManager.getConfig(__name__) or {}
+    config["open_in_claude_target"] = target
     mw.addonManager.writeConfig(__name__, config)
 
 
@@ -698,8 +744,41 @@ def _open_in_claude_code(target: str = "terminal") -> None:
     if sid:
         cmd += f" --resume {shlex.quote(str(sid))}"
 
-    if _sys.platform == "darwin":
-        script = cmd.replace("\\", "\\\\").replace('"', '\\"')
+    app = str(state.config.get("terminal_app", "")).strip()
+    if _open_macos_terminal(cmd, app):
+        where = app or "Terminal"
+        notice(
+            f"Opened this chat in Claude Code ({where}). It has your anki "
+            "tools via .mcp.json plus Claude Code's full toolset."
+        )
+        return
+    try:
+        from aqt.qt import QApplication
+
+        QApplication.clipboard().setText(cmd)
+        notice(
+            "Command copied to the clipboard - paste it into a terminal to "
+            "continue this chat in Claude Code."
+        )
+    except Exception:
+        notice(f"Run this in a terminal to continue in Claude Code: {cmd}")
+
+
+def _open_macos_terminal(command: str, app: str) -> bool:
+    """Run `command` in a macOS terminal, honoring the configured terminal_app.
+
+    Empty (or "Terminal") drives Apple Terminal via AppleScript `do script`
+    (the known-good default). Any other app name launches a throwaway
+    executable `.command` script in that app via `open -a`, which most
+    terminals (iTerm, Warp, Ghostty, kitty, …) run on open. Best-effort:
+    returns False so the caller can fall back to the clipboard."""
+    import subprocess
+    import sys as _sys
+
+    if _sys.platform != "darwin":
+        return False
+    if not app or app.lower() in ("terminal", "terminal.app"):
+        script = command.replace("\\", "\\\\").replace('"', '\\"')
         try:
             subprocess.run(
                 [
@@ -711,23 +790,24 @@ def _open_in_claude_code(target: str = "terminal") -> None:
                 capture_output=True,
                 timeout=15,
             )
-            notice(
-                "Opened this chat in Claude Code (Terminal). It has your anki "
-                "tools via .mcp.json plus Claude Code's full toolset."
-            )
-            return
+            return True
         except Exception:
-            pass
+            return False
     try:
-        from aqt.qt import QApplication
+        import os as _os
+        import stat
+        import tempfile
 
-        QApplication.clipboard().setText(cmd)
-        notice(
-            "Command copied to the clipboard - paste it into a terminal to "
-            "continue this chat in Claude Code."
+        fd, path = tempfile.mkstemp(suffix=".command", prefix="cwyc-cc-")
+        with _os.fdopen(fd, "w") as handle:
+            handle.write(f"#!/bin/bash\n{command}\n")
+        _os.chmod(path, _os.stat(path).st_mode | stat.S_IXUSR)
+        subprocess.run(
+            ["open", "-a", app, path], check=True, capture_output=True, timeout=15
         )
+        return True
     except Exception:
-        notice(f"Run this in a terminal to continue in Claude Code: {cmd}")
+        return False
 
 
 def _open_session_browser() -> None:

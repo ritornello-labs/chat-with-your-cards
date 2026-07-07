@@ -9,6 +9,7 @@
     --cwyc-bubble-user: var(--canvas-inset, rgba(0, 0, 0, 0.05));
     --cwyc-chip-bg: var(--canvas-elevated, #fff);
     --cwyc-accent: #4a7dff;
+    --cwyc-accent-soft: rgba(74, 125, 255, 0.12);
     --cwyc-radius: 14px;
     --cwyc-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
@@ -17,6 +18,7 @@
     --cwyc-bubble-user: rgba(255, 255, 255, 0.08);
     --cwyc-chip-bg: rgba(255, 255, 255, 0.05);
     --cwyc-accent: #6f95ff;
+    --cwyc-accent-soft: rgba(111, 149, 255, 0.18);
 }
 
 html,
@@ -189,17 +191,70 @@ body {
 
 .cwyc-tool-chip {
     display: inline-flex;
-    align-items: center;
-    gap: 7px;
+    flex-direction: column;
+    align-items: stretch;
     max-width: 100%;
     min-width: 0;
     box-sizing: border-box;
     border: 1px solid var(--border-subtle, var(--border));
     background: var(--cwyc-chip-bg);
     border-radius: 10px;
-    padding: 5px 10px;
     font-size: 12px;
     color: var(--fg-subtle, var(--fg));
+    overflow: hidden;
+}
+
+.cwyc-tool-head {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    padding: 5px 10px;
+    cursor: pointer;
+}
+
+.cwyc-tool-caret {
+    flex: 0 0 auto;
+    margin-left: 3px;
+    opacity: 0.5;
+    transition: transform 0.15s ease;
+}
+
+.cwyc-tool-expanded .cwyc-tool-caret {
+    transform: rotate(180deg);
+}
+
+.cwyc-tool-details {
+    border-top: 1px solid var(--border-subtle, var(--border));
+    padding: 7px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+
+.cwyc-tool-details[hidden] {
+    display: none;
+}
+
+.cwyc-tool-detail-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: var(--fg-subtle, var(--fg));
+    opacity: 0.8;
+}
+
+.cwyc-tool-detail-body {
+    margin: 2px 0 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--fg);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 170px;
+    overflow-y: auto;
 }
 
 .cwyc-tool-name {
@@ -272,12 +327,12 @@ body {
 
 #cwyc-composer {
     display: flex;
-    align-items: flex-end;
-    gap: 8px;
+    flex-direction: column;
+    gap: 6px;
     border: 1px solid var(--border);
     border-radius: 16px;
     background: var(--canvas-elevated, var(--canvas));
-    padding: 8px 8px 8px 12px;
+    padding: 9px 11px 8px;
 }
 
 #cwyc-composer:focus-within {
@@ -285,7 +340,8 @@ body {
 }
 
 #cwyc-input {
-    flex: 1 1 auto;
+    flex: 0 0 auto;
+    width: 100%;
     border: none;
     outline: none;
     resize: none;
@@ -295,6 +351,30 @@ body {
     font-size: 13.5px;
     line-height: 1.4;
     max-height: 160px;
+}
+
+/* Claude-Code-style control row under the input: permission mode + pins on
+   the left, model/effort + send on the right. */
+#cwyc-composer-bar {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+#cwyc-composer-spacer {
+    flex: 1 1 auto;
+}
+
+#cwyc-mode-wrap {
+    position: relative;
+    display: inline-flex;
+}
+
+.cwyc-caret {
+    flex: 0 0 auto;
+    opacity: 0.55;
 }
 
 #cwyc-send {
@@ -338,11 +418,11 @@ body {
     align-items: center;
     gap: 5px;
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 999px;
     background: transparent;
-    color: var(--fg);
-    font-size: 12px;
-    padding: 4px 10px;
+    color: var(--fg-subtle, var(--fg));
+    font-size: 11.5px;
+    padding: 3px 10px;
     cursor: pointer;
 }
 
@@ -356,9 +436,11 @@ body {
 
 #cwyc-pins-panel {
     flex: 0 0 auto;
-    border-bottom: 1px solid var(--border-subtle, var(--border));
+    border: 1px solid var(--border-subtle, var(--border));
+    border-radius: 12px;
     background: var(--canvas-elevated, var(--canvas));
     padding: 10px 12px;
+    margin-bottom: 7px;
     display: flex;
     flex-direction: column;
     gap: 7px;
@@ -776,12 +858,11 @@ body {
     align-items: center;
     gap: 4px;
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 999px;
     background: transparent;
-    color: var(--fg);
-    font-size: 12px;
-    padding: 4px 8px;
-    margin-right: 6px;
+    color: var(--fg-subtle, var(--fg));
+    font-size: 11.5px;
+    padding: 3px 10px;
     cursor: pointer;
 }
 
@@ -796,9 +877,11 @@ body {
 
 #cwyc-agent-panel {
     flex: 0 0 auto;
-    border-bottom: 1px solid var(--border-subtle, var(--border));
+    border: 1px solid var(--border-subtle, var(--border));
+    border-radius: 12px;
     background: var(--canvas-elevated, var(--canvas));
     padding: 10px 12px;
+    margin-bottom: 7px;
     display: flex;
     flex-direction: column;
     gap: 7px;
@@ -1149,30 +1232,6 @@ body {
     color: #ea4335;
 }
 
-/* ---------- header dock/undock control ---------- */
-
-#cwyc-dock-toggle {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: transparent;
-    color: var(--fg);
-    padding: 4px 7px;
-    margin-left: 6px;
-    cursor: pointer;
-}
-
-#cwyc-dock-toggle:hover {
-    background: var(--cwyc-bubble-user);
-}
-
-#cwyc-dock-toggle.cwyc-docked-out {
-    border-color: var(--cwyc-accent);
-    color: var(--cwyc-accent);
-}
-
 /* ---------- editable deck/tags on create proposals ---------- */
 
 .cwyc-proposal-field-row {
@@ -1295,18 +1354,76 @@ body {
 /* ---------- permission mode chip ---------- */
 
 #cwyc-mode-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     border: 1px solid var(--border);
     border-radius: 999px;
     background: transparent;
     color: var(--fg-subtle, var(--fg));
     font-size: 11.5px;
-    padding: 3px 10px;
-    margin-right: 6px;
+    padding: 3px 9px;
     cursor: pointer;
 }
 
 #cwyc-mode-chip:hover {
     background: var(--cwyc-bubble-user);
+}
+
+/* shared dropdown popovers (permission mode, open-in-Claude-Code) */
+.cwyc-menu-item {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--fg);
+    text-align: left;
+    padding: 6px 10px;
+    cursor: pointer;
+}
+
+.cwyc-menu-item:hover {
+    background: var(--cwyc-bubble-user);
+}
+
+.cwyc-menu-item-label {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.cwyc-menu-item-active .cwyc-menu-item-label {
+    color: var(--cwyc-accent);
+}
+
+.cwyc-menu-item-active .cwyc-menu-item-label::after {
+    content: " ✓";
+}
+
+.cwyc-menu-item-hint {
+    font-size: 10.5px;
+    color: var(--fg-subtle, var(--fg));
+}
+
+#cwyc-mode-menu {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 0;
+    z-index: 20;
+    min-width: 200px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--canvas-elevated, var(--canvas));
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+    padding: 4px;
+}
+
+#cwyc-mode-menu[hidden] {
+    display: none;
 }
 
 #cwyc-mode-chip.cwyc-mode-read-only {
@@ -1351,10 +1468,9 @@ body {
     display: none;
 }
 
-/* ---------- header icon buttons (history / open-cc / doctor) ---------- */
+/* ---------- header icon buttons (history / doctor) ---------- */
 
 #cwyc-history-toggle,
-#cwyc-open-cc,
 #cwyc-doctor-toggle {
     display: inline-flex;
     align-items: center;
@@ -1369,7 +1485,6 @@ body {
 }
 
 #cwyc-history-toggle:hover,
-#cwyc-open-cc:hover,
 #cwyc-doctor-toggle:hover {
     background: var(--cwyc-bubble-user);
 }
@@ -1521,42 +1636,67 @@ body {
     font-style: italic;
 }
 
-/* ---------- open-in-Claude-Code chooser ---------- */
+/* ---------- open-in-Claude-Code split button ---------- */
 
-#cwyc-header {
+#cwyc-open-cc-wrap {
     position: relative;
+    display: inline-flex;
+    margin-left: 6px;
+}
+
+/* Prominent, accent-tinted split button: main part opens with the current
+   target (shown in the label); the caret picks the target. */
+#cwyc-open-cc,
+#cwyc-open-cc-caret {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--cwyc-accent);
+    background: var(--cwyc-accent-soft);
+    color: var(--cwyc-accent);
+    cursor: pointer;
+}
+
+#cwyc-open-cc {
+    gap: 5px;
+    border-radius: 8px 0 0 8px;
+    border-right: none;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+#cwyc-open-cc-caret {
+    justify-content: center;
+    border-radius: 0 8px 8px 0;
+    padding: 4px 6px;
+}
+
+#cwyc-open-cc-caret .cwyc-caret {
+    opacity: 0.9;
+}
+
+#cwyc-open-cc:hover,
+#cwyc-open-cc-caret:hover {
+    background: var(--cwyc-accent);
+    color: #fff;
 }
 
 #cwyc-open-cc-menu {
     position: absolute;
-    top: 100%;
-    left: 90px;
+    top: calc(100% + 4px);
+    right: 0;
     z-index: 20;
+    min-width: 200px;
     display: flex;
     flex-direction: column;
     gap: 2px;
     border: 1px solid var(--border);
-    border-radius: 9px;
+    border-radius: 10px;
     background: var(--canvas-elevated, var(--canvas));
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
     padding: 4px;
 }
 
 #cwyc-open-cc-menu[hidden] {
     display: none;
-}
-
-#cwyc-open-cc-menu button {
-    border: none;
-    border-radius: 6px;
-    background: transparent;
-    color: var(--fg);
-    font-size: 12px;
-    padding: 5px 12px;
-    text-align: left;
-    cursor: pointer;
-}
-
-#cwyc-open-cc-menu button:hover {
-    background: var(--cwyc-bubble-user);
 }

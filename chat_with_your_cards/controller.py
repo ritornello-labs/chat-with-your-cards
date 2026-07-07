@@ -211,6 +211,19 @@ class ChatController:
             return
         self._push({"type": "history", "sessions": self._transcripts.list()})
 
+    def restore_last_chat(self) -> None:
+        """Reopen the most recent saved chat on launch (config restore_last_chat).
+        No-op when there is no prior chat. Uses the same replay + native resume
+        path as picking a chat from History."""
+        if self._transcripts is None:
+            return
+        sessions = self._transcripts.list()
+        if not sessions:
+            return
+        last_id = str(sessions[0].get("id", ""))
+        if last_id:
+            self.load_history(last_id)
+
     def load_history(self, transcript_id: str) -> None:
         """Replay a saved chat into the UI and continue it via the backend's
         native resume (DESIGN.md section 9)."""

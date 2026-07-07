@@ -33,8 +33,10 @@ from .base import (
     UsageUpdate,
 )
 
-SUMMARY_CHARS = 90
-RESULT_CHARS = 120
+# Inline chips ellipsize these anyway; the larger cap feeds the expandable
+# tool-detail view (the chip's collapsed row still shows only a short hint).
+SUMMARY_CHARS = 500
+RESULT_CHARS = 500
 LOG_ROTATE_BYTES = 512 * 1024
 
 RunOnUi = Callable[[Callable[[], None]], None]
@@ -105,6 +107,32 @@ class ParserState:
     # arrives with text nobody streamed, surface it as one TextDelta.
     streamed_chars: int = 0
     surfaced_texts: set[str] = field(default_factory=set)
+    # Paragraph separation across text boundaries within one turn. Consecutive
+    # text blocks (a new content block, or a second assistant message with no
+    # intervening tool call) were concatenated with no whitespace, gluing
+    # "…done.Next…" together. turn_text_chars tracks whether any text has been
+    # emitted this turn (reset at `result`); last_block_index and pending_break
+    # mark block/message boundaries so a "\n\n" is inserted before the next
+    # text. Leading "\n\n" in a fresh UI bubble (after a tool chip) is trimmed
+    # by the markdown renderer, so it is harmless there.
+    turn_text_chars: int = 0
+    last_block_index: int | None = None
+    pending_break: bool = False
+
+
+def _text_separator(state: ParserState, index: Any) -> str:
+    """The whitespace to prefix onto the next streamed text delta, so text
+    across a block/message boundary reads as a new paragraph, not glued."""
+    boundary = state.pending_break or (
+        index is not None
+        and state.last_block_index is not None
+        and index != state.last_block_index
+    )
+    sep = "\n\n" if boundary and state.turn_text_chars > 0 else ""
+    state.pending_break = False
+    if index is not None:
+        state.last_block_index = index
+    return sep
 
 
 def parse_stream_line(obj: dict[str, Any], state: ParserState) -> list[ChatEvent]:
@@ -126,8 +154,11 @@ def parse_stream_line(obj: dict[str, Any], state: ParserState) -> list[ChatEvent
         if event.get("type") == "content_block_delta":
             delta = event.get("delta") or {}
             if delta.get("type") == "text_delta" and delta.get("text"):
-                state.streamed_chars += len(delta["text"])
-                return [TextDelta(delta["text"])]
+                text = str(delta["text"])
+                sep = _text_separator(state, event.get("index"))
+                state.streamed_chars += len(text)
+                state.turn_text_chars += len(sep) + len(text)
+                return [TextDelta(sep + text)]
         return []
 
     if kind == "assistant":
@@ -154,8 +185,14 @@ def parse_stream_line(obj: dict[str, Any], state: ParserState) -> list[ChatEvent
         joined = "\n\n".join(unstreamed_text)
         if joined and state.streamed_chars == 0 and joined not in state.surfaced_texts:
             state.surfaced_texts.add(joined)
-            events.insert(0, TextDelta(joined))
+            sep = "\n\n" if state.turn_text_chars > 0 else ""
+            state.turn_text_chars += len(sep) + len(joined)
+            events.insert(0, TextDelta(sep + joined))
+        # Message boundary: the next text (a follow-up message, or text after a
+        # tool call) starts a fresh paragraph. Block indices restart per message.
         state.streamed_chars = 0
+        state.last_block_index = None
+        state.pending_break = True
         return events
 
     if kind == "user":
@@ -176,6 +213,11 @@ def parse_stream_line(obj: dict[str, Any], state: ParserState) -> list[ChatEvent
 
     if kind == "result":
         state.session_id = obj.get("session_id") or state.session_id
+        # Turn over: reset paragraph-separation state so the next turn's first
+        # text is not prefixed with a spurious break.
+        state.turn_text_chars = 0
+        state.last_block_index = None
+        state.pending_break = False
         result_events: list[ChatEvent] = []
         usage = obj.get("usage") or {}
         cost = obj.get("total_cost_usd")

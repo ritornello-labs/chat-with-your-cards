@@ -21,6 +21,7 @@
     var proposals = {}; // id -> {data, root, fieldInputs, included, order}
     var proposalOrder = [];
     var activeProposalId = null;
+    var revisingProposalId = null; // proposal a "Suggest change" targets until sent
     var pins = { deck: "", note_type: "", tags: [], fields: {} };
     var collectionMeta = { decks: [], note_types: [], tags: [] };
     var pinTags = []; // committed tag chips in the pins panel
@@ -130,19 +131,55 @@
         return "";
     }
 
+    function toolDetailBlock(label, text) {
+        text = (text || "").trim();
+        if (!text) {
+            return null;
+        }
+        var block = el("div", "cwyc-tool-detail-block");
+        block.appendChild(el("div", "cwyc-tool-detail-label", label));
+        block.appendChild(el("pre", "cwyc-tool-detail-body", text));
+        return block;
+    }
+
+    var CARET_SVG =
+        '<svg class="cwyc-tool-caret" viewBox="0 0 16 16" width="9" height="9" ' +
+        'aria-hidden="true"><path d="M4 6l4 4 4-4" stroke="currentColor" ' +
+        'stroke-width="1.6" stroke-linecap="round" fill="none"/></svg>';
+
     function addToolChip(callId, tool, summary) {
         var label = friendlyTool(tool);
         if (!label) {
             return; // hidden tool: no chip, and don't break the text flow
         }
         var chip = el("div", "cwyc-tool-chip tool-chip cwyc-tool-running");
-        chip.innerHTML =
+        var head = el("div", "cwyc-tool-head");
+        head.innerHTML =
             '<span class="cwyc-tool-spinner"></span>' +
             '<span class="cwyc-tool-name"></span>' +
             '<span class="cwyc-tool-summary"></span>' +
-            '<span class="cwyc-tool-result"></span>';
-        chip.querySelector(".cwyc-tool-name").textContent = label;
-        chip.querySelector(".cwyc-tool-summary").textContent = toolHint(summary);
+            '<span class="cwyc-tool-result"></span>' +
+            CARET_SVG;
+        head.querySelector(".cwyc-tool-name").textContent = label;
+        head.querySelector(".cwyc-tool-summary").textContent = toolHint(summary);
+        var details = el("div", "cwyc-tool-details");
+        details.hidden = true;
+        var inputBlock = toolDetailBlock("Input", summary);
+        if (inputBlock) {
+            details.appendChild(inputBlock);
+        }
+        // Collapsed by default; the whole header row is the toggle. Only
+        // expandable once there is something (input args, then the result).
+        head.addEventListener("click", function () {
+            if (!details.children.length) {
+                return;
+            }
+            var open = chip.classList.toggle("cwyc-tool-expanded");
+            details.hidden = !open;
+            scrollToBottomIfPinned();
+        });
+        chip.appendChild(head);
+        chip.appendChild(details);
         var row = el("div", "cwyc-row cwyc-row-tool");
         row.appendChild(chip);
         transcript.appendChild(row);
@@ -151,14 +188,20 @@
         scrollToBottomIfPinned();
     }
 
-    function finishToolChip(callId, ok) {
+    function finishToolChip(callId, ok, resultSummary) {
         var chip = toolChips[callId];
         if (!chip) {
             return; // hidden tool, or an unknown call id
         }
         chip.classList.remove("cwyc-tool-running");
         chip.classList.add(ok ? "cwyc-tool-ok" : "cwyc-tool-failed");
-        // Intentionally no raw result text: the check/✗ marker is enough.
+        // The check/✗ marker summarizes at a glance; the raw result is tucked
+        // into the expandable detail area for when the user wants specifics.
+        var details = chip.querySelector(".cwyc-tool-details");
+        var block = toolDetailBlock(ok ? "Result" : "Error", resultSummary);
+        if (details && block) {
+            details.appendChild(block);
+        }
         scrollToBottomIfPinned();
     }
 
@@ -201,6 +244,24 @@
         startAssistantMessage();
         setStreaming(true);
         post({ type: "send", text: text });
+        supersedeRevisingProposal();
+    }
+
+    // "Suggest change" pre-fills the composer with a revision request; sending
+    // it means the original card is being replaced, so set it aside (superseded,
+    // restorable) instead of leaving it dangling as pending. No-op if it was
+    // already resolved.
+    function supersedeRevisingProposal() {
+        var id = revisingProposalId;
+        revisingProposalId = null;
+        if (!id) {
+            return;
+        }
+        var record = proposals[id];
+        if (record && record.data.status === "pending") {
+            post({ type: "proposal_supersede", id: id });
+            markResolved(id, "superseded", {});
+        }
     }
 
     function resetTranscript() {
@@ -209,6 +270,7 @@
         proposals = {};
         proposalOrder = [];
         activeProposalId = null;
+        revisingProposalId = null;
         currentAssistant = null;
         pinnedToBottom = true;
         renderLedger({ entries: [] });
@@ -824,6 +886,7 @@
         if (first) {
             ref += ' ("' + first + '")';
         }
+        revisingProposalId = d.id; // set aside on send (supersedeRevisingProposal)
         input.value = "For " + ref + ", please ";
         input.focus();
         autosizeInput();
@@ -1275,7 +1338,9 @@
 
     /* ---- permission mode chip ---- */
 
-    var MODES = ["default", "ask-each-read", "read-only", "auto-accept", "trusted-writes"];
+    // Ordered most-oversight → most-autonomy (also the Shift+Tab cycle order):
+    // approve everything → no writes → review writes → auto-create → write freely.
+    var MODES = ["ask-each-read", "read-only", "default", "auto-accept", "trusted-writes"];
     var MODE_LABELS = {
         "default": "Propose",
         "ask-each-read": "Ask reads",
@@ -1283,26 +1348,116 @@
         "auto-accept": "Auto-accept",
         "trusted-writes": "Trusted",
     };
+    var MODE_HINTS = {
+        "ask-each-read": "You approve every read of your collection; writes still proposed.",
+        "read-only": "The assistant can look but never write.",
+        "default": "Reads are free; writes come to you as proposals to review.",
+        "auto-accept": "New notes apply automatically (capped); edits and deletes still ask.",
+        "trusted-writes": "Every write applies directly; only deletes ask.",
+    };
     var currentMode = "default";
+
+    var TRUSTED_CONFIRM =
+        "Trusted-writes lets the assistant change your collection directly " +
+        "(deletes still ask). Everything is ledgered and revertible, with a " +
+        "per-session write budget. Enable?";
 
     function renderMode(mode) {
         currentMode = MODES.indexOf(mode) === -1 ? "default" : mode;
         var chip = document.getElementById("cwyc-mode-chip");
-        chip.textContent = MODE_LABELS[currentMode];
-        chip.className = "cwyc-mode-" + currentMode;
+        var label = document.getElementById("cwyc-mode-label");
+        if (label) {
+            label.textContent = MODE_LABELS[currentMode];
+        }
+        if (chip) {
+            // Preserve the caret child; only swap the modifier class.
+            chip.className = "cwyc-mode-" + currentMode;
+        }
+        highlightModeMenu();
+    }
+
+    function buildModeMenu() {
+        var menu = document.getElementById("cwyc-mode-menu");
+        if (!menu) {
+            return;
+        }
+        menu.innerHTML = "";
+        MODES.forEach(function (mode) {
+            var item = el("button", "cwyc-menu-item");
+            item.type = "button";
+            item.dataset.mode = mode;
+            item.appendChild(el("span", "cwyc-menu-item-label", MODE_LABELS[mode]));
+            item.appendChild(el("span", "cwyc-menu-item-hint", MODE_HINTS[mode] || ""));
+            item.addEventListener("click", function () {
+                menu.hidden = true;
+                selectMode(mode);
+            });
+            menu.appendChild(item);
+        });
+        highlightModeMenu();
+    }
+
+    function highlightModeMenu() {
+        var menu = document.getElementById("cwyc-mode-menu");
+        if (!menu) {
+            return;
+        }
+        menu.querySelectorAll(".cwyc-menu-item").forEach(function (item) {
+            item.classList.toggle(
+                "cwyc-menu-item-active",
+                item.dataset.mode === currentMode
+            );
+        });
+    }
+
+    function selectMode(mode) {
+        // Direct pick from the menu. Trusted-writes needs an explicit yes;
+        // declining just cancels (unlike Shift+Tab cycling, which skips past).
+        if (mode === currentMode) {
+            return;
+        }
+        if (mode === "trusted-writes" && !window.confirm(TRUSTED_CONFIRM)) {
+            return;
+        }
+        post({ type: "set_permission_mode", mode: mode });
     }
 
     function cycleMode() {
         var next = MODES[(MODES.indexOf(currentMode) + 1) % MODES.length];
-        if (next === "trusted-writes" &&
-            !window.confirm(
-                "Trusted-writes lets the assistant change your collection " +
-                "directly (deletes still ask). Everything is ledgered and " +
-                "revertible, with a per-session write budget. Enable?"
-            )) {
+        if (next === "trusted-writes" && !window.confirm(TRUSTED_CONFIRM)) {
             next = MODES[(MODES.indexOf(next) + 1) % MODES.length];
         }
         post({ type: "set_permission_mode", mode: next });
+    }
+
+    /* ---- open-in-Claude-Code split button ---- */
+
+    var OPEN_TARGET_LABELS = { terminal: "Terminal", gui: "Desktop" };
+    var openTarget = "terminal";
+
+    function renderOpenTarget() {
+        var label = document.getElementById("cwyc-open-cc-label");
+        if (label) {
+            label.textContent = OPEN_TARGET_LABELS[openTarget] || "Terminal";
+        }
+        var menu = document.getElementById("cwyc-open-cc-menu");
+        if (menu) {
+            menu.querySelectorAll(".cwyc-menu-item").forEach(function (item) {
+                item.classList.toggle(
+                    "cwyc-menu-item-active", item.dataset.target === openTarget
+                );
+            });
+        }
+    }
+
+    function setOpenTarget(target) {
+        // Picking from the dropdown only changes the default; it does not open.
+        if (target !== "terminal" && target !== "gui") {
+            return;
+        }
+        openTarget = target;
+        renderOpenTarget();
+        post({ type: "set_open_in_claude_target", target: target });
     }
 
     /* ---- usage chip ---- */
@@ -1488,15 +1643,6 @@
         scrollToBottomIfPinned();
     }
 
-    function renderDockState(floating) {
-        var btn = document.getElementById("cwyc-dock-toggle");
-        if (!btn) {
-            return;
-        }
-        btn.title = floating ? "Re-dock panel into the main window" : "Detach panel";
-        btn.classList.toggle("cwyc-docked-out", !!floating);
-    }
-
     function collectPins() {
         var fields = {};
         document
@@ -1527,7 +1673,7 @@
                 addToolChip(payload.call_id, payload.tool, payload.summary);
                 break;
             case "tool_call_finished":
-                finishToolChip(payload.call_id, payload.ok);
+                finishToolChip(payload.call_id, payload.ok, payload.summary);
                 break;
             case "proposal":
                 renderProposal(payload.proposal);
@@ -1557,9 +1703,6 @@
                 break;
             case "agent":
                 renderAgent(payload);
-                break;
-            case "dock_state":
-                renderDockState(payload.floating);
                 break;
             case "done":
                 finalizeStream(false);
@@ -1611,6 +1754,11 @@
                 break;
             case "ui_config":
                 uiConfig.suggested_questions = payload.suggested_questions !== false;
+                if (payload.open_in_claude_target) {
+                    openTarget =
+                        payload.open_in_claude_target === "gui" ? "gui" : "terminal";
+                    renderOpenTarget();
+                }
                 refreshSuggestion();
                 break;
             case "learning":
@@ -1719,25 +1867,35 @@
         document.getElementById("cwyc-new-chat").addEventListener("click", function () {
             post({ type: "new_chat" });
         });
-        document.getElementById("cwyc-dock-toggle").addEventListener("click", function () {
-            post({ type: "toggle_float" });
-        });
-        document.getElementById("cwyc-mode-chip").addEventListener("click", cycleMode);
         var openMenu = document.getElementById("cwyc-open-cc-menu");
-        document.getElementById("cwyc-open-cc").addEventListener("click", function (event) {
+        var modeMenu = document.getElementById("cwyc-mode-menu");
+        buildModeMenu();
+        document.getElementById("cwyc-mode-chip").addEventListener("click", function (event) {
             event.stopPropagation();
+            openMenu.hidden = true;
+            modeMenu.hidden = !modeMenu.hidden;
+        });
+        // Split button: main part opens with the current target; the caret
+        // picks/persists it without opening.
+        document.getElementById("cwyc-open-cc").addEventListener("click", function () {
+            openMenu.hidden = true;
+            post({ type: "open_in_claude", target: openTarget });
+        });
+        document.getElementById("cwyc-open-cc-caret").addEventListener("click", function (event) {
+            event.stopPropagation();
+            modeMenu.hidden = true;
             openMenu.hidden = !openMenu.hidden;
         });
-        document.getElementById("cwyc-open-cc-gui").addEventListener("click", function () {
-            openMenu.hidden = true;
-            post({ type: "open_in_claude", target: "gui" });
+        openMenu.querySelectorAll(".cwyc-menu-item").forEach(function (item) {
+            item.addEventListener("click", function () {
+                openMenu.hidden = true;
+                setOpenTarget(item.dataset.target);
+            });
         });
-        document.getElementById("cwyc-open-cc-term").addEventListener("click", function () {
-            openMenu.hidden = true;
-            post({ type: "open_in_claude", target: "terminal" });
-        });
+        renderOpenTarget();
         document.addEventListener("click", function () {
             openMenu.hidden = true;
+            modeMenu.hidden = true;
         });
         var doctorPanel = document.getElementById("cwyc-doctor-panel");
         var historyPanel = document.getElementById("cwyc-history-panel");
