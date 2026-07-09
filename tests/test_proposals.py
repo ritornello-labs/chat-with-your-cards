@@ -390,6 +390,21 @@ class CreateFlowTests(unittest.TestCase):
         note = col.get_note(resolved["note_id"])
         self.assertEqual(col.decks.name(note.cards()[0].did), "Brand::New")
 
+    def test_filtered_deck_is_rejected_as_home_deck(self) -> None:
+        manager, col, _pushed = make_manager()
+        col.decks.new_filtered("Cram")
+        with self.assertRaisesRegex(ProposalError, "filtered deck"):
+            manager.submit_create({**CREATE_ARGS, "deck": "Cram"})
+
+    def test_filtered_deck_edited_in_before_accept_is_rejected(self) -> None:
+        manager, col, pushed = make_manager()
+        col.decks.new_filtered("Cram")
+        result = manager.submit_create(dict(CREATE_ARGS))
+        manager.accept({"id": result["proposal_id"], "deck": "Cram"})
+        error = pushes_of(pushed, "proposal_error")[-1]
+        self.assertIn("filtered deck", error["message"])
+        self.assertEqual(0, col.note_count())
+
 
 class PinsTests(unittest.TestCase):
     def test_pins_are_constraints(self) -> None:
@@ -823,6 +838,15 @@ class BulkOpsTests(unittest.TestCase):
         manager.revert({"id": result["proposal_id"]})
         default_id = col.decks.id("Default")
         self.assertEqual(3, len([c for c in col._cards.values() if c.did == default_id]))
+
+    def test_move_cards_rejects_filtered_destination(self) -> None:
+        manager, col, pushed = make_manager()
+        _seed_notes(manager, col, pushed)
+        col.decks.new_filtered("Cram")
+        with self.assertRaisesRegex(ProposalError, "filtered deck"):
+            manager.submit_move_cards(
+                {"query": 'deck:"Default"', "deck": "Cram"}
+            )
 
 
 class DeleteTests(unittest.TestCase):

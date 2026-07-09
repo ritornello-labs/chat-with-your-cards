@@ -303,8 +303,11 @@ class ProposalManager:
         model = self._validate_note_type_and_fields(col, note_type, fields)
         if not deck:
             raise ProposalError("deck is required (no deck pinned)")
-        if self._find_deck_id(col, deck) is None:
+        deck_id = self._find_deck_id(col, deck)
+        if deck_id is None:
             warnings.append(f"deck {deck!r} does not exist yet; it will be created")
+        else:
+            self._require_normal_deck(col, deck, deck_id)
 
         field_names = [f["name"] for f in model["flds"]]
         first = fields.get(field_names[0], "").strip()
@@ -595,6 +598,9 @@ class ProposalManager:
             raise ProposalError(f"bad query {query!r}: {exc}") from None
         if not card_ids:
             raise ProposalError(f"no cards match {query!r}")
+        deck_id = self._find_deck_id(col, deck)
+        if deck_id is not None:
+            self._require_normal_deck(col, deck, deck_id)
         proposal = Proposal(
             id=self._next_id(),
             kind="bulk",
@@ -1185,7 +1191,9 @@ class ProposalManager:
             if not card_ids:
                 raise ProposalError(f"no cards match {query!r} anymore")
             prior = {int(cid): int(col.get_card(cid).did) for cid in card_ids}
-            col.set_deck(card_ids, col.decks.id(deck))
+            deck_id = col.decks.id(deck)
+            self._require_normal_deck(col, deck, deck_id)
+            col.set_deck(card_ids, deck_id)
             self._ledger.append(
                 LedgerEntry(
                     id=proposal.id,
@@ -1957,6 +1965,22 @@ class ProposalManager:
             return None
 
     @staticmethod
+    def _require_normal_deck(col: Any, name: str, deck_id: Any) -> None:
+        """Reject filtered decks as persistent card destinations.
+
+        Cards belong to a normal home deck. Anki only places them in a
+        filtered deck through a rebuild, which records that home in ``odid``.
+        Adding or moving cards directly into a filtered deck leaves ``odid=0``
+        and later fails in review with "No such deck: '0'".
+        """
+        deck = col.decks.get(deck_id)
+        if deck and deck.get("dyn"):
+            raise ProposalError(
+                f"{name!r} is a filtered deck; create or move cards into a "
+                "normal home deck, then rebuild the filtered deck"
+            )
+
+    @staticmethod
     def _looks_duplicate(col: Any, model: Any, first_name: str, value: str) -> bool:
         try:
             query = '"{}:{}" note:"{}"'.format(
@@ -1976,6 +2000,7 @@ class ProposalManager:
                 tags.append(tag)
         note.tags = tags
         deck_id = col.decks.id(proposal.deck)
+        self._require_normal_deck(col, proposal.deck, deck_id)
         col.add_note(note, deck_id)
         self._ledger.append(
             LedgerEntry(
