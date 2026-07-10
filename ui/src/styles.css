@@ -1,0 +1,566 @@
+/* Chat With Your Cards - assistant-ui scaffold styles.
+ *
+ * Deliberately minimal and centralized (a single file, one variable block):
+ * this is a scaffold to reach feature parity on, not the restyle pass. CSS
+ * variables are self-contained (NOT read from Anki's injected --canvas/--fg/
+ * --border custom properties the way the existing web/styles.css does),
+ * because this bundle does not yet know how the eventual Python loader will
+ * wire it up (see ui/README.md "what remains for integration").
+ *
+ * Light/dark: `prefers-color-scheme` is the default (relevant standalone, in
+ * the dev preview, or in any browser without Anki); `body.night-mode` is
+ * Anki's own signal and wins whenever present, regardless of OS scheme -
+ * `body.night-mode` has higher CSS specificity than the bare `:root` rules
+ * below, so it always overrides them. Known gap: an Anki *light* theme
+ * running inside an OS set to dark falls back to the OS signal, since Anki
+ * has no equivalent "day-mode" class to detect that case explicitly.
+ */
+
+:root {
+  --cwyc-bg: #ffffff;
+  --cwyc-surface: #f6f6f7;
+  --cwyc-surface-elevated: #ffffff;
+  --cwyc-fg: #1a1a1a;
+  --cwyc-fg-subtle: #6b6b6b;
+  --cwyc-border: #d8d8d8;
+  --cwyc-border-subtle: #e8e8e8;
+  --cwyc-accent: #4a7dff;
+  --cwyc-accent-soft: rgba(74, 125, 255, 0.12);
+  --cwyc-danger: #d1392b;
+  --cwyc-danger-soft: rgba(209, 57, 43, 0.1);
+  --cwyc-success: #1f8a4c;
+  --cwyc-success-soft: rgba(31, 138, 76, 0.12);
+  --cwyc-warning: #9a6b00;
+  --cwyc-warning-soft: rgba(154, 107, 0, 0.12);
+  --cwyc-radius: 12px;
+  --cwyc-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --cwyc-bg: #1e1e1e;
+    --cwyc-surface: #262626;
+    --cwyc-surface-elevated: #2c2c2c;
+    --cwyc-fg: #f2f2f2;
+    --cwyc-fg-subtle: #a6a6a6;
+    --cwyc-border: #444444;
+    --cwyc-border-subtle: #383838;
+    --cwyc-accent: #6f95ff;
+    --cwyc-accent-soft: rgba(111, 149, 255, 0.18);
+    --cwyc-danger: #e37065;
+    --cwyc-danger-soft: rgba(227, 112, 101, 0.14);
+    --cwyc-success: #57c17f;
+    --cwyc-success-soft: rgba(87, 193, 127, 0.15);
+    --cwyc-warning: #d9a441;
+    --cwyc-warning-soft: rgba(217, 164, 65, 0.15);
+  }
+}
+
+body.night-mode {
+  --cwyc-bg: #1e1e1e;
+  --cwyc-surface: #262626;
+  --cwyc-surface-elevated: #2c2c2c;
+  --cwyc-fg: #f2f2f2;
+  --cwyc-fg-subtle: #a6a6a6;
+  --cwyc-border: #444444;
+  --cwyc-border-subtle: #383838;
+  --cwyc-accent: #6f95ff;
+  --cwyc-accent-soft: rgba(111, 149, 255, 0.18);
+  --cwyc-danger: #e37065;
+  --cwyc-danger-soft: rgba(227, 112, 101, 0.14);
+  --cwyc-success: #57c17f;
+  --cwyc-success-soft: rgba(87, 193, 127, 0.15);
+  --cwyc-warning: #d9a441;
+  --cwyc-warning-soft: rgba(217, 164, 65, 0.15);
+}
+
+.cwyc-app,
+.cwyc-app * {
+  box-sizing: border-box;
+}
+
+.cwyc-app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  font-family: var(--cwyc-font);
+  font-size: 13.5px;
+  color: var(--cwyc-fg);
+  background: var(--cwyc-bg);
+}
+
+.cwyc-app button {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+/* ---------- thread / viewport ---------- */
+
+.cwyc-thread {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.cwyc-viewport {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 14px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cwyc-empty {
+  align-self: center;
+  margin-top: 24px;
+  max-width: 85%;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--cwyc-fg-subtle);
+}
+
+.cwyc-row {
+  display: flex;
+}
+
+.cwyc-row-user {
+  justify-content: flex-end;
+}
+
+.cwyc-msg-user {
+  max-width: 85%;
+  background: var(--cwyc-surface);
+  border-radius: var(--cwyc-radius);
+  border-bottom-right-radius: 4px;
+  padding: 8px 12px;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.cwyc-msg-assistant {
+  max-width: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  line-height: 1.55;
+}
+
+.cwyc-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.cwyc-streaming::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 14px;
+  margin-left: 3px;
+  vertical-align: text-bottom;
+  background: var(--cwyc-accent);
+  border-radius: 2px;
+  animation: cwyc-blink 1s steps(2, start) infinite;
+}
+
+@keyframes cwyc-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+/* ---------- reasoning ---------- */
+
+.cwyc-reasoning {
+  border: 1px dashed var(--cwyc-border-subtle);
+  border-radius: 10px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--cwyc-fg-subtle);
+}
+
+.cwyc-reasoning > summary {
+  cursor: pointer;
+  font-style: italic;
+  list-style: none;
+}
+
+.cwyc-reasoning > summary::-webkit-details-marker {
+  display: none;
+}
+
+.cwyc-reasoning-running > summary {
+  color: var(--cwyc-accent);
+}
+
+.cwyc-reasoning-text {
+  margin-top: 6px;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+/* ---------- tool call chips ---------- */
+
+.cwyc-tool-chip {
+  max-width: 100%;
+  border: 1px solid var(--cwyc-border-subtle);
+  background: var(--cwyc-surface-elevated);
+  border-radius: 10px;
+  font-size: 12px;
+  color: var(--cwyc-fg-subtle);
+  overflow: hidden;
+}
+
+.cwyc-tool-chip > details > summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 10px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.cwyc-tool-chip > details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.cwyc-tool-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 600;
+}
+
+.cwyc-tool-result {
+  margin-left: auto;
+}
+
+.cwyc-tool-ok .cwyc-tool-result::before {
+  content: "\2713\00a0";
+  color: var(--cwyc-success);
+}
+
+.cwyc-tool-failed .cwyc-tool-result::before {
+  content: "\2717\00a0";
+  color: var(--cwyc-danger);
+}
+
+.cwyc-tool-spinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--cwyc-border);
+  border-top-color: var(--cwyc-accent);
+  border-radius: 50%;
+  animation: cwyc-spin 0.8s linear infinite;
+  flex: 0 0 auto;
+}
+
+@keyframes cwyc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.cwyc-tool-detail-block {
+  padding: 0 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cwyc-tool-detail-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.cwyc-tool-detail-body {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--cwyc-fg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 170px;
+  overflow-y: auto;
+}
+
+/* ---------- error banner ---------- */
+
+.cwyc-error-banner {
+  font-size: 12px;
+  color: var(--cwyc-danger);
+  background: var(--cwyc-danger-soft);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
+/* ---------- usage footer ---------- */
+
+.cwyc-usage-chip {
+  align-self: flex-start;
+  margin: 0 14px 6px;
+  font-size: 11px;
+  color: var(--cwyc-fg-subtle);
+  border: 1px solid var(--cwyc-border-subtle);
+  border-radius: 999px;
+  padding: 2px 9px;
+  opacity: 0.85;
+}
+
+/* ---------- proposal card ---------- */
+
+.cwyc-proposal {
+  border: 1px solid var(--cwyc-border);
+  border-radius: 12px;
+  background: var(--cwyc-surface-elevated);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cwyc-proposal-resolved {
+  opacity: 0.88;
+}
+
+.cwyc-proposal-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cwyc-proposal-kind {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--cwyc-accent);
+  border: 1px solid var(--cwyc-accent);
+  border-radius: 5px;
+  padding: 1px 6px;
+}
+
+.cwyc-proposal-where {
+  flex: 1 1 auto;
+  font-size: 12px;
+  color: var(--cwyc-fg-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cwyc-proposal-status {
+  flex: 0 0 auto;
+  font-size: 11px;
+  border-radius: 999px;
+  padding: 2px 9px;
+  background: var(--cwyc-surface);
+  color: var(--cwyc-fg-subtle);
+}
+
+.cwyc-status-accepted,
+.cwyc-status-auto-accepted {
+  background: var(--cwyc-success-soft);
+  color: var(--cwyc-success);
+}
+
+.cwyc-status-rejected {
+  background: var(--cwyc-danger-soft);
+  color: var(--cwyc-danger);
+}
+
+.cwyc-status-undone,
+.cwyc-status-superseded {
+  background: var(--cwyc-warning-soft);
+  color: var(--cwyc-warning);
+}
+
+.cwyc-proposal-rationale {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--cwyc-fg-subtle);
+}
+
+.cwyc-proposal-warning {
+  font-size: 11.5px;
+  color: var(--cwyc-warning);
+  background: var(--cwyc-warning-soft);
+  border-radius: 7px;
+  padding: 4px 8px;
+}
+
+.cwyc-proposal-error {
+  font-size: 11.5px;
+  color: var(--cwyc-danger);
+  background: var(--cwyc-danger-soft);
+  border-radius: 7px;
+  padding: 4px 8px;
+}
+
+.cwyc-proposal-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cwyc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cwyc-field-name {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--cwyc-fg-subtle);
+}
+
+.cwyc-field-value {
+  border: 1px solid var(--cwyc-border-subtle);
+  border-radius: 8px;
+  background: var(--cwyc-bg);
+  font-size: 12.5px;
+  line-height: 1.5;
+  padding: 6px 8px;
+}
+
+.cwyc-field-old {
+  color: var(--cwyc-fg-subtle);
+  text-decoration: line-through;
+  opacity: 0.75;
+  margin-bottom: 3px;
+}
+
+.cwyc-field-input {
+  width: 100%;
+  border: 1px solid var(--cwyc-border);
+  border-radius: 8px;
+  background: var(--cwyc-bg);
+  color: var(--cwyc-fg);
+  font-family: var(--cwyc-font);
+  font-size: 12.5px;
+  line-height: 1.45;
+  padding: 6px 8px;
+  outline: none;
+  resize: vertical;
+}
+
+.cwyc-field-input:focus {
+  border-color: var(--cwyc-accent);
+}
+
+.cwyc-proposal-count {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cwyc-proposal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.cwyc-proposal-actions button {
+  border: 1px solid var(--cwyc-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--cwyc-fg);
+  font-size: 12px;
+  padding: 5px 14px;
+  cursor: pointer;
+}
+
+.cwyc-btn-suggest {
+  margin-right: auto;
+  color: var(--cwyc-fg-subtle);
+}
+
+.cwyc-btn-reject:hover {
+  border-color: var(--cwyc-danger);
+  color: var(--cwyc-danger);
+}
+
+.cwyc-primary,
+.cwyc-btn-accept {
+  background: var(--cwyc-accent) !important;
+  border-color: var(--cwyc-accent) !important;
+  color: #fff !important;
+}
+
+.cwyc-primary:hover,
+.cwyc-btn-accept:hover {
+  filter: brightness(1.08);
+}
+
+/* ---------- composer ---------- */
+
+.cwyc-composer {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 12px 12px;
+  border: 1px solid var(--cwyc-border);
+  border-radius: 16px;
+  background: var(--cwyc-surface-elevated);
+  padding: 9px 11px 8px;
+}
+
+.cwyc-composer:focus-within {
+  border-color: var(--cwyc-accent);
+}
+
+.cwyc-composer-input {
+  width: 100%;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--cwyc-fg);
+  font-family: var(--cwyc-font);
+  font-size: 13.5px;
+  line-height: 1.4;
+  max-height: 160px;
+}
+
+.cwyc-composer-bar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.cwyc-send {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 50%;
+  background: var(--cwyc-accent);
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cwyc-send:hover {
+  filter: brightness(1.1);
+}
+
+.cwyc-send:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.cwyc-send-stop {
+  background: var(--cwyc-fg-subtle);
+}

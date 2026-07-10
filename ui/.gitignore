@@ -1,0 +1,4 @@
+node_modules/
+dist/
+*.local
+node_modules/.tmp/

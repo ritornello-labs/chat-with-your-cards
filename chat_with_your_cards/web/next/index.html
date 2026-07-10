@@ -1,0 +1,26 @@
+<!doctype html>
+<!-- Chat With Your Cards - assistant-ui build output.
+
+     Copied verbatim into chat_with_your_cards/web/next/index.html by
+     `npm run build` (Vite's publicDir). A complete, directly-openable HTML
+     document with relative <link>/<script> tags and no CDN/network calls at
+     runtime - loadable as-is via `python3 -m http.server` from the
+     chat_with_your_cards/web/next/ directory, or by any future Python
+     loader (see ui/README.md "what remains for integration": the current
+     web/ loader, dock.py, instead reads index.html as a *body-only*
+     fragment for AnkiWebView.stdHtml(body=..., css=[...], js=[...]) - that
+     is a different loading convention than this file uses, and switching
+     chat_with_your_cards/web/next over to it is left to Python-side
+     integration, not decided here). -->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chat With Your Cards</title>
+    <link rel="stylesheet" href="./bundle.css" />
+  </head>
+  <body>
+    <div id="cwyc-root"></div>
+    <script src="./bundle.js"></script>
+  </body>
+</html>

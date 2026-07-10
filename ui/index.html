@@ -1,0 +1,26 @@
+<!doctype html>
+<!--
+  Vite dev server root (npm run dev only - NOT part of the production
+  bundle). Loads src/dev-main.tsx, which installs the scripted replayer
+  (src/dev/replayer.ts) in place of a real Anki webview, then renders the
+  same <App> component the production build ships. Roughly approximates the
+  Anki chat dock's width so proportions look right; see AGENTS.md /
+  dev/preview.html for the equivalent harness the plain-JS UI (web/) uses.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chat With Your Cards - assistant-ui dev preview</title>
+  </head>
+  <body>
+    <div id="dev-toolbar">
+      <span>cwyc-ui dev preview</span>
+      <button id="dev-toggle-night" type="button">Toggle night mode</button>
+    </div>
+    <div id="dev-frame">
+      <div id="cwyc-root"></div>
+    </div>
+    <script type="module" src="/src/dev-main.tsx"></script>
+  </body>
+</html>
