@@ -97,35 +97,45 @@ def build_pins_block(pins: dict[str, Any] | None) -> str | None:
 
 
 def build_system_prompt(
-    overview: str | None,
     *,
     permission_mode: str = "default",
     pins: dict[str, Any] | None = None,
-    conventions: str | None = None,
 ) -> str:
+    """Assemble the string passed to `--append-system-prompt`.
+
+    COMPLIANCE.md rule 3: this must stay lean and roughly constant-size. The ceiling test asserts under 4,000 chars in the worst case. The two unbounded inputs that used to be
+    inlined here - the collection overview and the user's note conventions -
+    are gone from this function's signature on purpose:
+      - the overview travels in the FIRST user message of the session as a
+        <collection-overview> block (see controller.wrap_user_message);
+      - conventions are a skill the harness loads on demand (see
+        skills.materialize_conventions_agent_skill), pointed at below by a
+        fixed sentence rather than inlined.
+    Only base instructions, the permission-mode paragraphs, and the (small,
+    bounded) pins block belong here. Do not reinline bulk/unbounded content;
+    test_context_and_stats.py's length-ceiling test guards this.
+    """
     parts = [
         "You are the assistant inside \"Chat With Your Cards\", a chat dock in "
         "the Anki desktop app. The user is studying; be concise and direct. "
         "Answers render as markdown in a narrow sidebar - prefer short "
         "paragraphs and tight lists.",
         "",
-        "You have MCP tools (server \"anki\") to query the user's collection: "
+        "You have MCP tools (server \"anki\") over the user's collection: "
         "search_notes (full Anki search syntax), get_note, get_card, "
         "deck_tree, tag_tree, collection_stats, list_note_types, "
         "get_note_type, find_related (clue-based: field prefixes like "
-        "\"Analysis:\", shared tags, same deck), and get_card_images (view a "
-        "card's actual images, not just their filenames). Reads are allowed "
-        "without asking. When looking for related material, prefer "
-        "find_related first, then refine with search_notes. Cards may record "
-        "where they came from as URIs in their fields: get_card_sources "
-        "finds them (with position metadata when present); open web sources "
-        "with WebFetch, local PDFs with Read (jump to meta.page), EPUBs with "
-        "read_epub - useful for grounding explanations and proposing more "
-        "cards from the same source. When YOU create a card from a source, "
-        "record it richly in the source field as an anchor: "
+        "\"Analysis:\", shared tags, same deck), get_card_images (actual "
+        "images, not just filenames). Reads need no confirmation; prefer "
+        "find_related before search_notes for related material. Cards may "
+        "carry source URIs in their fields - get_card_sources finds them "
+        "(with position metadata when present): WebFetch for web sources, "
+        "Read for local PDFs (meta.page), read_epub for EPUBs, to ground "
+        "explanations and propose more cards from the same source. When "
+        "creating a card from a source, record a rich anchor: "
         "<a href=\"URI#page=N\" data-source='{\"chapter\": \"...\", "
-        "\"section\": \"...\"}'>readable title, p.N</a> - future sessions "
-        "then jump straight to the right spot.",
+        "\"section\": \"...\"}'>title, p.N</a> so future sessions jump "
+        "straight to the spot.",
         "",
         "When a <current-card> block is present in a message, that is the "
         "card the user is looking at right now; treat it as the default "
@@ -138,44 +148,43 @@ def build_system_prompt(
     else:
         parts.append(
             "\nTo create or change notes, use propose_note and "
-            "propose_note_edit. They never write directly: the user reviews a "
-            "proposal card (with diffs and a rendered card preview) and "
-            "accepts, edits, or rejects it. Check the note type's fields with "
+            "propose_note_edit - never direct writes: the user reviews a "
+            "proposal card (diffs plus a rendered preview) and accepts, "
+            "edits, or rejects it. Check the note type's fields with "
             "get_note_type before proposing; match the user's existing style "
             "(look at similar notes first). Propose one focused note per "
-            "concept rather than a batch. For edits, only include fields that "
-            "actually change. When you revise a proposal the user has NOT yet "
-            "accepted (e.g. they asked for a change to a card still pending "
-            "review), pass supersedes=<that proposal_id> so the old card is "
-            "set aside in favor of your new one instead of piling up."
+            "concept, not a batch. For edits, only include fields that "
+            "actually change. Revising a still-pending proposal (e.g. the "
+            "user asks for a change before it's accepted)? Pass "
+            "supersedes=<that proposal_id> so the old card is set aside "
+            "instead of piling up."
         )
         parts.append(
-            "\nFor operations across many notes, do NOT loop propose_note_edit: "
-            "use rename_tag / find_replace / move_cards for mechanical "
-            "operations (each is one confirmation with an affected count), and "
-            "a change set (open_change_set -> add_to_change_set per note -> "
-            "close_change_set) when each note needs its own judged edit - the "
-            "user reviews the whole batch as one unit with sampled diffs. "
-            "Notes that change while a batch is open are skipped, never "
-            "overwritten blind."
+            "\nFor many-note operations, don't loop propose_note_edit: use "
+            "rename_tag / find_replace / move_cards for mechanical ops (one "
+            "confirmation, with an affected count), and a change set "
+            "(open_change_set -> add_to_change_set per note -> "
+            "close_change_set) for edits needing per-note judgment - the "
+            "user reviews the whole batch with sampled diffs. Notes changed "
+            "while a batch is open are skipped, never overwritten blind."
         )
         parts.append(
             "\nYou can also manage decks: create_deck, rename_deck (subdecks "
-            "follow), set_deck_options (presets may be shared by several "
-            "decks - get_deck_info shows the config and who shares it), and "
+            "follow), set_deck_options (presets may be shared - "
+            "get_deck_info shows the config and who shares it), and "
             "filtered decks via create_filtered_deck / update_filtered_deck / "
-            "filtered_deck_action (rebuild or empty). Each is one "
-            "confirmation card, like the bulk tools."
+            "filtered_deck_action (rebuild or empty) - one confirmation card "
+            "each, like the bulk tools."
         )
         if permission_mode == "trusted-writes":
             parts.append(
-                "\nTrusted-writes is on: your creations, edits, bulk operations "
+                "\nTrusted-writes is on: creations, edits, bulk operations "
                 "and change sets apply immediately (an Anki backup checkpoint "
-                "is created before bulk applies), up to a per-session write "
-                "budget - after that, changes queue for manual review. "
-                "Deleting notes ALWAYS requires the user's explicit "
+                "runs before bulk applies), up to a per-session write "
+                "budget - past that, changes queue for manual review. "
+                "Deleting notes ALWAYS needs the user's explicit "
                 "confirmation. Work carefully: everything is ledgered and "
-                "revertible, but the user is trusting you to not need it."
+                "revertible, but the user is trusting you not to need it."
             )
         if permission_mode == "auto-accept":
             parts.append(
@@ -187,25 +196,30 @@ def build_system_prompt(
         pins_block = build_pins_block(pins)
         if pins_block:
             parts.append("\n" + pins_block)
-        if conventions:
-            parts.append(
-                "\n<note-conventions>\nThe user's note-authoring conventions - "
-                "follow them for every proposal:\n"
-                + conventions.strip()
-                + "\n</note-conventions>"
-            )
-    if overview:
-        parts.append("\n<collection-overview>\n" + overview + "\n</collection-overview>")
-    else:
         parts.append(
-            "\nThe collection overview is not computed yet; use deck_tree, "
-            "tag_tree, and collection_stats to inspect the collection."
+            "\nYour note-authoring conventions live in the note-conventions "
+            "skill - load it before proposing or editing any card."
         )
+    parts.append(
+        "\nThe collection overview (when available) arrives as a "
+        "<collection-overview> block on your first message; until then, use "
+        "deck_tree, tag_tree, and collection_stats."
+    )
     return "\n".join(parts)
 
 
-def wrap_user_message(text: str, card_block: str | None) -> str:
-    """Prefix the user text with card context when it changed since last send."""
-    if card_block is None:
+def wrap_user_message(
+    text: str, card_block: str | None, overview_block: str | None = None
+) -> str:
+    """Prefix the user text with context blocks.
+
+    `overview_block` (the <collection-overview>...</collection-overview>
+    text, when the controller decides this is the first message of the
+    session - COMPLIANCE.md rule 3) goes first, then `card_block` when the
+    current card changed since the last send. Either, both, or neither may
+    be present.
+    """
+    prefix = "\n\n".join(block for block in (overview_block, card_block) if block)
+    if not prefix:
         return text
-    return f"{card_block}\n\n{text}"
+    return f"{prefix}\n\n{text}"

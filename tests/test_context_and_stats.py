@@ -69,22 +69,85 @@ class ContextTest(unittest.TestCase):
         )
         self.assertEqual([], extract_field_prefixes(["https://example.com: nope"]))
 
-    def test_system_prompt_mentions_tools_and_overview(self) -> None:
-        prompt = build_system_prompt("OVERVIEW-TEXT", permission_mode="read-only")
+    def test_system_prompt_mentions_tools(self) -> None:
+        prompt = build_system_prompt(permission_mode="read-only")
         self.assertIn("search_notes", prompt)
         self.assertIn("find_related", prompt)
-        self.assertIn("OVERVIEW-TEXT", prompt)
         self.assertIn("read-only", prompt)
 
-    def test_system_prompt_without_overview_points_at_tools(self) -> None:
-        prompt = build_system_prompt(None)
-        self.assertIn("not computed yet", prompt)
+    def test_system_prompt_has_no_overview_or_conventions_params(self) -> None:
+        # COMPLIANCE.md rule 3: these two unbounded inputs must not be
+        # re-accepted by build_system_prompt (overview -> first user message,
+        # conventions -> a skill). A regression here would be a signature
+        # change, which this call exercises directly.
+        with self.assertRaises(TypeError):
+            build_system_prompt("OVERVIEW-TEXT")  # type: ignore[call-arg]
+        with self.assertRaises(TypeError):
+            build_system_prompt(conventions="be terse")  # type: ignore[call-arg]
+
+    def test_system_prompt_points_at_overview_first_message_and_tools(self) -> None:
+        # Fixed, generalized fallback sentence - present regardless of
+        # whether an overview happens to be available this run, since
+        # build_system_prompt no longer knows either way.
+        prompt = build_system_prompt(permission_mode="default")
+        self.assertIn("<collection-overview>", prompt)
+        self.assertIn("first message", prompt)
+        self.assertIn("deck_tree", prompt)
+        self.assertIn("collection_stats", prompt)
+
+    def test_system_prompt_points_at_conventions_skill_when_writes_allowed(self) -> None:
+        prompt = build_system_prompt(permission_mode="default")
+        self.assertIn("note-conventions", prompt)
+        self.assertIn("skill", prompt)
+
+    def test_system_prompt_read_only_skips_conventions_pointer(self) -> None:
+        # Read-only sessions can never propose/edit a card, so the
+        # conventions-skill pointer (only relevant to those tools) is
+        # omitted, matching the pre-refactor behavior of the inlined block.
+        prompt = build_system_prompt(permission_mode="read-only")
+        self.assertNotIn("note-conventions", prompt)
+
+    def test_system_prompt_length_ceiling_worst_case(self) -> None:
+        """COMPLIANCE.md rule 3 regression guard: the assembled --append-system-prompt content must stay bounded (under 4,000 chars) in the worst case. Assert real headroom below that in
+        the worst case across every permission mode, with a heavily-pinned
+        session (every pin type set, a long deck path, the longest stock
+        note-type name, several tags, two field defaults) - larger than any
+        pin configuration the dock's dropdowns/chip editor would realistically
+        produce."""
+        maximal_pins = {
+            "deck": "Language::Mandarin::Vocabulary::HSK3",
+            "note_type": "Basic (and reversed card)",
+            "tags": ["mandarin", "hsk3", "vocab", "ai-created", "chapter-4"],
+            "fields": {"Source": "Duolingo", "Extra": "from placement test"},
+        }
+        for mode in (
+            "default",
+            "ask-each-read",
+            "read-only",
+            "auto-accept",
+            "trusted-writes",
+        ):
+            with self.subTest(mode=mode):
+                prompt = build_system_prompt(permission_mode=mode, pins=maximal_pins)
+                self.assertLess(len(prompt), 4000)
 
     def test_wrap_user_message(self) -> None:
         self.assertEqual("hi", wrap_user_message("hi", None))
         wrapped = wrap_user_message("hi", "<current-card>x</current-card>")
         self.assertTrue(wrapped.startswith("<current-card>"))
         self.assertTrue(wrapped.endswith("hi"))
+
+    def test_wrap_user_message_with_overview_block(self) -> None:
+        overview = "<collection-overview>OV</collection-overview>"
+        card = "<current-card>x</current-card>"
+        # Overview alone.
+        wrapped = wrap_user_message("hi", None, overview)
+        self.assertEqual(f"{overview}\n\nhi", wrapped)
+        # Overview stacks ahead of the card block, both ahead of the text.
+        wrapped = wrap_user_message("hi", card, overview)
+        self.assertEqual(f"{overview}\n\n{card}\n\nhi", wrapped)
+        # Neither block: unchanged text, matching the pre-existing 2-arg call.
+        self.assertEqual("hi", wrap_user_message("hi", None, None))
 
 
 class OverviewSerializerTest(unittest.TestCase):

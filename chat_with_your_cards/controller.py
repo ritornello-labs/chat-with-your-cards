@@ -49,6 +49,7 @@ class ChatController:
         workdir: Path,
         proposals: Any = None,
         transcripts: Any = None,
+        overview_builder: Callable[[], str | None] | None = None,
     ) -> None:
         self._push = push
         self._config = config
@@ -57,12 +58,14 @@ class ChatController:
         self._workdir = workdir
         self._proposals = proposals
         self._transcripts = transcripts
+        self._overview_builder = overview_builder
         self._assistant_buffer = ""
         self._pending_resume: str | None = None
         self._backend: Any = None
         self._backend_notice_sent = False
         self._session: Any = None
         self._last_card_id_sent: int | None = None
+        self._overview_sent = False
         self.backend_kind: str = "unset"
         self.event_log: list[ChatEvent] = []
 
@@ -159,7 +162,22 @@ class ChatController:
             self._transcripts.record({"type": "user_message", "text": text})
         card_block, label = self._context_for_send()
         self._push({"type": "context", "label": label})
-        self._session.send(wrap_user_message(text, card_block), self._on_event)
+        overview_block = self._overview_for_send()
+        self._session.send(
+            wrap_user_message(text, card_block, overview_block), self._on_event
+        )
+
+    def _overview_for_send(self) -> str | None:
+        """Collection overview, prefixed once - on the first user message of
+        the session, not repeated (COMPLIANCE.md rule 3: kept out of
+        --append-system-prompt; see context.build_system_prompt)."""
+        if self._overview_sent:
+            return None
+        self._overview_sent = True
+        overview = self._overview_builder() if self._overview_builder else None
+        if not overview:
+            return None
+        return f"<collection-overview>\n{overview}\n</collection-overview>"
 
     def _context_for_send(self) -> tuple[str | None, str]:
         info = current_card_info()
@@ -194,6 +212,7 @@ class ChatController:
             self._session.close()
             self._session = None
         self._last_card_id_sent = None
+        self._overview_sent = False
         self._pending_resume = None
         self._assistant_buffer = ""
         self.event_log.clear()
@@ -240,6 +259,7 @@ class ChatController:
         self._pending_resume = self._transcripts.backend_session_id
         self._assistant_buffer = ""
         self._last_card_id_sent = None
+        self._overview_sent = False
         self.event_log.clear()
         if self._proposals is not None:
             self._proposals.new_session()

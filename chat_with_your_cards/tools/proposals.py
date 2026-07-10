@@ -176,7 +176,11 @@ def register_proposal_tools(registry: ToolRegistry) -> None:
         ToolSpec(
             "move_cards",
             "Move all cards matching an Anki search into a deck. One "
-            "confirmation with the affected count.",
+            "confirmation with the affected count. CAUTION: moving cards "
+            "discards their FSRS memory (stability/difficulty) - Anki wipes it "
+            "on any deck move, and undo cannot restore it - so the proposal "
+            "warns how many cards would lose memory. Prefer a filtered deck "
+            "when you only need to study cards temporarily without rehoming them.",
             {
                 "type": "object",
                 "properties": {

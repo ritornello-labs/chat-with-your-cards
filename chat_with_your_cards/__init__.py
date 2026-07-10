@@ -158,9 +158,13 @@ def _setup() -> None:
         dock.bridge.push(payload)
 
     from .learning import LearningStore
-    from .skills import materialize_agent_skills
+    from .skills import materialize_agent_skills, materialize_conventions_agent_skill
 
     conventions = load_conventions(USER_FILES, str(config.get("conventions_prompt", "")))
+    # Mirror conventions into the agent-home skills dir so the harness
+    # auto-discovers them (COMPLIANCE.md rule 3) instead of them being
+    # inlined into --append-system-prompt - see context.build_system_prompt.
+    materialize_conventions_agent_skill(USER_FILES / "agent-home", conventions)
     card_skill_path = materialize_agent_skills(USER_FILES / "agent-home")
     state.learning = LearningStore(USER_FILES / "learning", card_skill_path)
 
@@ -177,16 +181,16 @@ def _setup() -> None:
     )
 
     def system_prompt() -> str:
-        cache = state.stats_cache
-        overview = (
-            cache.overview(int(config["context_token_budget"])) if cache else None
-        )
         return build_system_prompt(
-            overview,
             permission_mode=str(config["permission_mode"]),
             pins=state.proposals.pins if state.proposals else None,
-            conventions=conventions,
         )
+
+    def overview_text() -> str | None:
+        # Fed to the controller, which prefixes it to the first user message
+        # of the session (COMPLIANCE.md rule 3) instead of the system prompt.
+        cache = state.stats_cache
+        return cache.overview(int(config["context_token_budget"])) if cache else None
 
     state.controller = ChatController(
         push=recording_push,
@@ -196,6 +200,7 @@ def _setup() -> None:
         workdir=USER_FILES / "agent-home",
         proposals=state.proposals,
         transcripts=state.transcripts,
+        overview_builder=overview_text,
     )
     _wire_bridge()
     shortcuts_mod.register_shortcuts(state)

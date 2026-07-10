@@ -2,8 +2,17 @@
 
 The user writes a conventions prompt in the add-on config; we wrap it
 into a minimal SKILL.md under user_files/ (the on-disk shape the full-
-skill tier will share in M3) and inject its content into the system
-prompt for note proposals.
+skill tier will share in M3) - the per-profile source of truth, kept for
+back-compat and for a user who drops in a hand-authored full-skill
+directory instead of using the config prompt.
+
+COMPLIANCE.md rule 3: conventions used to also be inlined into
+`--append-system-prompt` (see context.build_system_prompt's history).
+They no longer are - `materialize_conventions_agent_skill` below mirrors
+the same text into agent_home/.claude/skills/note-conventions/SKILL.md,
+the conventional directory `materialize_agent_skills` already seeds
+(agent cwd = agent_home), so the harness auto-discovers and loads it
+like any other skill instead of it being pasted into every session.
 """
 
 from __future__ import annotations
@@ -12,7 +21,10 @@ from pathlib import Path
 
 SKILL_HEADER = """---
 name: note-conventions
-description: The user's Anki note-authoring conventions for proposed notes.
+description: The user's Anki note-authoring conventions - style, phrasing, \
+field usage, and formatting rules for this collection. Load before \
+proposing a new note or editing an existing one (propose_note, \
+propose_note_edit).
 ---
 
 """
@@ -28,6 +40,32 @@ def materialize_conventions_skill(user_files: Path, prompt: str) -> str | None:
     skill_dir.mkdir(parents=True, exist_ok=True)
     skill_path.write_text(SKILL_HEADER + text + "\n", encoding="utf-8")
     return text
+
+
+def materialize_conventions_agent_skill(agent_home: Path, text: str | None) -> Path | None:
+    """Mirror the resolved conventions text into the agent-home skills dir
+    (same directory `materialize_agent_skills` seeds) so the harness
+    auto-discovers it like any other skill, instead of it being inlined
+    into `--append-system-prompt` (COMPLIANCE.md rule 3).
+
+    `text` is whatever `load_conventions` resolved (config prompt wins,
+    else a previous run's - or a hand-dropped full-skill tier's -
+    user_files/skills/note-conventions/SKILL.md body). Regenerated every
+    run: unlike the anki-card-authoring template, this file's source of
+    truth is user_files/ (or the config), not something the user is
+    expected to hand-edit inside agent_home directly.
+    """
+    skill_path = agent_home / ".claude" / "skills" / "note-conventions" / "SKILL.md"
+    if not text or not text.strip():
+        if skill_path.exists():
+            try:
+                skill_path.unlink()
+            except OSError:
+                pass
+        return None
+    skill_path.parent.mkdir(parents=True, exist_ok=True)
+    skill_path.write_text(SKILL_HEADER + text.strip() + "\n", encoding="utf-8")
+    return skill_path
 
 
 CARD_SKILL_TEMPLATE = """---

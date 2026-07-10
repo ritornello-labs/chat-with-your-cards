@@ -13,8 +13,10 @@ flow is unit-testable against a fake collection.
 from __future__ import annotations
 
 import secrets
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable
+
+from . import contract, invariants
 
 AI_TAG = "ai-created"
 AI_EDIT_TAG = "ai-edited"
@@ -46,6 +48,17 @@ SUPERSEDED = "superseded"
 
 class ProposalError(Exception):
     """Validation failure reported back to the agent as a tool error."""
+
+
+@dataclass
+class _WriteResult:
+    """What a chokepoint ``execute`` reports back: the value to return to the
+    caller, the collection-wide count-delta ``Expectation`` to assert, and the
+    touched-row ``Scope`` the scoped postconditions run over."""
+
+    value: Any
+    expectation: invariants.Expectation
+    scope: invariants.Scope
 
 
 @dataclass
@@ -601,6 +614,16 @@ class ProposalManager:
         deck_id = self._find_deck_id(col, deck)
         if deck_id is not None:
             self._require_normal_deck(col, deck, deck_id)
+        # F2 / SAFETY.md hazard 8: set_deck calls clear_fsrs_data, so a move
+        # silently wipes each card's learned memory state, and revert (another
+        # set_deck) cannot restore it. Surface the loss on the proposal card.
+        warnings: list[str] = []
+        fsrs = self._fsrs_memory_count(col, card_ids)
+        if fsrs:
+            warnings.append(
+                f"moving discards FSRS memory (stability/difficulty) for {fsrs} "
+                "card(s); this cannot be restored by undo."
+            )
         proposal = Proposal(
             id=self._next_id(),
             kind="bulk",
@@ -613,6 +636,7 @@ class ProposalManager:
             rationale=str(args.get("rationale", "")),
             count=len(card_ids),
             samples=[{"text": f'{len(card_ids)} card(s) matching {query!r} → "{deck}"'}],
+            warnings=warnings,
         )
         return self._finish_submission(proposal, len(card_ids))
 
@@ -1101,6 +1125,165 @@ class ProposalManager:
             "notes_in_set": proposal.count,
         }
 
+    # ---- the write chokepoint (SAFETY.md Part 2, rule 1) ----
+
+    @staticmethod
+    def _run_in_transaction(col: Any, op: Callable[[], None]) -> None:
+        """Run ``op`` inside the collection's write transaction so any raise
+        rolls the whole thing back (SAFETY.md rule 1).
+
+        SAFETY: SAFETY.md's pseudocode ``with col.transact():`` is aspirational;
+        pylib exposes no ``Collection.transact``. The real primitive is
+        ``col.db.transact(op)`` (anki/dbproxy.py:34) which does
+        ``db_begin(); op(); db_commit()`` and ``db_rollback()`` on any
+        exception. We call that. If a collection double has no ``db.transact``
+        we degrade to a plain call (no atomicity), which only happens in
+        environments that cannot roll back anyway.
+        """
+        db = getattr(col, "db", None)
+        transact = getattr(db, "transact", None)
+        if callable(transact):
+            transact(op)
+        else:  # pragma: no cover - only when no transactional backend exists
+            op()
+
+    def _apply_write(
+        self,
+        *,
+        execute: Callable[[Any, invariants.Snapshot], _WriteResult],
+        precheck: Callable[[Any], None] | None = None,
+        backup_reason: str | None = None,
+        critical_backup: bool = False,
+        lenient_cards: bool = False,
+    ) -> Any:
+        """The single guarded apply path every note/card mutation flows through
+        (SAFETY.md rule 1): backup (if risky) -> transaction -> snapshot ->
+        PRECONDITIONS -> execute (backend API only) -> POSTCONDITIONS.
+
+        A precondition failure, a postcondition (invariant) violation, or any
+        backend exception rolls the transaction back and surfaces as a clean
+        ``ProposalError``; the ledger is truncated to its pre-write length so a
+        rolled-back write never leaves a phantom ledger entry. ``lenient_cards``
+        relaxes only the card-count delta to whatever actually happened (field
+        edits may legitimately activate/deactivate conditional cards, AGENTS.md;
+        the drift is still surfaced as a warning by ``_stats_drift_warnings``).
+        """
+        col = self._col()
+        if backup_reason is not None:
+            self._checkpoint(backup_reason, critical_backup)
+        ledger_mark = len(self._ledger)
+        box: dict[str, Any] = {}
+
+        def op() -> None:
+            before = invariants.snapshot(col, invariants.Scope())
+            if precheck is not None:
+                precheck(col)
+            result = execute(col, before)
+            box["result"] = result
+            expectation = result.expectation
+            if lenient_cards:
+                after_cards = int(col.db.scalar("select count() from cards"))
+                expectation = replace(
+                    expectation, card_delta=after_cards - before.card_count
+                )
+            invariants.assert_all(col, replace(before, scope=result.scope), expectation)
+
+        try:
+            self._run_in_transaction(col, op)
+        except ProposalError:
+            del self._ledger[ledger_mark:]
+            raise
+        except Exception as exc:  # backend error or InvariantViolation
+            del self._ledger[ledger_mark:]
+            raise ProposalError(str(exc)) from None
+        return box["result"].value
+
+    def _revert_write(
+        self,
+        col: Any,
+        mutate: Callable[[], None],
+        scope: invariants.Scope,
+    ) -> None:
+        """Guarded revert path: run ``mutate`` inside the transaction, convert
+        any backend exception to a reported ``ProposalError`` (F1: a filtered
+        ``set_deck`` hard-errors with ``CanNotMoveCardsInto`` and must never
+        escape as an unhandled pycmd exception), and run the corruption
+        postconditions over the touched rows so a revert that would recreate the
+        original corruption is rejected instead of committed."""
+
+        def op() -> None:
+            mutate()
+            for check in (
+                invariants.no_homeless_filtered_cards(col, scope.deck_ids),
+                invariants.no_dangling_odid(col, scope.card_ids),
+            ):
+                if check is not None:
+                    raise invariants.InvariantViolation(check)
+
+        try:
+            self._run_in_transaction(col, op)
+        except ProposalError:
+            raise
+        except Exception as exc:
+            raise ProposalError(str(exc)) from None
+
+    def _precheck_create(self, proposal: Proposal) -> Callable[[Any], None]:
+        def precheck(col: Any) -> None:
+            result = contract.check_create(col, proposal)
+            self._merge_contract_warnings(proposal, result.warnings)
+            if not result.ok:
+                raise ProposalError("\n".join(result.errors))
+
+        return precheck
+
+    def _precheck_edit(self, proposal: Proposal) -> Callable[[Any], None]:
+        def precheck(col: Any) -> None:
+            result = contract.check_edit(col, proposal)
+            self._merge_contract_warnings(proposal, result.warnings)
+            if not result.ok:
+                raise ProposalError("\n".join(result.errors))
+
+        return precheck
+
+    @staticmethod
+    def _merge_contract_warnings(proposal: Proposal, warnings: list[str]) -> None:
+        for warning in warnings:
+            if warning not in proposal.warnings:
+                proposal.warnings.append(warning)
+
+    @staticmethod
+    def _fsrs_memory_count(col: Any, card_ids: list[int]) -> int:
+        """How many of ``card_ids`` carry FSRS memory that a move would discard
+        (SAFETY.md hazard 8: ``set_deck`` calls ``clear_fsrs_data``). Prefers
+        ``card.memory_state``; falls back to the ``s``/``d`` in ``card.data``;
+        if neither is inspectable, counts every card, because a move wipes FSRS
+        regardless and the warning must not understate the loss."""
+        import json as _json
+
+        count = 0
+        inspectable = False
+        for cid in card_ids:
+            try:
+                card = col.get_card(cid)
+            except Exception:
+                continue
+            state = getattr(card, "memory_state", "unknown")
+            if state != "unknown":
+                inspectable = True
+                if state is not None:
+                    count += 1
+                continue
+            data = getattr(card, "data", "") or ""
+            if data:
+                try:
+                    blob = _json.loads(data)
+                except Exception:
+                    blob = None
+                if isinstance(blob, dict) and ("s" in blob or "d" in blob):
+                    inspectable = True
+                    count += 1
+        return count if inspectable else len(list(card_ids))
+
     # ---- user-facing decisions (bridge entry points) ----
 
     def accept(self, msg: dict[str, Any]) -> None:
@@ -1124,6 +1307,10 @@ class ProposalManager:
         }
         touched: list[int] = []
         try:
+            # create/edit/bulk/delete/change_set all flow through the write
+            # chokepoint (_apply_write: transaction + preconditions + invariant
+            # postconditions). SAFETY: deck_op and skill_update do NOT yet — see
+            # the comments on those branches for why and what remains.
             if proposal.kind == "create":
                 self._accept_create(proposal, msg, final_fields)
                 touched = [proposal.note_id] if proposal.note_id else []
@@ -1137,8 +1324,17 @@ class ProposalManager:
             elif proposal.kind == "change_set":
                 touched = self._accept_change_set(proposal)
             elif proposal.kind == "deck_op":
+                # SAFETY: not yet unified through _apply_write. Deck ops change
+                # no note/card counts (create/rename/options/filtered rebuild),
+                # already convert backend errors to ProposalError, resolve decks
+                # by name, and refresh the deck browser. What remains to unify:
+                # wrap _accept_deck_op in a transaction and add a filtered-deck
+                # corruption postcondition for create_filtered_deck/rebuild.
                 touched = self._accept_deck_op(proposal)
             elif proposal.kind == "skill_update":
+                # SAFETY: not a collection write at all - _apply_skill writes the
+                # skill markdown file on disk, so the col transaction/invariants
+                # do not apply. Always user-confirmed and never ledger-reverted.
                 if self._apply_skill is None:
                     raise ProposalError("skill updates are not available")
                 proposal.warnings = self._apply_skill(proposal)
@@ -1147,6 +1343,11 @@ class ProposalManager:
                 raise ProposalError(f"unknown proposal kind {proposal.kind!r}")
             proposal.status = AUTO_ACCEPTED if direct else proposal.status
         except ProposalError as exc:
+            self._push(
+                {"type": "proposal_error", "id": proposal.id, "message": str(exc)}
+            )
+            return
+        except Exception as exc:  # backend error outside the chokepoint's reach
             self._push(
                 {"type": "proposal_error", "id": proposal.id, "message": str(exc)}
             )
@@ -1166,47 +1367,94 @@ class ProposalManager:
             self._after_write(touched)
 
     def _accept_bulk(self, proposal: Proposal) -> list[int]:
-        col = self._col()
-        self._checkpoint(f"bulk {proposal.op}", False)  # ledger-revertible
         if proposal.op == "rename_tag":
             old = proposal.op_args["old_tag"]
             new = proposal.op_args["new_tag"]
-            note_ids = list(col.find_notes(f'tag:"{old}"'))
-            col.tags.rename(old, new)
-            self._ledger.append(
-                LedgerEntry(
-                    id=proposal.id,
-                    kind="bulk",
-                    note_id=0,
-                    label=f"rename tag {old} → {new} ({len(note_ids)} notes)",
-                    data={"op": "rename_tag", "old_tag": old, "new_tag": new},
+
+            def execute_rename(col: Any, before: invariants.Snapshot) -> _WriteResult:
+                note_ids = list(col.find_notes(f'tag:"{old}"'))
+                col.tags.rename(old, new)
+                self._ledger.append(
+                    LedgerEntry(
+                        id=proposal.id,
+                        kind="bulk",
+                        note_id=0,
+                        label=f"rename tag {old} → {new} ({len(note_ids)} notes)",
+                        data={"op": "rename_tag", "old_tag": old, "new_tag": new},
+                    )
                 )
+                return _WriteResult(
+                    note_ids,
+                    invariants.Expectation(),
+                    invariants.Scope(note_ids=tuple(int(n) for n in note_ids)),
+                )
+
+            note_ids = self._apply_write(
+                execute=execute_rename, backup_reason=f"bulk {proposal.op}"
             )
             proposal.status = ACCEPTED
             return note_ids
         if proposal.op == "move_cards":
             query = proposal.op_args["query"]
             deck = proposal.op_args["deck"]
-            card_ids = list(col.find_cards(query))
-            if not card_ids:
-                raise ProposalError(f"no cards match {query!r} anymore")
-            prior = {int(cid): int(col.get_card(cid).did) for cid in card_ids}
-            deck_id = col.decks.id(deck)
-            self._require_normal_deck(col, deck, deck_id)
-            col.set_deck(card_ids, deck_id)
-            self._ledger.append(
-                LedgerEntry(
-                    id=proposal.id,
-                    kind="bulk",
-                    note_id=0,
-                    label=f'move {len(card_ids)} card(s) → "{deck}"',
-                    data={"op": "move_cards", "card_decks": prior},
+
+            def execute_move(col: Any, before: invariants.Snapshot) -> _WriteResult:
+                card_ids = list(col.find_cards(query))
+                if not card_ids:
+                    raise ProposalError(f"no cards match {query!r} anymore")
+                # F1: capture each card's HOME deck, never a raw filtered `did`.
+                # odid != 0 means the card currently sits in a filtered deck and
+                # its home is odid; storing the filtered did would make revert
+                # call set_deck into a filtered deck and hard-error with
+                # CanNotMoveCardsInto (SAFETY.md Part 1).
+                prior: dict[int, int] = {}
+                for cid in card_ids:
+                    c = col.get_card(cid)
+                    prior[int(cid)] = int(getattr(c, "odid", 0) or c.did)
+                # Single deck-resolution point: rejects a filtered destination.
+                deck_id = contract.resolve_writable_deck(col, deck)
+                if deck_id is contract.WILL_CREATE:
+                    deck_id = col.decks.id(deck)
+                col.set_deck(card_ids, deck_id)
+                self._ledger.append(
+                    LedgerEntry(
+                        id=proposal.id,
+                        kind="bulk",
+                        note_id=0,
+                        label=f'move {len(card_ids)} card(s) → "{deck}"',
+                        data={"op": "move_cards", "card_decks": prior},
+                    )
                 )
+                note_ids = [int(col.get_card(cid).nid) for cid in card_ids[:50]]
+                return _WriteResult(
+                    note_ids,
+                    invariants.Expectation(),
+                    invariants.Scope(
+                        deck_ids=(int(deck_id),),
+                        card_ids=tuple(int(c) for c in card_ids),
+                    ),
+                )
+
+            note_ids = self._apply_write(
+                execute=execute_move, backup_reason=f"bulk {proposal.op}"
             )
             proposal.status = ACCEPTED
-            return [int(col.get_card(cid).nid) for cid in card_ids[:50]]
+            return note_ids
         if proposal.op == "find_replace":
-            applied, skipped = self._apply_items(col, proposal)
+
+            def execute_replace(col: Any, before: invariants.Snapshot) -> _WriteResult:
+                applied, skipped = self._apply_items(col, proposal)
+                return _WriteResult(
+                    (applied, skipped),
+                    invariants.Expectation(),
+                    invariants.Scope(note_ids=tuple(int(n) for n in applied)),
+                )
+
+            applied, skipped = self._apply_write(
+                execute=execute_replace,
+                backup_reason=f"bulk {proposal.op}",
+                lenient_cards=True,
+            )
             proposal.status = ACCEPTED
             if skipped:
                 proposal.warnings = [
@@ -1383,36 +1631,61 @@ class ProposalManager:
         return []
 
     def _accept_delete(self, proposal: Proposal) -> list[int]:
-        col = self._col()
-        self._checkpoint("delete notes", True)  # irreversible: sync backup
         note_ids = [int(n) for n in proposal.op_args.get("note_ids", [])]
-        existing = []
-        for nid in note_ids:
-            try:
-                col.get_note(nid)
+
+        def execute(col: Any, before: invariants.Snapshot) -> _WriteResult:
+            existing: list[int] = []
+            card_total = 0
+            for nid in note_ids:
+                try:
+                    note = col.get_note(nid)
+                except Exception:
+                    continue
                 existing.append(nid)
-            except Exception:
-                continue
-        if not existing:
-            raise ProposalError("those notes no longer exist")
-        col.remove_notes(existing)
-        self._ledger.append(
-            LedgerEntry(
-                id=proposal.id,
-                kind="delete",
-                note_id=0,
-                label=f"deleted {len(existing)} note(s)",
-                revertible=False,
+                card_total += len(list(note.cards()))
+            if not existing:
+                raise ProposalError("those notes no longer exist")
+            col.remove_notes(existing)
+            self._ledger.append(
+                LedgerEntry(
+                    id=proposal.id,
+                    kind="delete",
+                    note_id=0,
+                    label=f"deleted {len(existing)} note(s)",
+                    revertible=False,
+                )
             )
+            return _WriteResult(
+                existing,
+                invariants.Expectation(
+                    note_delta=-len(existing), card_delta=-card_total
+                ),
+                invariants.Scope(),
+            )
+
+        existing = self._apply_write(
+            execute=execute, backup_reason="delete notes", critical_backup=True
         )
         proposal.status = ACCEPTED
         return existing
 
     def _accept_change_set(self, proposal: Proposal) -> list[int]:
         col = self._col()
-        self._checkpoint(f"change set: {proposal.title}", False)
         before = self._counts(col)
-        applied, skipped = self._apply_items(col, proposal)
+
+        def execute(col: Any, snap: invariants.Snapshot) -> _WriteResult:
+            applied, skipped = self._apply_items(col, proposal)
+            return _WriteResult(
+                (applied, skipped),
+                invariants.Expectation(),
+                invariants.Scope(note_ids=tuple(int(n) for n in applied)),
+            )
+
+        applied, skipped = self._apply_write(
+            execute=execute,
+            backup_reason=f"change set: {proposal.title}",
+            lenient_cards=True,
+        )
         after = self._counts(col)
         proposal.status = ACCEPTED
         warnings = self._stats_drift_warnings(before, after)
@@ -1518,61 +1791,77 @@ class ProposalManager:
     def _accept_edit(
         self, proposal: Proposal, msg: dict[str, Any], final_fields: dict[str, str]
     ) -> None:
-        col = self._col()
         accepted = msg.get("accepted_fields")
         names = [str(n) for n in accepted] if accepted is not None else list(final_fields)
         apply_fields = {n: final_fields[n] for n in names if n in final_fields}
         if not apply_fields and not proposal.add_tags and not proposal.remove_tags:
             raise ProposalError("nothing selected to apply")
         assert proposal.note_id is not None
-        try:
-            note = col.get_note(proposal.note_id)
-        except Exception:
-            raise ProposalError("the note no longer exists") from None
+        note_id = int(proposal.note_id)
+        contract_precheck = self._precheck_edit(proposal)
 
-        current = dict(note.items())
-        stale = [
-            name
-            for name in apply_fields
-            if current.get(name, "") != proposal.base_fields.get(name, "")
-        ]
-        if stale:
-            # Staleness guard: the note changed underneath the proposal
-            # (user edit mid-chat, sync). Refresh the baseline and ask for
-            # re-review instead of applying blind (DESIGN.md section 5).
-            for name in proposal.fields:
-                proposal.base_fields[name] = current.get(name, "")
-            proposal.warnings = [
-                "This note changed while the proposal was open (fields: "
-                + ", ".join(stale)
-                + "). Diffs refreshed - please re-review."
+        def precheck(col: Any) -> None:
+            contract_precheck(col)
+            try:
+                note = col.get_note(note_id)
+            except Exception:
+                raise ProposalError("the note no longer exists") from None
+            current = dict(note.items())
+            stale = [
+                name
+                for name in apply_fields
+                if current.get(name, "") != proposal.base_fields.get(name, "")
             ]
-            self._push({"type": "proposal", "proposal": proposal.to_payload()})
-            raise ProposalError("note changed underneath; proposal refreshed for re-review")
+            if stale:
+                # Staleness guard: the note changed underneath the proposal
+                # (user edit mid-chat, sync). Refresh the baseline and ask for
+                # re-review instead of applying blind (DESIGN.md section 5).
+                for name in proposal.fields:
+                    proposal.base_fields[name] = current.get(name, "")
+                proposal.warnings = [
+                    "This note changed while the proposal was open (fields: "
+                    + ", ".join(stale)
+                    + "). Diffs refreshed - please re-review."
+                ]
+                self._push({"type": "proposal", "proposal": proposal.to_payload()})
+                raise ProposalError(
+                    "note changed underneath; proposal refreshed for re-review"
+                )
 
-        prior_fields = {name: current[name] for name in apply_fields}
-        prior_tags = list(note.tags)
-        for name, value in apply_fields.items():
-            note[name] = value
-        for tag in proposal.add_tags:
-            if tag not in note.tags:
-                note.tags.append(tag)
-        note.tags = [t for t in note.tags if t not in proposal.remove_tags]
-        self._tag_edit(note)
-        col.update_note(note)
-        proposal.status = ACCEPTED
-        first = next(iter(prior_fields.values()), "")
-        self._ledger.append(
-            LedgerEntry(
-                id=proposal.id,
-                kind="edit",
-                note_id=proposal.note_id,
-                label=_short_label(next(iter(apply_fields.values()), first)),
-                prior_fields=prior_fields,
-                prior_tags=prior_tags,
+        def execute(col: Any, before: invariants.Snapshot) -> _WriteResult:
+            note = col.get_note(note_id)
+            current = dict(note.items())
+            prior_fields = {name: current[name] for name in apply_fields}
+            prior_tags = list(note.tags)
+            for name, value in apply_fields.items():
+                note[name] = value
+            for tag in proposal.add_tags:
+                if tag not in note.tags:
+                    note.tags.append(tag)
+            note.tags = [t for t in note.tags if t not in proposal.remove_tags]
+            self._tag_edit(note)
+            col.update_note(note)
+            first = next(iter(prior_fields.values()), "")
+            self._ledger.append(
+                LedgerEntry(
+                    id=proposal.id,
+                    kind="edit",
+                    note_id=note_id,
+                    label=_short_label(next(iter(apply_fields.values()), first)),
+                    prior_fields=prior_fields,
+                    prior_tags=prior_tags,
+                )
             )
-        )
-        self._observe({"event": "applied", "note_ids": [int(proposal.note_id)]})
+            cards = tuple(int(c.id) for c in note.cards())
+            return _WriteResult(
+                None,
+                invariants.Expectation(),
+                invariants.Scope(note_ids=(note_id,), card_ids=cards),
+            )
+
+        self._apply_write(execute=execute, precheck=precheck, lenient_cards=True)
+        proposal.status = ACCEPTED
+        self._observe({"event": "applied", "note_ids": [note_id]})
         self._observe(
             {
                 "event": "reviewed",
@@ -1623,8 +1912,13 @@ class ProposalManager:
                 model = self._validate_note_type_and_fields(
                     col, proposal.note_type, proposal.fields
                 )
+                # Re-create flows through the chokepoint (_apply_create).
                 proposal.note_id = self._apply_create(col, model, proposal)
             else:
+                # SAFETY: the readd EDIT path is not yet routed through
+                # _apply_write; it re-applies an undone edit inline and is
+                # already guarded by this method's broad try/except. What
+                # remains: fold it into the edit chokepoint like _accept_edit.
                 assert proposal.note_id is not None
                 note = col.get_note(proposal.note_id)
                 current = dict(note.items())
@@ -1708,6 +2002,9 @@ class ProposalManager:
         except ProposalError as exc:
             self._push({"type": "notice", "text": f"Could not revert: {exc}"})
             return
+        except Exception as exc:  # backend error the chokepoint did not convert
+            self._push({"type": "notice", "text": f"Could not revert: {exc}"})
+            return
         proposal = self._proposals.get(entry.id)
         if proposal is not None:
             proposal.status = UNDONE
@@ -1725,6 +2022,9 @@ class ProposalManager:
             try:
                 self._revert_entry(entry)
             except ProposalError:
+                errors += 1
+                continue
+            except Exception:  # backend error the chokepoint did not convert
                 errors += 1
                 continue
             proposal = self._proposals.get(entry.id)
@@ -1757,57 +2057,100 @@ class ProposalManager:
         resync: list[int] = [entry.note_id] if entry.note_id else []
         if entry.kind == "change_set":
             resync = [int(i["note_id"]) for i in entry.data.get("items", [])]
+
+        if entry.kind == "deck_op":
+            # SAFETY: deck-op reverts flow through _revert_deck_op, which looks
+            # decks up by name, converts backend errors to ProposalError, and
+            # refreshes the deck browser. Deck ops move no note/card counts, so
+            # they are not yet unified through _revert_write's invariant sandwich.
+            self._revert_deck_op(col, entry)
+            entry.undone = True
+            return
+
         if entry.kind == "create":
+            # Preconditions (already-deleted / studied) BEFORE any mutation.
             try:
                 note = col.get_note(entry.note_id)
             except Exception:
                 raise ProposalError("note already deleted") from None
             if any(getattr(card, "reps", 0) > 0 for card in note.cards()):
                 raise ProposalError("note has been studied; delete it in the Browser")
-            col.remove_notes([entry.note_id])
+
+            def mutate_create() -> None:
+                col.remove_notes([entry.note_id])
+
+            self._revert_write(col, mutate_create, invariants.Scope())
         elif entry.kind == "bulk" and entry.data.get("op") == "rename_tag":
-            # Reverse rename; if the target tag pre-existed the merge cannot be
-            # fully separated (warned at proposal time).
-            col.tags.rename(entry.data["new_tag"], entry.data["old_tag"])
+
+            def mutate_rename() -> None:
+                # Reverse rename; if the target tag pre-existed the merge cannot
+                # be fully separated (warned at proposal time).
+                col.tags.rename(entry.data["new_tag"], entry.data["old_tag"])
+
+            self._revert_write(col, mutate_rename, invariants.Scope())
         elif entry.kind == "bulk" and entry.data.get("op") == "move_cards":
+            card_decks = entry.data.get("card_decks", {})
             by_deck: dict[int, list[int]] = {}
-            for cid, did in entry.data.get("card_decks", {}).items():
+            for cid, did in card_decks.items():
                 by_deck.setdefault(int(did), []).append(int(cid))
-            for did, cids in by_deck.items():
-                col.set_deck(cids, did)
-        elif entry.kind == "deck_op":
-            self._revert_deck_op(col, entry)
+
+            def mutate_move() -> None:
+                # F1: card_decks holds each card's HOME (normal) deck, never a
+                # filtered did, so set_deck can't hit CanNotMoveCardsInto. Any
+                # backend error is still converted to a clean "could not revert".
+                for did, cids in by_deck.items():
+                    col.set_deck(cids, did)
+
+            self._revert_write(
+                col,
+                mutate_move,
+                invariants.Scope(
+                    deck_ids=tuple(by_deck),
+                    card_ids=tuple(int(c) for c in card_decks),
+                ),
+            )
         elif entry.kind == "change_set":
-            missing = 0
-            for item in entry.data.get("items", []):
-                try:
-                    note = col.get_note(item["note_id"])
-                except Exception:
-                    missing += 1
-                    continue
-                for name, value in item["base_fields"].items():
-                    note[name] = value
-                if item.get("prior_tags") is not None:
-                    note.tags = list(item["prior_tags"])
-                col.update_note(note)
-            if missing:
+            missing_box = {"n": 0}
+
+            def mutate_change_set() -> None:
+                missing = 0
+                for item in entry.data.get("items", []):
+                    try:
+                        note = col.get_note(item["note_id"])
+                    except Exception:
+                        missing += 1
+                        continue
+                    for name, value in item["base_fields"].items():
+                        note[name] = value
+                    if item.get("prior_tags") is not None:
+                        note.tags = list(item["prior_tags"])
+                    col.update_note(note)
+                missing_box["n"] = missing
+
+            self._revert_write(col, mutate_change_set, invariants.Scope())
+            if missing_box["n"]:
                 self._push(
                     {
                         "type": "notice",
-                        "text": f"Revert: {missing} note(s) no longer exist and "
-                        "were skipped.",
+                        "text": f"Revert: {missing_box['n']} note(s) no longer exist "
+                        "and were skipped.",
                     }
                 )
         else:
             try:
-                note = col.get_note(entry.note_id)
+                col.get_note(entry.note_id)
             except Exception:
                 raise ProposalError("note no longer exists") from None
-            for name, value in entry.prior_fields.items():
-                note[name] = value
-            if entry.prior_tags is not None:
-                note.tags = list(entry.prior_tags)
-            col.update_note(note)
+
+            def mutate_edit() -> None:
+                note = col.get_note(entry.note_id)
+                for name, value in entry.prior_fields.items():
+                    note[name] = value
+                if entry.prior_tags is not None:
+                    note.tags = list(entry.prior_tags)
+                col.update_note(note)
+
+            self._revert_write(col, mutate_edit, invariants.Scope())
         entry.undone = True
         if resync:
             self._observe({"event": "resync", "note_ids": resync})
@@ -1991,27 +2334,45 @@ class ProposalManager:
             return False
 
     def _apply_create(self, col: Any, model: Any, proposal: Proposal) -> int:
-        note = col.new_note(model)
-        for name, value in proposal.fields.items():
-            note[name] = value
-        tags = list(proposal.tags)
-        for tag in (self.created_tag, self.session_tag):
-            if tag and tag not in tags:
-                tags.append(tag)
-        note.tags = tags
-        deck_id = col.decks.id(proposal.deck)
-        self._require_normal_deck(col, proposal.deck, deck_id)
-        col.add_note(note, deck_id)
-        self._ledger.append(
-            LedgerEntry(
-                id=proposal.id,
-                kind="create",
-                note_id=note.id,
-                label=_short_label(next(iter(proposal.fields.values()), "")),
+        precheck = self._precheck_create(proposal)
+
+        def execute(col: Any, before: invariants.Snapshot) -> _WriteResult:
+            note = col.new_note(model)
+            for name, value in proposal.fields.items():
+                note[name] = value
+            tags = list(proposal.tags)
+            for tag in (self.created_tag, self.session_tag):
+                if tag and tag not in tags:
+                    tags.append(tag)
+            note.tags = tags
+            # Single deck-resolution point (rejects a filtered home deck);
+            # create it as a normal deck when it does not exist yet.
+            deck_id = contract.resolve_writable_deck(col, proposal.deck)
+            if deck_id is contract.WILL_CREATE:
+                deck_id = col.decks.id(proposal.deck)
+            col.add_note(note, deck_id)
+            self._ledger.append(
+                LedgerEntry(
+                    id=proposal.id,
+                    kind="create",
+                    note_id=note.id,
+                    label=_short_label(next(iter(proposal.fields.values()), "")),
+                )
             )
-        )
-        self._observe({"event": "applied", "note_ids": [int(note.id)]})
-        return int(note.id)
+            card_ids = tuple(int(c.id) for c in note.cards())
+            return _WriteResult(
+                int(note.id),
+                invariants.Expectation(note_delta=1, card_delta=len(card_ids)),
+                invariants.Scope(
+                    deck_ids=(int(deck_id),),
+                    note_ids=(int(note.id),),
+                    card_ids=card_ids,
+                ),
+            )
+
+        note_id = self._apply_write(execute=execute, precheck=precheck)
+        self._observe({"event": "applied", "note_ids": [note_id]})
+        return note_id
 
     # ---- card previews (best-effort; None when rendering unavailable) ----
 

@@ -15,8 +15,9 @@ import json
 import os
 import time
 import traceback
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 # Force the deterministic demo backend before the add-on builds one: the
 # smoke must not depend on (or spend money through) a real claude CLI.
@@ -95,6 +96,42 @@ def _backup_count() -> int:
         return -1
 
 
+@contextmanager
+def _capture_pushes(proposals: Any) -> Iterator[list[dict[str, Any]]]:
+    """Temporarily wrap ProposalManager._push to record every pushed payload
+    (proposal cards, proposal_error, ledger updates, ...) so a check can
+    assert on what got surfaced to the user without going through the
+    webview DOM. Restores the original push callable afterward, mirroring
+    how _trusted_writes above restores state.config in a finally block."""
+    captured: list[dict[str, Any]] = []
+    original_push = proposals._push
+
+    def _record(payload: dict[str, Any]) -> None:
+        captured.append(payload)
+        original_push(payload)
+
+    proposals._push = _record
+    try:
+        yield captured
+    finally:
+        proposals._push = original_push
+
+
+def _undo_status_snapshot() -> dict[str, Any]:
+    """Read col.undo_status() into a JSON-safe dict. Used to OBSERVE
+    (SAFETY.md's "Known wart on the rollback path": db_rollback reverts the
+    SQL but does not pop the undo entry an inner backend op already pushed)
+    - never asserted on, since whether the wart manifests is exactly what we
+    are trying to learn, not something we already know the answer to."""
+    assert mw is not None
+    status = mw.col.undo_status()
+    return {
+        "undo": getattr(status, "undo", "") or None,
+        "redo": getattr(status, "redo", "") or None,
+        "last_step": int(getattr(status, "last_step", 0)),
+    }
+
+
 def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]], Any]) -> None:
     """Drive the REAL ProposalManager and collection tools against the real
     disposable collection - the real-Anki equivalents of the fake-collection
@@ -152,6 +189,279 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
         return {"notes": len(ids)}
 
     check("change set apply+revert (real col.update_note)", _change_set)
+
+    def _create_happy_path() -> dict[str, Any]:
+        """Baseline for the rollback checks below: submit + accept a create
+        proposal through the real ProposalManager chokepoint (SAFETY.md Part
+        2 rule 1) and confirm the note actually landed with the declared
+        deck/fields/tags and the note count moved by exactly +1."""
+        col = mw.col
+        before_notes = int(col.db.scalar("select count() from notes"))
+        result = proposals.submit_create(
+            {
+                "note_type": "Basic",
+                "deck": "Default",
+                "tags": ["probe-happy"],
+                "fields": {"Front": "probe happy front", "Back": "probe happy back"},
+                "rationale": "probe happy-path create",
+            }
+        )
+        if result.get("status") != "pending_user_review":
+            raise AssertionError(f"expected pending_user_review, got {result}")
+        proposal_id = result["proposal_id"]
+        proposals.accept({"id": proposal_id})
+
+        after_notes = int(col.db.scalar("select count() from notes"))
+        if after_notes - before_notes != 1:
+            raise AssertionError(
+                f"note count delta {after_notes - before_notes}, expected +1"
+            )
+        from chat_with_your_cards.proposals import ACCEPTED
+
+        proposal = proposals._proposals[proposal_id]
+        if proposal.status != ACCEPTED:
+            raise AssertionError(f"proposal did not resolve accepted: {proposal.status}")
+        if proposal.note_id is None:
+            raise AssertionError("accepted proposal has no note_id")
+        note = col.get_note(proposal.note_id)
+        if note["Front"] != "probe happy front" or note["Back"] != "probe happy back":
+            raise AssertionError(f"note fields wrong: {dict(note.items())}")
+        deck_name = col.decks.name(note.cards()[0].did)
+        if deck_name != "Default":
+            raise AssertionError(f"note landed in the wrong deck: {deck_name}")
+        if "probe-happy" not in note.tags or "ai-created" not in note.tags:
+            raise AssertionError(f"tags missing: {note.tags}")
+        if not col.db.list("select id from cards where nid = ? and usn = -1", note.id):
+            raise AssertionError("new card not marked pending sync (usn != -1)")
+        return {
+            "note_id": int(note.id),
+            "note_count_delta": after_notes - before_notes,
+            "deck": deck_name,
+        }
+
+    check("create: happy path submit+accept via real ProposalManager", _create_happy_path)
+
+    def _postcondition_rollback() -> dict[str, Any]:
+        """SAFETY.md Part 2 rule 1's backstop: force invariants.assert_all to
+        raise AFTER col.add_note has already run, and confirm col.db.transact
+        really rolls the SQL back in a REAL Anki collection - the fake
+        collection in tests/test_invariants.py hand-simulates this with a
+        Python dict snapshot/restore, which cannot tell us whether the real
+        rust-backend db_rollback() behaves the same way. Also records
+        col.undo_status() before/after so we learn whether SAFETY.md's "Known
+        wart on the rollback path" (a dangling undo entry left by the inner
+        backend op that ran before the postcondition failed) manifests on
+        real Anki - that part is an OBSERVATION, not an assertion, since
+        finding out is the point."""
+        from chat_with_your_cards import invariants as invariants_mod
+        from chat_with_your_cards.proposals import PENDING
+
+        col = mw.col
+        before_notes = int(col.db.scalar("select count() from notes"))
+        ledger_before = len(proposals._ledger)
+        undo_before = _undo_status_snapshot()
+
+        result = proposals.submit_create(
+            {
+                "note_type": "Basic",
+                "deck": "Default",
+                "tags": ["probe-postcondition-rollback"],
+                "fields": {
+                    "Front": "probe rollback front",
+                    "Back": "probe rollback back",
+                },
+                "rationale": "probe forced postcondition failure",
+            }
+        )
+        proposal_id = result["proposal_id"]
+
+        original_assert_all = invariants_mod.assert_all
+
+        def _boom(*_a: Any, **_kw: Any) -> None:
+            raise invariants_mod.InvariantViolation(
+                "probe-forced postcondition failure (real-Anki rollback check)"
+            )
+
+        invariants_mod.assert_all = _boom
+        try:
+            with _capture_pushes(proposals) as captured:
+                proposals.accept({"id": proposal_id})
+        finally:
+            invariants_mod.assert_all = original_assert_all
+
+        after_notes = int(col.db.scalar("select count() from notes"))
+        if after_notes != before_notes:
+            raise AssertionError(
+                "note count changed despite forced postcondition failure: "
+                f"{before_notes} -> {after_notes} (real-Anki SQL rollback did "
+                "not revert col.add_note)"
+            )
+        if col.find_notes('tag:"probe-postcondition-rollback"'):
+            raise AssertionError(
+                "a note tagged probe-postcondition-rollback exists after the "
+                "forced rollback; col.db.transact did not revert the mutation"
+            )
+        if len(proposals._ledger) != ledger_before:
+            raise AssertionError(
+                "ledger grew despite the rolled-back write (phantom ledger entry)"
+            )
+
+        errors = [
+            p
+            for p in captured
+            if p.get("type") == "proposal_error" and p.get("id") == proposal_id
+        ]
+        if not errors:
+            raise AssertionError(
+                "forced InvariantViolation did not surface as a proposal_error "
+                f"(ProposalError); captured pushes: {captured}"
+            )
+        proposal = proposals._proposals[proposal_id]
+        if proposal.status != PENDING:
+            raise AssertionError(
+                f"proposal should remain pending after a failed accept, got "
+                f"{proposal.status!r}"
+            )
+
+        undo_after = _undo_status_snapshot()
+
+        # The collection must still be usable: a normal accept right after
+        # the forced rollback must still succeed cleanly.
+        followup = proposals.submit_create(
+            {
+                "note_type": "Basic",
+                "deck": "Default",
+                "tags": ["probe-postcondition-followup"],
+                "fields": {
+                    "Front": "probe followup front",
+                    "Back": "probe followup back",
+                },
+                "rationale": "confirm collection usable after forced rollback",
+            }
+        )
+        proposals.accept({"id": followup["proposal_id"]})
+        if not col.find_notes('tag:"probe-postcondition-followup"'):
+            raise AssertionError(
+                "collection unusable after forced rollback: follow-up accept "
+                "failed"
+            )
+
+        return {
+            "proposal_error_message": errors[0].get("message"),
+            "undo_status_before": undo_before,
+            "undo_status_after_forced_rollback": undo_after,
+            "followup_accept_ok": True,
+        }
+
+    check(
+        "create: postcondition InvariantViolation rolls back real SQL "
+        "(real col.db.transact) + undo_status observation",
+        _postcondition_rollback,
+    )
+
+    def _change_set_mid_batch_rollback() -> dict[str, Any]:
+        """Mid-batch all-or-nothing: a 3-item change set where the SECOND
+        item's write is doomed to fail partway through _apply_items. Confirms
+        the FIRST item's already-applied col.update_note is rolled back too
+        when a later item's write raises inside the same col.db.transact.
+
+        Method note: SAFETY.md's suggested trigger ("delete the note out from
+        under it") does NOT reach this code path on the real collection -
+        _apply_items wraps col.get_note in its own try/except and treats a
+        missing note as a skipped/stale item, not a raised error (the
+        staleness guard, by design - confirmed by reading proposals.py, not
+        assumed). To actually exercise the all-or-nothing rollback we
+        monkeypatch col.update_note to raise for the doomed note's id,
+        simulating a genuine backend failure partway through the batch."""
+        col = mw.col
+        ids = [_new_note(f"f3 batch {i}", back="orig") for i in range(3)]
+        cs = proposals.open_change_set({"title": "probe doomed batch"})
+        cs_id = cs["change_set_id"]
+        for i, nid in enumerate(ids):
+            proposals.add_to_change_set(
+                {
+                    "change_set_id": cs_id,
+                    "note_id": nid,
+                    "field_changes": {"Back": f"batch swept {i}"},
+                }
+            )
+        proposals.close_change_set({"change_set_id": cs_id, "summary": "doomed batch"})
+
+        doomed_nid = ids[1]
+        real_update_note = col.update_note
+
+        def _doomed_update_note(note: Any, *a: Any, **kw: Any) -> Any:
+            if int(note.id) == int(doomed_nid):
+                raise Exception("probe-forced backend failure mid-batch (F3)")
+            return real_update_note(note, *a, **kw)
+
+        col.update_note = _doomed_update_note
+        ledger_before = len(proposals._ledger)
+        try:
+            with _capture_pushes(proposals) as captured:
+                proposals.accept({"id": cs_id})
+        finally:
+            col.update_note = real_update_note
+
+        notes = {nid: col.get_note(nid) for nid in ids}
+        if notes[ids[0]]["Back"] != "orig":
+            raise AssertionError(
+                f"FIRST item's edit was NOT rolled back: {notes[ids[0]]['Back']!r} "
+                "(all-or-nothing violated - a mid-batch failure left a partial "
+                "write committed)"
+            )
+        if notes[ids[1]]["Back"] != "orig":
+            raise AssertionError(
+                f"doomed item unexpectedly changed: {notes[ids[1]]['Back']!r}"
+            )
+        if notes[ids[2]]["Back"] != "orig":
+            raise AssertionError(
+                "THIRD (never-reached) item unexpectedly changed: "
+                f"{notes[ids[2]]['Back']!r}"
+            )
+        if len(proposals._ledger) != ledger_before:
+            raise AssertionError(
+                "ledger grew despite the rolled-back batch (phantom ledger entry)"
+            )
+
+        errors = [
+            p
+            for p in captured
+            if p.get("type") == "proposal_error" and p.get("id") == cs_id
+        ]
+        if not errors:
+            raise AssertionError(
+                "doomed mid-batch write did not surface as a proposal_error "
+                f"(ProposalError); captured pushes: {captured}"
+            )
+
+        followup = proposals.submit_create(
+            {
+                "note_type": "Basic",
+                "deck": "Default",
+                "tags": ["probe-f3-followup"],
+                "fields": {"Front": "f3 followup", "Back": "b"},
+                "rationale": "confirm collection usable after mid-batch rollback",
+            }
+        )
+        proposals.accept({"id": followup["proposal_id"]})
+        if not col.find_notes('tag:"probe-f3-followup"'):
+            raise AssertionError(
+                "collection unusable after mid-batch rollback: follow-up accept "
+                "failed"
+            )
+
+        return {
+            "proposal_error_message": errors[0].get("message"),
+            "all_or_nothing_confirmed": True,
+            "undo_status_after": _undo_status_snapshot(),
+        }
+
+    check(
+        "change_set: mid-batch backend failure rolls back the WHOLE batch "
+        "(all-or-nothing, real col.db.transact)",
+        _change_set_mid_batch_rollback,
+    )
 
     def _delete_with_backup() -> dict[str, Any]:
         ids = [_new_note(f"del {i}", tags=["probe-del"]) for i in range(2)]
@@ -442,7 +752,14 @@ def _run_checks() -> dict[str, Any]:
 
     def check(name: str, fn: Callable[[], Any]) -> Any:
         value = fn()
-        checks.append({"name": name, "ok": True})
+        entry: dict[str, Any] = {"name": name, "ok": True}
+        # Most checks return None or a live object (module, QDockWidget) for
+        # the caller's own use; only a JSON-safe dict is worth echoing into
+        # the result file (e.g. the undo_status observations below need to
+        # reach $ANKI_ADDON_WORKBENCH_RESULT, not just pass/fail).
+        if isinstance(value, dict):
+            entry["detail"] = value
+        checks.append(entry)
         return value
 
     addon = check(

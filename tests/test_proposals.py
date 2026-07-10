@@ -7,6 +7,8 @@ auto-accept with its per-session cap (DESIGN.md sections 5 and 8).
 
 from __future__ import annotations
 
+import copy
+import sqlite3
 import sys
 import unittest
 from pathlib import Path
@@ -31,6 +33,9 @@ class FakeCard:
         self.id = cid
         self.nid = 0
         self.odid = 0  # home deck while the card sits in a filtered deck
+        self.usn = -1  # -1 == pending sync, the state every touched row must hold
+        self.memory_state: Any = None  # FSRS stability/difficulty, wiped by set_deck
+        self.data = ""  # legacy JSON blob (s/d) fallback for FSRS detection
 
 
 class FakeNote:
@@ -39,6 +44,7 @@ class FakeNote:
         self._fields = {f["name"]: "" for f in model["flds"]}
         self.tags: list[str] = []
         self.id = 0
+        self.usn = -1  # -1 == pending sync
         self._cards: list[FakeCard] = []
 
     def __getitem__(self, name: str) -> str:
@@ -124,7 +130,10 @@ class FakeDecks:
         deck = self._decks.get(did)
         return deck["name"] if deck else ""
 
-    def get(self, did: int) -> dict[str, Any] | None:
+    def get(self, did: int, default: bool = True) -> dict[str, Any] | None:
+        # `default` mirrors the real DeckManager.get; the invariants pass
+        # default=False and expect None for a missing id (never the Default
+        # fallback). This double never fabricates a fallback deck either way.
         deck = self._decks.get(did)
         return dict(deck) if deck else None
 
@@ -201,6 +210,71 @@ class FakeTags:
                 note.tags = [new if t == old else t for t in note.tags]
 
 
+class FakeDB:
+    """DBProxy stand-in the postcondition invariants read through.
+
+    scalar/list/all run REAL SQLite over a projection of the collection's
+    notes/cards/col rows, rebuilt from the method-API dicts before each read so
+    the invariants' SELECTs execute exactly as Anki's DBProxy would run them.
+    transact(op) mirrors anki/dbproxy.py: it runs op and rolls the whole
+    collection back (restoring the dict state) if op raises, so a mid-batch
+    failure or a postcondition violation leaves nothing committed.
+    """
+
+    def __init__(self, col: "FakeCol") -> None:
+        self._col = col
+
+    def _fetch(self, sql: str, args: tuple) -> list:
+        # A short-lived connection per read, projected from the current dicts
+        # and closed immediately, so no sqlite handle outlives the query.
+        conn = sqlite3.connect(":memory:")
+        try:
+            conn.executescript(
+                "create table col (id integer primary key, scm integer);"
+                "create table notes (id integer primary key, usn integer);"
+                "create table cards (id integer primary key, nid integer, "
+                "did integer, odid integer, usn integer);"
+            )
+            conn.execute("insert into col (id, scm) values (1, ?)", (self._col._scm,))
+            for nid, note in self._col._notes.items():
+                conn.execute(
+                    "insert into notes (id, usn) values (?, ?)",
+                    (int(nid), int(getattr(note, "usn", -1))),
+                )
+            for cid, card in self._col._cards.items():
+                conn.execute(
+                    "insert into cards (id, nid, did, odid, usn) values (?, ?, ?, ?, ?)",
+                    (
+                        int(cid),
+                        int(getattr(card, "nid", 0)),
+                        int(card.did),
+                        int(getattr(card, "odid", 0)),
+                        int(getattr(card, "usn", -1)),
+                    ),
+                )
+            return conn.execute(sql, args).fetchall()
+        finally:
+            conn.close()
+
+    def scalar(self, sql: str, *args: object) -> object:
+        rows = self._fetch(sql, args)
+        return rows[0][0] if rows else None
+
+    def list(self, sql: str, *args: object) -> list:
+        return [r[0] for r in self._fetch(sql, args)]
+
+    def all(self, sql: str, *args: object) -> list:
+        return [list(r) for r in self._fetch(sql, args)]
+
+    def transact(self, op: "Any") -> None:
+        snapshot = self._col._snapshot_state()
+        try:
+            op()
+        except BaseException:
+            self._col._restore_state(snapshot)
+            raise
+
+
 class FakeCol:
     def __init__(self) -> None:
         self.models = FakeModels([BASIC])
@@ -210,6 +284,36 @@ class FakeCol:
         self._notes: dict[int, FakeNote] = {}
         self._cards: dict[int, FakeCard] = {}
         self._next_id = 100
+        self._scm = 1000  # schema mark; no op in this suite bumps it
+        self.db = FakeDB(self)
+
+    # --- transaction rollback support (see FakeDB.transact) ---
+
+    def _snapshot_state(self) -> Any:
+        # One deepcopy with a shared memo keeps cross-references (a card in both
+        # _cards and its note._cards) identical in the snapshot.
+        return copy.deepcopy(
+            (
+                self._notes,
+                self._cards,
+                self.decks._decks,
+                self.decks._configs,
+                self.decks._next,
+                self._next_id,
+                self._scm,
+            )
+        )
+
+    def _restore_state(self, snapshot: Any) -> None:
+        (
+            self._notes,
+            self._cards,
+            self.decks._decks,
+            self.decks._configs,
+            self.decks._next,
+            self._next_id,
+            self._scm,
+        ) = snapshot
 
     def new_note(self, model: dict[str, Any]) -> FakeNote:
         return FakeNote(model)
@@ -251,8 +355,17 @@ class FakeCol:
         return self._cards[card_id]
 
     def set_deck(self, card_ids: list[int], deck_id: int) -> None:
+        # Mirror Anki: set_deck into a filtered deck hard-errors
+        # (CanNotMoveCardsInto, card/mod.rs:371), and any move clears odid and
+        # wipes FSRS memory via clear_fsrs_data (hazard 8).
+        deck = self.decks.get(deck_id)
+        if deck and deck.get("dyn"):
+            raise RuntimeError("CanNotMoveCardsInto")
         for cid in card_ids:
-            self._cards[cid].did = deck_id
+            card = self._cards[cid]
+            card.did = deck_id
+            card.odid = 0
+            card.memory_state = None
 
     def get_note(self, note_id: int) -> FakeNote:
         # Like real Anki: a fresh Note object per call (cards stay shared so
@@ -267,6 +380,10 @@ class FakeCol:
         return clone
 
     def update_note(self, note: FakeNote) -> None:
+        # Test hook: a field value of "BOOM" simulates a backend failure, so a
+        # mid-batch rollback can be exercised (F3).
+        if any(value == "BOOM" for value in note._fields.values()):
+            raise RuntimeError("simulated backend failure")
         stored = self._notes[note.id]
         stored._fields = dict(note._fields)
         stored.tags = list(note.tags)
@@ -1359,6 +1476,145 @@ class DeckOpTests(unittest.TestCase):
         self.assertEqual(1, len(calls))
         manager.revert({"id": pid})
         self.assertEqual(2, len(calls))
+
+
+class SafetyWiringTests(unittest.TestCase):
+    """F1/F2/F3 and the contract+invariants chokepoint (SAFETY.md Part 2)."""
+
+    def test_f1_move_revert_of_filtered_card_returns_to_home_deck(self) -> None:
+        # A card living in a filtered deck has did=<filtered>, odid=<home>.
+        # move_cards must capture the HOME deck (odid), so a later revert sends
+        # the card home instead of calling set_deck into a filtered deck (which
+        # hard-errors with CanNotMoveCardsInto).
+        manager, col, pushed = make_manager()
+        _seed_notes(manager, col, pushed, n=1)
+        manager.submit_create_filtered_deck(
+            {
+                "name": "Cram",
+                "terms": [{"search": 'deck:"Default"', "limit": 10, "order": 6}],
+            }
+        )
+        cram_pid = pushes_of(pushed, "proposal")[-1]["proposal"]["id"]
+        manager.accept({"id": cram_pid})
+        cram = col.decks.id_for_name("Cram")
+        default = col.decks.id_for_name("Default")
+        card = next(iter(col._cards.values()))
+        self.assertEqual(card.did, cram)  # gathered into the filtered deck
+        self.assertEqual(card.odid, default)  # home recorded in odid
+
+        result = manager.submit_move_cards(
+            {"query": 'deck:"Cram"', "deck": "Archive"}
+        )
+        move_pid = result["proposal_id"]
+        manager.accept({"id": move_pid})
+        archive = col.decks.id_for_name("Archive")
+        self.assertEqual(card.did, archive)
+
+        # F1: the ledger captured the home deck (Default), never the filtered id.
+        entry = next(e for e in manager._ledger if e.id == move_pid)
+        self.assertEqual({default}, set(entry.data["card_decks"].values()))
+        self.assertNotIn(cram, entry.data["card_decks"].values())
+
+        # Revert sends the card to its normal home deck, no crash, no notice.
+        manager.revert({"id": move_pid})
+        self.assertEqual(card.did, default)
+        self.assertFalse(
+            any("Could not revert" in n["text"] for n in pushes_of(pushed, "notice"))
+        )
+
+    def test_f1_move_revert_backend_error_becomes_notice(self) -> None:
+        # If a revert's stored destination is somehow a filtered deck, set_deck
+        # hard-errors; the revert path must convert that to a clean notice, not
+        # let the backend exception escape unhandled (and must not mark undone).
+        from chat_with_your_cards.proposals import LedgerEntry
+
+        manager, col, pushed = make_manager()
+        _seed_notes(manager, col, pushed, n=1)
+        col.decks.new_filtered("Cram")
+        cram = col.decks.id_for_name("Cram")
+        cid = next(iter(col._cards))
+        manager._ledger.append(
+            LedgerEntry(
+                id="pX",
+                kind="bulk",
+                note_id=0,
+                label="bad move",
+                data={"op": "move_cards", "card_decks": {cid: cram}},
+            )
+        )
+        manager.revert({"id": "pX"})
+        self.assertTrue(
+            any("Could not revert" in n["text"] for n in pushes_of(pushed, "notice"))
+        )
+        entry = next(e for e in manager._ledger if e.id == "pX")
+        self.assertFalse(entry.undone)
+
+    def test_f2_move_proposal_warns_about_fsrs_memory_loss(self) -> None:
+        manager, col, pushed = make_manager()
+        _seed_notes(manager, col, pushed, n=2)
+        cards = list(col._cards.values())
+        cards[0].memory_state = "s=1.0,d=5.0"  # this card carries FSRS memory
+        # cards[1].memory_state stays None (no memory to lose)
+        result = manager.submit_move_cards(
+            {"query": 'deck:"Default"', "deck": "Archive"}
+        )
+        warnings = pushes_of(pushed, "proposal")[-1]["proposal"]["warnings"]
+        self.assertTrue(any("FSRS memory" in w for w in warnings))
+        self.assertTrue(any("1 card" in w for w in warnings))
+        self.assertTrue(any("cannot be restored" in w for w in warnings))
+        self.assertEqual(result["warnings"], warnings)
+
+    def test_f2_no_warning_when_no_card_has_fsrs_memory(self) -> None:
+        manager, col, pushed = make_manager()
+        _seed_notes(manager, col, pushed, n=2)  # memory_state defaults to None
+        manager.submit_move_cards({"query": 'deck:"Default"', "deck": "Archive"})
+        warnings = pushes_of(pushed, "proposal")[-1]["proposal"]["warnings"]
+        self.assertFalse(any("FSRS" in w for w in warnings))
+
+    def test_f3_midbatch_failure_rolls_back_with_nothing_committed(self) -> None:
+        manager, col, pushed = make_manager()
+        ids = _seed_notes(manager, col, pushed, n=2)  # Back = "A0.", "A1."
+        cs = manager.open_change_set({"title": "batch"})
+        cs_id = cs["change_set_id"]
+        manager.add_to_change_set(
+            {"change_set_id": cs_id, "note_id": ids[0], "field_changes": {"Back": "ok0"}}
+        )
+        manager.add_to_change_set(
+            {"change_set_id": cs_id, "note_id": ids[1], "field_changes": {"Back": "BOOM"}}
+        )
+        manager.close_change_set({"change_set_id": cs_id})
+
+        manager.accept({"id": cs_id})  # note0 applies, note1 fails mid-batch
+
+        # The whole batch rolled back: note0's committed change is undone.
+        self.assertEqual("A0.", col.get_note(ids[0])["Back"])
+        self.assertEqual("A1.", col.get_note(ids[1])["Back"])
+        # Surfaced as a proposal error and left no ledger entry behind.
+        self.assertTrue(pushes_of(pushed, "proposal_error"))
+        self.assertEqual([], [e for e in manager._ledger if e.kind == "change_set"])
+
+    def test_f3_create_rolls_back_when_postcondition_fails(self) -> None:
+        # A postcondition violation inside the transaction must roll the create
+        # back so nothing is committed. Force it by having add_note also spawn a
+        # stray extra card, so the observed card delta (+2) disagrees with the
+        # declared +1 and count_delta_matches raises.
+        manager, col, pushed = make_manager()
+        real_add_note = col.add_note
+
+        def add_note_with_stray(note: Any, deck_id: int) -> None:
+            real_add_note(note, deck_id)
+            stray = FakeCard(did=deck_id, cid=note.id * 10 + 1)
+            stray.nid = note.id
+            col._cards[stray.id] = stray  # blast-radius: an undeclared extra card
+
+        col.add_note = add_note_with_stray  # type: ignore[method-assign]
+        result = manager.submit_create(dict(CREATE_ARGS))
+        manager.accept({"id": result["proposal_id"]})
+
+        self.assertTrue(pushes_of(pushed, "proposal_error"))
+        self.assertEqual(0, col.note_count())  # rolled back: no note committed
+        self.assertEqual(0, col.card_count())
+        self.assertEqual([], manager._ledger)
 
 
 if __name__ == "__main__":
