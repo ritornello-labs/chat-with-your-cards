@@ -74,13 +74,20 @@ export function ReasoningBlock({ text, status, estimatedTokens }: ReasoningBlock
         className={"cwyc-reasoning" + (running ? " cwyc-reasoning-running" : "")}
         open={open}
         onToggle={(event) => setOpen(event.currentTarget.open)}
+        data-testid={running ? "thinking-indicator" : undefined}
       >
-        <summary>
-          {running
-            ? "Thinking…"
-            : estimatedTokens
-              ? `Thought for ~${estimatedTokens} tokens`
-              : "Thought for a bit"}
+        <summary data-testid={running ? undefined : "thinking-summary"}>
+          <span
+            className={"cwyc-ember" + (running ? "" : " cwyc-ember-cold")}
+            aria-hidden
+          />
+          {running ? (
+            <span className="cwyc-thinking-phrase">Thinking…</span>
+          ) : (
+            <span className="cwyc-thinking-done-label">
+              {estimatedTokens ? `Thought for ~${estimatedTokens} tokens` : "Thought for a bit"}
+            </span>
+          )}
         </summary>
         <div className="cwyc-reasoning-text">{text}</div>
       </details>
@@ -88,22 +95,26 @@ export function ReasoningBlock({ text, status, estimatedTokens }: ReasoningBlock
   }
 
   if (running) {
+    // The thinking ember: a slowly breathing amber dot beside the rotating
+    // phrase; the live "~N tokens" count rides along in Plex Mono.
     return (
-      <div className="cwyc-reasoning cwyc-reasoning-indicator cwyc-reasoning-running">
-        <span className="cwyc-reasoning-phrase">{THINKING_PHRASES[phraseIndex]}</span>
+      <div className="cwyc-thinking" data-testid="thinking-indicator">
+        <span className="cwyc-ember" aria-hidden />
+        <span className="cwyc-thinking-phrase">{THINKING_PHRASES[phraseIndex]}</span>
         {!!estimatedTokens && (
-          <span className="cwyc-reasoning-tokens"> ~{estimatedTokens} tokens</span>
+          <span className="cwyc-thinking-tokens">~{estimatedTokens} tokens</span>
         )}
       </div>
     );
   }
 
-  // Done, and no real thinking text ever arrived: collapse to a static
-  // one-liner, or render nothing if no token estimate was ever reported.
+  // Done, and no real thinking text ever arrived: a quiet mono one-liner
+  // with the ember gone cold, or nothing if no token estimate was reported.
   if (!estimatedTokens) return null;
   return (
-    <div className="cwyc-reasoning cwyc-reasoning-indicator cwyc-reasoning-done">
-      Thought for ~{estimatedTokens} tokens
+    <div className="cwyc-thinking" data-testid="thinking-summary">
+      <span className="cwyc-ember cwyc-ember-cold" aria-hidden />
+      <span className="cwyc-thinking-done-label">Thought for ~{estimatedTokens} tokens</span>
     </div>
   );
 }

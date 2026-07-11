@@ -34,8 +34,10 @@ known issues live in [DESIGN.md](DESIGN.md).
 - `make test-gui-smoke-docker` — headless real-Anki smoke in Docker/Xvfb via
   [`anki-addon-workbench`](https://pypi.org/project/anki-addon-workbench/);
   the probe captures light/dark screenshots itself with `mw.grab()`.
-- `dev/preview.html` (serve the repo, open in a browser, `?night` for dark) —
-  fast chat-UI iteration with a stubbed `pycmd`, no Anki involved.
+- `cd ui && npm run dev` — the assistant-ui frontend's Vite dev server
+  (http://localhost:5173), rendering the real components against a scripted
+  replayer with a stubbed `pycmd`, no Anki involved. `npm run build` emits the
+  committed bundle to `chat_with_your_cards/web/next/`. See `ui/README.md`.
 - The add-on proper lives in `chat_with_your_cards/`; a future `.ankiaddon`
   is that directory zipped.
 

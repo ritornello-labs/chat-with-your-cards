@@ -1,11 +1,11 @@
 /**
  * Production entry point. Built by `npm run build` into
  * chat_with_your_cards/web/next/bundle.js - a classic, self-contained IIFE
- * script (see vite.config.ts) meant to be loaded the same way dock.py loads
- * web/app.js today via AnkiWebView.stdHtml(): plain <script>/<link> tags,
- * no module system, no CDN/network calls at runtime.
+ * script (see vite.config.ts) loaded by dock.py via AnkiWebView.stdHtml():
+ * plain <script>/<link> tags, no module system, no CDN/network calls at
+ * runtime.
  *
- * Mirrors app.js's own bootstrap: install the window.chatUI global before
+ * Bootstrap order: install the window.chatUI global before
  * anything else, kick off the ready handshake, then mount React. Real mode
  * only - window.pycmd is expected to already be wired by AnkiWebView. (Dev
  * mode instead loads dev-main.tsx, which installs a fake window.pycmd first.)

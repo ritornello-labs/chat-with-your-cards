@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@assistant-ui/react": "0.14.24",
+    "dompurify": "3.4.11",
+    "marked": "18.0.5",
     "react": "19.2.7",
     "react-dom": "19.2.7"
   },

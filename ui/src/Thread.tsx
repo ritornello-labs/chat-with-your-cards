@@ -8,7 +8,7 @@ import { TextPart } from "./components/TextPart";
 
 function UserMessage() {
   return (
-    <MessagePrimitive.Root className="cwyc-row cwyc-row-user">
+    <MessagePrimitive.Root className="cwyc-row cwyc-row-user" data-testid="user-message">
       <div className="cwyc-msg cwyc-msg-user">
         <MessagePrimitive.Parts />
       </div>
@@ -18,7 +18,7 @@ function UserMessage() {
 
 function AssistantMessage({ store }: { store: ChatStore }) {
   return (
-    <MessagePrimitive.Root className="cwyc-row cwyc-row-assistant">
+    <MessagePrimitive.Root className="cwyc-row cwyc-row-assistant" data-testid="assistant-message">
       <div className="cwyc-msg cwyc-msg-assistant">
         <MessagePrimitive.Parts
           components={{
@@ -45,10 +45,16 @@ function Composer() {
         className="cwyc-composer-input"
         placeholder="Ask about this card…"
         rows={1}
+        data-testid="composer-input"
       />
       <div className="cwyc-composer-bar">
         <ThreadPrimitive.If running={false}>
-          <ComposerPrimitive.Send className="cwyc-send" aria-label="Send" title="Send (Enter)">
+          <ComposerPrimitive.Send
+            className="cwyc-send"
+            aria-label="Send"
+            title="Send (Enter)"
+            data-testid="send"
+          >
             <SendIcon />
           </ComposerPrimitive.Send>
         </ThreadPrimitive.If>
@@ -57,6 +63,7 @@ function Composer() {
             className="cwyc-send cwyc-send-stop"
             aria-label="Stop"
             title="Stop (Esc)"
+            data-testid="stop"
           >
             <StopIcon />
           </ComposerPrimitive.Cancel>

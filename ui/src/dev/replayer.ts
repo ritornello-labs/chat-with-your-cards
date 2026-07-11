@@ -1,13 +1,13 @@
 /**
- * Dev-mode scripted replayer: installs a fake window.pycmd (exactly like
- * dev/preview.html does for app.js) so main.tsx's real bridge.ts code path -
- * postCommand() -> window.pycmd(...) - runs unmodified against canned data
- * instead of a live Python backend. Only src/dev-main.tsx imports this file,
- * so it never reaches the production bundle (chat_with_your_cards/web/next/).
+ * Dev-mode scripted replayer: installs a fake window.pycmd so main.tsx's real
+ * bridge.ts code path - postCommand() -> window.pycmd(...) - runs unmodified
+ * against canned data instead of a live Python backend. Only src/dev-main.tsx
+ * imports this file, so it never reaches the production bundle
+ * (chat_with_your_cards/web/next/).
  *
- * Scripts are mined from chat_with_your_cards/backends/fixtures.py and
- * dev/preview.html's proposal fixtures (same demo copy, reimplemented here
- * since this module owns TypeScript timing/event-shape, not Python). Timing
+ * Scripts are mined from chat_with_your_cards/backends/fixtures.py (same demo
+ * copy, reimplemented here since this module owns TypeScript
+ * timing/event-shape, not Python). Timing
  * mirrors backends/scripted.py: 25-60ms per 2-5 word delta, tool calls take
  * their declared duration_ms; "think_tokens" beats use a slower 200-450ms
  * cadence (mirrors backends/scripted.py's _THINK_MIN_MS/_THINK_MAX_MS) so

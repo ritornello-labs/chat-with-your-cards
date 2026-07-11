@@ -25,13 +25,15 @@ export function ToolCallCard(props: ToolCallMessagePartProps) {
         "cwyc-tool-chip" +
         (running ? " cwyc-tool-running" : finished ? (isError ? " cwyc-tool-failed" : " cwyc-tool-ok") : "")
       }
+      data-testid="tool-chip"
     >
       <details>
         <summary>
-          {running ? <span className="cwyc-tool-spinner" aria-hidden /> : null}
+          <CaretIcon />
           <span className="cwyc-tool-name">{toolName}</span>
+          {running ? <span className="cwyc-ember cwyc-tool-result" aria-label="running" /> : null}
           {finished ? (
-            <span className="cwyc-tool-result">{isError ? "failed" : "ok"}</span>
+            <span className="cwyc-tool-result">{isError ? "✗ failed" : "✓ ok"}</span>
           ) : null}
         </summary>
         {argsText ? (
@@ -48,5 +50,19 @@ export function ToolCallCard(props: ToolCallMessagePartProps) {
         ) : null}
       </details>
     </div>
+  );
+}
+
+function CaretIcon() {
+  return (
+    <svg
+      className="cwyc-tool-caret"
+      viewBox="0 0 8 8"
+      width="8"
+      height="8"
+      aria-hidden="true"
+    >
+      <path d="M2.5 1l3 3-3 3" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }

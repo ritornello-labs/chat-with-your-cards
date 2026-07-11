@@ -34,10 +34,6 @@
   terminal handoff opens. Empty uses Terminal.app via AppleScript; any other
   app name (e.g. `"iTerm"`, `"Warp"`, `"Ghostty"`) is launched with a temporary
   `.command` script via `open -a`.
-- `ui` (default `"classic"`): which chat interface the dock loads. `"classic"`
-  is the current vanilla-JS UI; `"next"` is the new assistant-ui frontend
-  (in active development — richer streaming, collapsible reasoning, tool
-  cards). Set back to `"classic"` and restart Anki if anything misbehaves.
 - `source_fields` (default `{}` = look everywhere): optional per-note-type
   restriction of which fields may contain card sources, e.g.
   `{"0 Cloze": ["Extra"]}`. By default any URI in any field is treated as a

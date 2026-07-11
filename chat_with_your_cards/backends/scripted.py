@@ -34,7 +34,7 @@ _DELTA_MIN_MS = 25
 _DELTA_MAX_MS = 60
 # Thinking beats land slower than text deltas - they are meant to be read as
 # "still working", not raced through - so the rotating indicator's ~2.5s
-# phrase cadence (app.js / ReasoningBlock.tsx) has time to actually rotate
+# phrase cadence (ReasoningBlock.tsx) has time to actually rotate
 # during manual preview iteration.
 _THINK_MIN_MS = 200
 _THINK_MAX_MS = 450

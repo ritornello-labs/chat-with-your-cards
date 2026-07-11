@@ -5,9 +5,10 @@ Next-generation Chat With Your Cards UI, built on
 not the shadcn-style pre-styled components - see "Design notes" below).
 
 This directory is a standalone dev toolchain. It has no runtime dependency on
-the rest of the add-on; it only *produces* a static bundle the add-on can
-load. Nothing here is wired into `chat_with_your_cards/**/*.py` yet - see
-"What remains for integration".
+the rest of the add-on; it only *produces* the static bundle the add-on loads
+from `chat_with_your_cards/web/next/`. As of 2026-07-11 this is the add-on's
+**only** UI (the old vanilla-JS `web/` UI was deleted) - see "Integration
+status" below.
 
 ## Install / build / preview
 
@@ -71,14 +72,21 @@ with zero Python/Anki involved.
 |---|---|---|
 | `@assistant-ui/react` | `0.14.24` | 2026-06-25 |
 | `react` / `react-dom` | `19.2.7` | 2026-06-01 |
+| `marked` | `18.0.5` | 2026-06-04 |
+| `dompurify` | `3.4.11` | 2026-06-17 |
 | `vite` | `8.1.4` | (latest eligible at install time) |
 | `@vitejs/plugin-react` | `6.0.3` | (latest eligible at install time) |
 | `typescript` | `7.0.2` | (latest eligible at install time) |
 
-All installed via `sfw npm install`, gated by `.npmrc`'s `min-release-age=7`
-(the newest `@assistant-ui/react` at build time, `0.14.26`, was 6 days old
-and got excluded automatically; `0.14.24` was the newest eligible release).
-`package-lock.json` is committed.
+Both `marked` and `dompurify` ship their own TypeScript types (no `@types/*`
+needed). All installed via `sfw npm install`; `package-lock.json` is
+committed. The 7-day age gate is enforced by hand-pinning on this machine's
+npm (11.11.1 warns "Unknown project config min-release-age" — it does not
+honor `.npmrc`'s `min-release-age=7` natively), so the newest *eligible*
+release was picked explicitly: `marked` `18.0.6` (2026-07-09, 2 days old)
+and `dompurify` `3.4.12` (2026-07-11, same-day) were both too fresh and were
+pinned back to `18.0.5` / `3.4.11`; `@assistant-ui/react` `0.14.26` (6 days)
+was likewise excluded in favor of `0.14.24`.
 
 `npm config get min-release-age` prints a "Unknown project config" warning on
 this machine's npm (11.11.1) even though the gate demonstrably works (`npm
@@ -91,18 +99,25 @@ upgrade changes this.
 
 ## Bundle size
 
-- `bundle.js`: 443,130 bytes (433 KiB) uncompressed, ~131,258 bytes (128 KiB) gzipped
-- `bundle.css`: 8,540 bytes, ~2,184 bytes gzipped
+- `bundle.js`: 514,540 bytes (502 KiB) uncompressed, ~156.7 KiB gzipped
+- `bundle.css`: 121,148 bytes (118 KiB), ~83.9 KiB gzipped
 
-(As of the thinking-indicator pass, 2026-07-11: +1,188 bytes JS / +276 bytes
-CSS over the previous 441,942 / 8,264 - the `ReasoningBlock.tsx` rewrite plus
-`store.ts`'s `appendThinking`/`THINKING_SENTINEL` addition, no new
-dependency.)
+(As of the markdown pass, 2026-07-11: **+68,600 bytes JS (+67.0 KiB)** over
+the restyle's 445,940 — `marked` + `dompurify` bundled in at build time
+(zero runtime network) — and **+1,620 bytes CSS (+1.6 KiB)** for the
+`.cwyc-markdown` styles. The prior "Reading lamp" restyle pass added +2,810
+bytes JS over its own 443,130 baseline plus ~111 KB CSS, almost entirely the
+four IBM Plex woff2 latin subsets in `src/assets/fonts/` that Vite's lib mode
+inlines into `bundle.css` as base64 `data:` URIs. The inlining is what keeps
+the bundle a strict three-file artifact with zero runtime network fetches —
+verified against the browser's network log: only same-origin
+`index.html`/`bundle.css`/`bundle.js` requests.)
 
 ## The bridge contract
 
-`src/bridge.ts` mirrors `chat_with_your_cards/bridge.py` exactly - the Python
-side needs zero changes to load this UI instead of `web/app.js`:
+`src/bridge.ts` mirrors `chat_with_your_cards/bridge.py` exactly - so the
+Python side needed zero changes to load this UI in place of the old
+hand-rolled vanilla-JS UI:
 
 - **JS -> Python**: `window.pycmd("cwyc:" + JSON.stringify({type, ...}))`.
   `postCommand()` is the one place this happens.
@@ -111,8 +126,8 @@ side needs zero changes to load this UI instead of `web/app.js`:
 - **Ready handshake**: JS posts `{type:"ready"}` on a 250ms retry loop
   (`startReadyHandshake`, up to 40 attempts) until Python calls
   `window.chatUI.ackReady()` directly (not through `dispatch`) - this
-  mirrors `app.js`'s `pingReadyUntilAcked()` / `__init__.py`'s
-  `_mark_web_ready()` handshake exactly.
+  mirrors `__init__.py`'s `_mark_web_ready()` handshake exactly (the same
+  contract the previous UI used).
 - `window.chatUI.focusComposer()` is also installed, matching
   `dock.py`'s `focus_composer()` (`self.web.eval("window.chatUI &&
   window.chatUI.focusComposer();")`).
@@ -123,11 +138,10 @@ path (see `src/bridge.ts`'s module doc for the reasoning):
 - **Real mode** (`src/main.tsx`, the production entry): `window.pycmd` is
   provided by `AnkiWebView`. Nothing else to do.
 - **Dev mode** (`src/dev-main.tsx` -> `src/dev/replayer.ts`): installs a fake
-  `window.pycmd` *before* the app mounts (same pattern as
-  `dev/preview.html` does for `app.js`), so `postCommand()` runs unmodified
+  `window.pycmd` *before* the app mounts, so `postCommand()` runs unmodified
   against scripted data. Scripts are mined from
-  `chat_with_your_cards/backends/fixtures.py` / `scripted.py` and
-  `dev/preview.html`'s proposal fixtures; timing mirrors
+  `chat_with_your_cards/backends/fixtures.py` / `scripted.py` plus a couple of
+  proposal fixtures reimplemented in the replayer; timing mirrors
   `backends/scripted.py` (25-60ms per 2-5 word delta). Type a message
   containing **tool**, **propose**, **edit**, **think**, **long**, or
   **error** to trigger that script; anything else gets the default reply. A
@@ -143,7 +157,7 @@ necessarily mounted) that maps the `ChatEvent` stream onto assistant-ui's
 
 | Event (`events.ts`, mirrors `backends/base.py`'s `event_to_dict()`) | UI effect |
 |---|---|
-| `text_delta` | appended to a trailing `{type:"text"}` part |
+| `text_delta` | appended to a trailing `{type:"text"}` part, rendered as sanitized markdown (`marked` → DOMPurify, `src/markdown.ts` / `TextPart.tsx`) on every delta |
 | `thinking_delta` (real since 2026-07-11 - see below) | appended to a trailing `{type:"reasoning"}` part, `text` pinned to `THINKING_SENTINEL` while no real text has streamed |
 | `tool_call_started` | new `{type:"tool-call"}` part, `result` unset |
 | `tool_call_finished` | sets `result`/`isError` on the matching part by `call_id` |
@@ -242,8 +256,29 @@ send exactly `{type:"proposal_accept", id, fields, accepted_fields?}` /
 
 ## Design notes
 
-Deliberately minimal and centralized styling (`src/styles.css`, one file,
-one CSS-variable block) on top of assistant-ui's **headless primitives**
+**Restyled 2026-07-11 ("Reading lamp"):** warm paper neutrals (`#faf9f6`
+light / `#1e1e1c` warm charcoal dark), one saffron-amber accent
+(`#d99a2b` light / `#e6b45c` dark, dark-text-on-amber fills - never white),
+desaturated green/red semantics, IBM Plex Sans + IBM Plex Mono bundled as
+latin-subset woff2 (OFL; `src/assets/fonts/`, inlined into `bundle.css` at
+build time - no CDN). Signature moments: the proposal card framed as a
+physical flashcard with a 3D front/back (or before/after) flip on the
+rendered-card preview (sandboxed srcdoc iframes, same face semantics as
+`app.js`'s `buildPreviewTabs`), and the "thinking ember" - a 2.5s breathing
+amber dot on the live reasoning indicator that goes cold and static on the
+collapsed "Thought for ~N tokens" line. Motion is limited to the streaming
+caret, the 150ms tool-chip expand, the card flip, and the ember, all behind
+a `prefers-reduced-motion` kill switch. Every text/background pair was
+checked >= 4.5:1 (WCAG AA) in both modes.
+
+**Test hooks:** stable `data-testid` attributes, independent of styling
+classes, for the GUI probe: `composer-input`, `send`, `stop`,
+`assistant-message`, `user-message`, `tool-chip`, `thinking-indicator`
+(live), `thinking-summary` (collapsed/done), `proposal-card`,
+`proposal-approve`, `proposal-edit`, `proposal-reject`, `error-banner`.
+
+All styling remains centralized (`src/styles.css`, one file, one
+CSS-variable block per theme) on top of assistant-ui's **headless primitives**
 (`ThreadPrimitive`, `ComposerPrimitive`, `MessagePrimitive` from
 `@assistant-ui/react` directly) - not assistant-ui's newer shadcn-style
 pre-styled components (the ones the public "Installation"/"Thread UI" docs
@@ -260,13 +295,13 @@ package level - confirmed via `npm view @assistant-ui/react@0.14.24
 peerDependencies dependencies`.
 
 CSS variables (`--cwyc-*`) are self-contained, **not** read from Anki's
-injected `--canvas`/`--fg`/`--border` custom properties the way
-`chat_with_your_cards/web/styles.css` does - this bundle doesn't yet know how
-the eventual Python loader will wire it up. `prefers-color-scheme` is the
-default (relevant standalone / in the dev preview / in any plain browser);
-`body.night-mode` is Anki's own signal and wins whenever present (it has
-higher CSS specificity than the bare `:root` rules), matching the existing
-`web/styles.css` convention. Known gap: an Anki *light* theme running inside
+injected `--canvas`/`--fg`/`--border` custom properties (the way the old
+vanilla-JS UI's stylesheet did) - this bundle keeps its own palette.
+`prefers-color-scheme` is the default (relevant standalone / in the dev
+preview / in any plain browser); `body.night-mode` is Anki's own signal and
+wins whenever present (it has higher CSS specificity than the bare `:root`
+rules), the same night-mode convention the previous UI used. Known gap: an
+Anki *light* theme running inside
 an OS set to dark falls back to the OS signal, since Anki has no equivalent
 "day-mode" class to detect that case explicitly - not solvable from CSS
 alone without a real signal from Python, and out of scope for this pass.
@@ -274,12 +309,11 @@ alone without a real signal from Python, and out of scope for this pass.
 Not ported from `app.js` (intentionally out of scope for this scaffold -
 restyle-later or integration-later, not forgotten):
 
-- Markdown rendering (`marked.js` in `app.js`; plain text here)
-- The word-level diff view on edit-proposal fields
+- The word-level diff view on edit-proposal fields (whole-field old/new
+  blocks render red/green instead)
 - Friendly tool-name labels + hiding internal tools (`search_notes` ->
   "Searched your cards", `ToolSearch` hidden) - every tool call renders
   generically here
-- Card preview iframes (rendered templates) on proposal cards
 - Everything outside the core thread: pins panel, agent/model picker,
   permission-mode chip, doctor panel, chat history panel, ledger strip,
   bulk accept/reject bar, learning nudge, suggested-questions ghost text,
@@ -290,41 +324,31 @@ restyle-later or integration-later, not forgotten):
   diff view) - only `create`/`edit` get field-level editing, matching the
   task's explicit Approve/Edit/Reject scope
 
-## What remains for integration (NOT done here, by design)
+## Integration status
 
-This UI does not wire itself into the add-on. Specifically, someone (not
-this pass) needs to:
+**Integrated 2026-07-11 — this is now the only UI.** The hand-rolled
+vanilla-JS `web/` UI and its browser dev harness were deleted;
+`chat_with_your_cards/dock.py`'s `_load_ui()` unconditionally loads this
+bundle from `web/next/` through `stdHtml()` (a `<div id="cwyc-root"></div>`
+body fragment plus `bundle.js`/`bundle.css` web exports — Anki never loads
+the standalone `web/next/index.html`), and the `ui` config flag was removed.
+The GUI smoke probe (`tests/gui_smoke/probe_addon/`) drives this UI's
+`data-testid`s against a real `AnkiWebView`, confirming the `window.pycmd`
+timing / ready handshake and the full send → stream → proposal round-trip.
 
-1. **Add a Python-side flag/setting to load `web/next/` instead of
-   `web/`.** `chat_with_your_cards/dock.py`'s `_load_ui()` currently does:
+Done since the scaffold: the "Reading lamp" restyle (see "Design notes"),
+and **markdown rendering** (`marked` → DOMPurify, `src/markdown.ts` /
+`TextPart.tsx` — sanitized because model output is untrusted, streaming-safe
+because it re-renders on every delta).
 
-   ```python
-   body = (_WEB_DIR / "index.html").read_text(encoding="utf-8")
-   self.web.stdHtml(body=body, css=[f"{base}/styles.css"], js=[f"{base}/vendor/marked.min.js", f"{base}/app.js"])
-   ```
+Still open (parity gaps with the old `app.js`, not blockers):
 
-   `_WEB_DIR` would need to become configurable, pointed at
-   `web/next/`. **Important:** `chat_with_your_cards/web/next/index.html` is
-   a *complete* HTML document (`<html><head><link>...<body>...<script>`),
-   not the body-only fragment `stdHtml(body=...)` expects - unlike
-   `web/index.html`. Either extract just the inner
-   `<div id="cwyc-root"></div>` and keep using `stdHtml(body=..., css=[...],
-   js=[...])`, or switch to loading `web/next/index.html` directly (e.g. via
-   `web.load_url`/`QUrl.fromLocalFile`), bypassing `stdHtml` for this path.
-   Both are one-line-ish changes; which one is right depends on whether
-   `stdHtml`'s other injected context (Anki's own CSS variables, `pycmd`
-   bootstrapping, etc.) is still wanted for this bundle. Not decided here.
-2. **Verify `window.pycmd` timing against a real `AnkiWebView`.** This UI's
-   ready handshake (`startReadyHandshake`) assumes the same 250ms/40-attempt
-   retry `app.js` already uses successfully in production; not re-verified
-   against a live Anki webview in this pass (only against a plain browser
-   and the scripted replayer).
-3. **Decide the CSS variable source** (see "Design notes" above): keep this
-   bundle's self-contained `--cwyc-*` variables, or rewire them to read
-   Anki's injected `--canvas`/`--fg`/`--border` the way `web/styles.css`
-   does, for tighter visual consistency with the rest of Anki's chrome.
-4. **Restyle pass.** Per the task, this pass is deliberately
-   default-assistant-ui-primitive-plain. A follow-up pass should bring
-   visual parity with `web/styles.css` (or move past it) and close the
-   "Not ported from app.js" gaps above, prioritized by what's actually
-   blocking a real cutover.
+- The CSS variable source stays this bundle's self-contained `--cwyc-*`
+  variables (see "Design notes"); rewiring them to Anki's injected
+  `--canvas`/`--fg`/`--border` for tighter chrome consistency is a possible
+  future pass.
+- The word-level diff view on edit-proposal fields, friendly tool-name
+  labels / hiding internal tools, and everything outside the core thread
+  (pins panel, history, model/effort + permission pickers, doctor, ledger
+  strip, bulk bar, learning nudge, suggested-questions ghost text, extra
+  keyboard shortcuts) — see the "Not ported from `app.js`" list above.

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from aqt import mw
@@ -19,19 +18,14 @@ DOCK_TITLE = "Chat With Your Cards"
 # (composer wrapping one word per line). This both clamps a too-small saved
 # value on load and hard-stops the user from dragging below it. 320 keeps the
 # composer control row on a single line for the common labels; longer ones
-# wrap gracefully (flex-wrap in styles.css) rather than overflow.
+# wrap gracefully (the assistant-ui bundle's composer styling) rather than
+# overflow.
 MIN_DOCK_WIDTH = 320
-
-_WEB_DIR = Path(__file__).resolve().parent / "web"
 
 
 class ChatDock(QDockWidget):
-    def __init__(self, dock_width: int, ui_mode: str = "classic") -> None:
+    def __init__(self, dock_width: int) -> None:
         super().__init__(DOCK_TITLE, mw)
-        # "classic" = the vanilla-JS web/ UI; "next" = the assistant-ui bundle
-        # in web/next/ (DESIGN.md section 9, 2026-07-10). Unknown values fall
-        # back to classic so a bad config never leaves the dock blank.
-        self._ui_mode = ui_mode if ui_mode in ("classic", "next") else "classic"
         self._configured_width = max(int(dock_width), MIN_DOCK_WIDTH)
         self._width_applied = False
         self.setMinimumWidth(MIN_DOCK_WIDTH)
@@ -55,27 +49,20 @@ class ChatDock(QDockWidget):
         self._load_ui()
 
     def _load_ui(self) -> None:
+        # The assistant-ui frontend is the only UI (DESIGN.md section 9,
+        # 2026-07-11). Anki loads the committed bundle from web/next/ via the
+        # standard stdHtml path: a <div id="cwyc-root"></div> body fragment
+        # plus the bundle registered as web exports. The bundle defers mounting
+        # until DOMContentLoaded (stdHtml injects js= into <head>, before this
+        # body fragment exists) and creates its own #cwyc-root if absent. The
+        # standalone web/next/index.html the build emits is a dev-only artifact
+        # and is never loaded here.
         addon_pkg = mw.addonManager.addonFromModule(__name__)
         base = f"/_addons/{addon_pkg}/web"
-        if self._ui_mode == "next":
-            # assistant-ui frontend: same stdHtml path as classic, loading the
-            # committed bundle from web/next/. The bundle defers mounting until
-            # DOMContentLoaded (stdHtml injects js= into <head>, before this
-            # body fragment exists) and creates its own #cwyc-root if absent.
-            # The standalone web/next/index.html is a dev-only artifact and is
-            # never loaded here (DESIGN.md section 9, 2026-07-10).
-            self.web.stdHtml(
-                body='<div id="cwyc-root"></div>',
-                css=[f"{base}/next/bundle.css"],
-                js=[f"{base}/next/bundle.js"],
-                context=self,
-            )
-            return
-        body = (_WEB_DIR / "index.html").read_text(encoding="utf-8")
         self.web.stdHtml(
-            body=body,
-            css=[f"{base}/styles.css"],
-            js=[f"{base}/vendor/marked.min.js", f"{base}/app.js"],
+            body='<div id="cwyc-root"></div>',
+            css=[f"{base}/next/bundle.css"],
+            js=[f"{base}/next/bundle.js"],
             context=self,
         )
 
@@ -95,8 +82,8 @@ class ChatDock(QDockWidget):
             mw.resizeDocks([self], [self._configured_width], Qt.Orientation.Horizontal)
 
 
-def create_dock(dock_width: int, ui_mode: str = "classic") -> ChatDock:
-    dock = ChatDock(dock_width, ui_mode)
+def create_dock(dock_width: int) -> ChatDock:
+    dock = ChatDock(dock_width)
     mw.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
     dock.hide()
     # The Tools-menu entry is built in __init__ (it needs the shortcut config

@@ -1,83 +1,185 @@
-/* Chat With Your Cards - assistant-ui scaffold styles.
+/* Chat With Your Cards - "Reading lamp" visual identity.
  *
- * Deliberately minimal and centralized (a single file, one variable block):
- * this is a scaffold to reach feature parity on, not the restyle pass. CSS
- * variables are self-contained (NOT read from Anki's injected --canvas/--fg/
- * --border custom properties the way the existing web/styles.css does),
- * because this bundle does not yet know how the eventual Python loader will
- * wire it up (see ui/README.md "what remains for integration").
+ * A quiet, dense, warm study companion: warm paper neutrals layered over
+ * each other, one saffron-amber accent used sparingly (send, focus rings,
+ * the thinking ember, the approve fill), conventional-but-desaturated
+ * green/red for diffs and semantics. Layout vernacular follows Claude
+ * Code/ChatGPT conventions per DESIGN.md section 9; the novelty budget is
+ * spent on the proposal flashcard (3D flip) and the thinking ember only.
  *
- * Light/dark, two authorities that never fight (2026-07-10):
- * - Inside Anki, the ONLY signal is Anki's own night-mode marker. Anki sets
- *   `night-mode` on document.documentElement (aqt/webview.py; the classic UI
- *   keys `:root.night-mode` the same way) plus legacy `nightMode`/`night-mode`
- *   body classes. prefers-color-scheme is deliberately ignored in Anki so an
- *   Anki-light theme on a dark OS stays light (the gap the earlier scaffold
- *   comment described is closed).
+ * Typography: IBM Plex Sans (body/UI) + IBM Plex Mono (tool names, ids,
+ * token counts), bundled locally below as latin-subset woff2 (OFL license,
+ * fetched from Google Fonts' static URLs) - zero network fetches at
+ * runtime; system stacks as fallback.
+ *
+ * Light/dark, two authorities that never fight (unchanged mechanism):
+ * - Inside Anki, the ONLY signal is Anki's own night-mode marker
+ *   (`night-mode` on document.documentElement plus legacy body classes).
+ *   prefers-color-scheme is deliberately ignored in Anki so an Anki-light
+ *   theme on a dark OS stays light.
  * - Standalone (npm run dev, plain-browser harnesses), dev-main.tsx adds
- *   `cwyc-standalone` to <html>, which scopes the prefers-color-scheme block
- *   below; the dev toolbar's night toggle still works via body.night-mode.
+ *   `cwyc-standalone` to <html>, which scopes the prefers-color-scheme
+ *   block; the dev toolbar's night toggle still works via body.night-mode.
+ *
+ * The --cwyc-* custom-property layer is self-contained on purpose: the warm
+ * paper palette IS the identity, so it does not inherit Anki's injected
+ * --canvas/--fg values directly - Anki's night-mode class is the respected
+ * integration point instead (see ui/README.md "what remains").
+ *
+ * Motion discipline: the streaming caret blink, the tool-chip 150ms expand,
+ * the proposal-card flip, and the ember breathing. Nothing else animates,
+ * and everything is disabled under prefers-reduced-motion.
  */
 
-:root {
-  --cwyc-bg: #ffffff;
-  --cwyc-surface: #f6f6f7;
-  --cwyc-surface-elevated: #ffffff;
-  --cwyc-fg: #1a1a1a;
-  --cwyc-fg-subtle: #6b6b6b;
-  --cwyc-border: #d8d8d8;
-  --cwyc-border-subtle: #e8e8e8;
-  --cwyc-accent: #4a7dff;
-  --cwyc-accent-soft: rgba(74, 125, 255, 0.12);
-  --cwyc-danger: #d1392b;
-  --cwyc-danger-soft: rgba(209, 57, 43, 0.1);
-  --cwyc-success: #1f8a4c;
-  --cwyc-success-soft: rgba(31, 138, 76, 0.12);
-  --cwyc-warning: #9a6b00;
-  --cwyc-warning-soft: rgba(154, 107, 0, 0.12);
-  --cwyc-radius: 12px;
-  --cwyc-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+/* ---------- fonts (bundled, latin subset, font-display swap) ---------- */
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: swap;
+  src: url("./assets/fonts/ibm-plex-sans-latin-var.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: italic;
+  font-weight: 100 700;
+  font-display: swap;
+  src: url("./assets/fonts/ibm-plex-sans-latin-var-italic.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./assets/fonts/ibm-plex-mono-latin-400.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./assets/fonts/ibm-plex-mono-latin-500.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* ---------- tokens: light (warm paper) ---------- */
+
+:root {
+  --cwyc-bg: #faf9f6;
+  --cwyc-surface: #f1eee7;
+  --cwyc-surface-raised: #fdfcfa;
+  --cwyc-fg: #2b2620;
+  --cwyc-fg-subtle: #6c655a;
+  --cwyc-fg-faint: #8d8578;
+  --cwyc-border: #dcd6c8;
+  --cwyc-border-subtle: #e9e5da;
+
+  /* The one accent: saffron amber. -ink is the AA-safe text/icon variant on
+     paper; the raw fill carries dark text (--cwyc-on-amber), never white. */
+  --cwyc-amber: #d99a2b;
+  --cwyc-amber-hover: #c98c1f;
+  --cwyc-amber-ink: #8a5f10;
+  --cwyc-amber-soft: rgba(217, 154, 43, 0.14);
+  --cwyc-amber-ring: rgba(217, 154, 43, 0.35);
+  --cwyc-on-amber: #241a08;
+
+  /* Semantic pair, desaturated to sit in the warm palette. */
+  --cwyc-green: #41724f;
+  --cwyc-green-soft: rgba(74, 124, 89, 0.13);
+  --cwyc-red: #b0483c;
+  --cwyc-red-soft: rgba(176, 72, 60, 0.11);
+  --cwyc-warn: #8a6a1c;
+  --cwyc-warn-soft: rgba(180, 140, 40, 0.13);
+
+  --cwyc-selection: rgba(217, 154, 43, 0.3);
+  --cwyc-card-shadow: 0 2px 8px rgba(64, 54, 32, 0.1);
+  --cwyc-radius: 10px;
+  --cwyc-font: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, sans-serif;
+  --cwyc-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
+    monospace;
+}
+
+/* ---------- tokens: dark (warm charcoal) ---------- */
+
+/* Standalone only: follow the OS. Inside Anki the night-mode class below is
+   the sole authority (see file header). Keep both blocks in sync. */
 @media (prefers-color-scheme: dark) {
   :root.cwyc-standalone {
-    --cwyc-bg: #1e1e1e;
-    --cwyc-surface: #262626;
-    --cwyc-surface-elevated: #2c2c2c;
-    --cwyc-fg: #f2f2f2;
-    --cwyc-fg-subtle: #a6a6a6;
-    --cwyc-border: #444444;
-    --cwyc-border-subtle: #383838;
-    --cwyc-accent: #6f95ff;
-    --cwyc-accent-soft: rgba(111, 149, 255, 0.18);
-    --cwyc-danger: #e37065;
-    --cwyc-danger-soft: rgba(227, 112, 101, 0.14);
-    --cwyc-success: #57c17f;
-    --cwyc-success-soft: rgba(87, 193, 127, 0.15);
-    --cwyc-warning: #d9a441;
-    --cwyc-warning-soft: rgba(217, 164, 65, 0.15);
+    --cwyc-bg: #1e1e1c;
+    --cwyc-surface: #272723;
+    --cwyc-surface-raised: #2c2b27;
+    --cwyc-fg: #eae6dd;
+    --cwyc-fg-subtle: #a69f91;
+    --cwyc-fg-faint: #7d766a;
+    --cwyc-border: #3b3931;
+    --cwyc-border-subtle: #33312b;
+
+    --cwyc-amber: #e6b45c;
+    --cwyc-amber-hover: #eec06f;
+    --cwyc-amber-ink: #e6b45c;
+    --cwyc-amber-soft: rgba(230, 180, 92, 0.16);
+    --cwyc-amber-ring: rgba(230, 180, 92, 0.4);
+    --cwyc-on-amber: #241a08;
+
+    --cwyc-green: #85b592;
+    --cwyc-green-soft: rgba(133, 181, 146, 0.14);
+    --cwyc-red: #d99287;
+    --cwyc-red-soft: rgba(217, 146, 135, 0.13);
+    --cwyc-warn: #cfa95e;
+    --cwyc-warn-soft: rgba(207, 169, 94, 0.14);
+
+    --cwyc-selection: rgba(230, 180, 92, 0.32);
+    --cwyc-card-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
   }
 }
 
 :root.night-mode,
 body.night-mode,
 body.nightMode {
-  --cwyc-bg: #1e1e1e;
-  --cwyc-surface: #262626;
-  --cwyc-surface-elevated: #2c2c2c;
-  --cwyc-fg: #f2f2f2;
-  --cwyc-fg-subtle: #a6a6a6;
-  --cwyc-border: #444444;
-  --cwyc-border-subtle: #383838;
-  --cwyc-accent: #6f95ff;
-  --cwyc-accent-soft: rgba(111, 149, 255, 0.18);
-  --cwyc-danger: #e37065;
-  --cwyc-danger-soft: rgba(227, 112, 101, 0.14);
-  --cwyc-success: #57c17f;
-  --cwyc-success-soft: rgba(87, 193, 127, 0.15);
-  --cwyc-warning: #d9a441;
-  --cwyc-warning-soft: rgba(217, 164, 65, 0.15);
+  --cwyc-bg: #1e1e1c;
+  --cwyc-surface: #272723;
+  --cwyc-surface-raised: #2c2b27;
+  --cwyc-fg: #eae6dd;
+  --cwyc-fg-subtle: #a69f91;
+  --cwyc-fg-faint: #7d766a;
+  --cwyc-border: #3b3931;
+  --cwyc-border-subtle: #33312b;
+
+  --cwyc-amber: #e6b45c;
+  --cwyc-amber-hover: #eec06f;
+  --cwyc-amber-ink: #e6b45c;
+  --cwyc-amber-soft: rgba(230, 180, 92, 0.16);
+  --cwyc-amber-ring: rgba(230, 180, 92, 0.4);
+  --cwyc-on-amber: #241a08;
+
+  --cwyc-green: #85b592;
+  --cwyc-green-soft: rgba(133, 181, 146, 0.14);
+  --cwyc-red: #d99287;
+  --cwyc-red-soft: rgba(217, 146, 135, 0.13);
+  --cwyc-warn: #cfa95e;
+  --cwyc-warn-soft: rgba(207, 169, 94, 0.14);
+
+  --cwyc-selection: rgba(230, 180, 92, 0.32);
+  --cwyc-card-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
 }
+
+/* ---------- base ---------- */
 
 .cwyc-app,
 .cwyc-app * {
@@ -90,6 +192,7 @@ body.nightMode {
   height: 100%;
   font-family: var(--cwyc-font);
   font-size: 13.5px;
+  line-height: 1.55;
   color: var(--cwyc-fg);
   background: var(--cwyc-bg);
 }
@@ -97,6 +200,45 @@ body.nightMode {
 .cwyc-app button {
   font-family: inherit;
   font-size: inherit;
+}
+
+.cwyc-app ::selection {
+  background: var(--cwyc-selection);
+}
+
+/* Amber focus ring on every interactive element; the composer textarea is
+   exempt (its frame carries the ring via :focus-within instead). */
+.cwyc-app :focus-visible {
+  outline: 2px solid var(--cwyc-amber);
+  outline-offset: 2px;
+}
+
+.cwyc-composer-input:focus-visible {
+  outline: none;
+}
+
+/* Thin, unobtrusive scrollbars. */
+.cwyc-app * {
+  scrollbar-width: thin;
+  scrollbar-color: var(--cwyc-border) transparent;
+}
+
+.cwyc-app *::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+.cwyc-app *::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.cwyc-app *::-webkit-scrollbar-thumb {
+  background: var(--cwyc-border);
+  border-radius: 4px;
+}
+
+.cwyc-app *::-webkit-scrollbar-thumb:hover {
+  background: var(--cwyc-fg-faint);
 }
 
 /* ---------- thread / viewport ---------- */
@@ -112,16 +254,16 @@ body.nightMode {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: 14px 14px 6px;
+  padding: 12px 12px 4px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
+/* Fresh chat: a single quiet centered line, not a splash. */
 .cwyc-empty {
-  align-self: center;
-  margin-top: 24px;
-  max-width: 85%;
+  margin: auto;
+  max-width: 80%;
   text-align: center;
   font-size: 12.5px;
   color: var(--cwyc-fg-subtle);
@@ -138,9 +280,10 @@ body.nightMode {
 .cwyc-msg-user {
   max-width: 85%;
   background: var(--cwyc-surface);
+  border: 1px solid var(--cwyc-border-subtle);
   border-radius: var(--cwyc-radius);
-  border-bottom-right-radius: 4px;
-  padding: 8px 12px;
+  border-bottom-right-radius: 3px;
+  padding: 6px 10px;
   white-space: pre-wrap;
   overflow-wrap: break-word;
 }
@@ -151,7 +294,6 @@ body.nightMode {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  line-height: 1.55;
 }
 
 .cwyc-text {
@@ -160,15 +302,143 @@ body.nightMode {
   overflow-wrap: break-word;
 }
 
+/* ---------- rendered markdown (assistant text) ---------- */
+/* Sanitized marked output (see markdown.ts). Reading-lamp palette: tight
+   paragraph spacing, warm-background mono code, amber links, compact lists.
+   No new fonts - only the bundled --cwyc-font / --cwyc-mono. */
+.cwyc-markdown {
+  /* rendered HTML, not preformatted text: override .cwyc-text's pre-wrap so
+     block elements lay out normally (whitespace inside them still collapses). */
+  white-space: normal;
+  line-height: 1.5;
+}
+
+.cwyc-markdown > *:first-child {
+  margin-top: 0;
+}
+
+.cwyc-markdown > *:last-child {
+  margin-bottom: 0;
+}
+
+.cwyc-markdown p {
+  margin: 0 0 0.5em;
+}
+
+.cwyc-markdown ul,
+.cwyc-markdown ol {
+  margin: 0.35em 0;
+  padding-left: 1.35em;
+}
+
+.cwyc-markdown li {
+  margin: 0.15em 0;
+}
+
+.cwyc-markdown li > p {
+  margin: 0;
+}
+
+.cwyc-markdown h1,
+.cwyc-markdown h2,
+.cwyc-markdown h3,
+.cwyc-markdown h4 {
+  margin: 0.8em 0 0.35em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.cwyc-markdown h1 {
+  font-size: 1.3em;
+}
+.cwyc-markdown h2 {
+  font-size: 1.18em;
+}
+.cwyc-markdown h3 {
+  font-size: 1.06em;
+}
+.cwyc-markdown h4 {
+  font-size: 1em;
+}
+
+.cwyc-markdown a {
+  color: var(--cwyc-amber-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.cwyc-markdown a:hover {
+  color: var(--cwyc-amber-hover);
+}
+
+.cwyc-markdown code {
+  font-family: var(--cwyc-mono);
+  font-size: 0.9em;
+  background: var(--cwyc-amber-soft);
+  color: var(--cwyc-fg);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+
+.cwyc-markdown pre {
+  margin: 0.5em 0;
+  padding: 8px 10px;
+  background: var(--cwyc-surface);
+  border: 1px solid var(--cwyc-border-subtle);
+  border-radius: var(--cwyc-radius);
+  overflow-x: auto;
+}
+
+.cwyc-markdown pre code {
+  font-size: 0.86em;
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  white-space: pre;
+}
+
+.cwyc-markdown blockquote {
+  margin: 0.5em 0;
+  padding: 0.1em 0 0.1em 0.9em;
+  border-left: 3px solid var(--cwyc-border);
+  color: var(--cwyc-fg-subtle);
+}
+
+.cwyc-markdown hr {
+  border: none;
+  border-top: 1px solid var(--cwyc-border);
+  margin: 0.8em 0;
+}
+
+.cwyc-markdown table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  display: block;
+  overflow-x: auto;
+}
+
+.cwyc-markdown th,
+.cwyc-markdown td {
+  border: 1px solid var(--cwyc-border-subtle);
+  padding: 4px 8px;
+  text-align: left;
+}
+
+.cwyc-markdown th {
+  background: var(--cwyc-surface);
+  font-weight: 600;
+}
+
+/* Streaming caret: a slim amber bar. */
 .cwyc-streaming::after {
   content: "";
   display: inline-block;
-  width: 7px;
+  width: 2px;
   height: 14px;
-  margin-left: 3px;
+  margin-left: 2px;
   vertical-align: text-bottom;
-  background: var(--cwyc-accent);
-  border-radius: 2px;
+  background: var(--cwyc-amber);
+  border-radius: 1px;
   animation: cwyc-blink 1s steps(2, start) infinite;
 }
 
@@ -178,17 +448,77 @@ body.nightMode {
   }
 }
 
-/* ---------- reasoning ---------- */
+/* ---------- the thinking ember ---------- */
 
+.cwyc-ember {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cwyc-amber);
+  animation: cwyc-ember-breathe 2.5s ease-in-out infinite;
+}
+
+@keyframes cwyc-ember-breathe {
+  0%,
+  100% {
+    opacity: 0.4;
+    box-shadow: 0 0 0 0 rgba(217, 154, 43, 0);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 6px 0 var(--cwyc-amber-ring);
+  }
+}
+
+/* Gone cold: static, muted. */
+.cwyc-ember-cold {
+  animation: none;
+  background: var(--cwyc-fg-faint);
+  opacity: 0.55;
+  box-shadow: none;
+}
+
+/* ---------- reasoning / thinking indicator ---------- */
+
+.cwyc-thinking {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 1px 0;
+  font-size: 12px;
+  color: var(--cwyc-fg-subtle);
+}
+
+.cwyc-thinking-phrase {
+  font-style: italic;
+}
+
+.cwyc-thinking-tokens,
+.cwyc-thinking-done-label {
+  font-family: var(--cwyc-mono);
+  font-style: normal;
+  font-size: 11px;
+  color: var(--cwyc-fg-subtle);
+}
+
+.cwyc-thinking-tokens {
+  opacity: 0.85;
+}
+
+/* Real-thinking-text variant (future-proofing; text is redacted upstream
+   today): the same quiet line, expandable. */
 .cwyc-reasoning {
-  border: 1px dashed var(--cwyc-border-subtle);
-  border-radius: 10px;
-  padding: 4px 10px;
+  border: none;
+  padding: 1px 0;
   font-size: 12px;
   color: var(--cwyc-fg-subtle);
 }
 
 .cwyc-reasoning > summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   cursor: pointer;
   font-style: italic;
   list-style: none;
@@ -198,36 +528,16 @@ body.nightMode {
   display: none;
 }
 
-.cwyc-reasoning-running > summary {
-  color: var(--cwyc-accent);
-}
-
 .cwyc-reasoning-text {
-  margin-top: 6px;
+  margin: 6px 0 2px 14px;
+  padding-left: 9px;
+  border-left: 1px solid var(--cwyc-border);
   white-space: pre-wrap;
   overflow-wrap: break-word;
 }
 
-/* The no-real-text indicator (rotating "Thinking…" phrase while running, a
-   static "Thought for ~N tokens" once done) is a plain line, not a
-   collapsible box - lighter weight than the boxed .cwyc-reasoning <details>
-   above, matching the classic UI's equivalent (web/styles.css). */
-.cwyc-reasoning-indicator {
-  border: none;
-  padding: 2px 0;
-  font-style: italic;
-}
-
-.cwyc-reasoning-indicator.cwyc-reasoning-running {
-  color: var(--cwyc-accent);
-}
-
-.cwyc-reasoning-tokens {
-  opacity: 0.75;
-}
-
-.cwyc-reasoning-done {
-  color: var(--cwyc-fg-subtle);
+.cwyc-reasoning[open] > .cwyc-reasoning-text {
+  animation: cwyc-expand 150ms ease;
 }
 
 /* ---------- tool call chips ---------- */
@@ -235,9 +545,9 @@ body.nightMode {
 .cwyc-tool-chip {
   max-width: 100%;
   border: 1px solid var(--cwyc-border-subtle);
-  background: var(--cwyc-surface-elevated);
-  border-radius: 10px;
-  font-size: 12px;
+  background: var(--cwyc-surface);
+  border-radius: 8px;
+  font-size: 11.5px;
   color: var(--cwyc-fg-subtle);
   overflow: hidden;
 }
@@ -246,7 +556,7 @@ body.nightMode {
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 5px 10px;
+  padding: 4px 9px;
   cursor: pointer;
   list-style: none;
 }
@@ -255,61 +565,71 @@ body.nightMode {
   display: none;
 }
 
+.cwyc-tool-caret {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  color: var(--cwyc-fg-faint);
+  transition: transform 150ms ease;
+}
+
+.cwyc-tool-chip > details[open] .cwyc-tool-caret {
+  transform: rotate(90deg);
+}
+
 .cwyc-tool-name {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-weight: 600;
+  font-family: var(--cwyc-mono);
+  font-weight: 500;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cwyc-tool-result {
   margin-left: auto;
-}
-
-.cwyc-tool-ok .cwyc-tool-result::before {
-  content: "\2713\00a0";
-  color: var(--cwyc-success);
-}
-
-.cwyc-tool-failed .cwyc-tool-result::before {
-  content: "\2717\00a0";
-  color: var(--cwyc-danger);
-}
-
-.cwyc-tool-spinner {
-  width: 10px;
-  height: 10px;
-  border: 2px solid var(--cwyc-border);
-  border-top-color: var(--cwyc-accent);
-  border-radius: 50%;
-  animation: cwyc-spin 0.8s linear infinite;
   flex: 0 0 auto;
 }
 
-@keyframes cwyc-spin {
-  to {
-    transform: rotate(360deg);
-  }
+.cwyc-tool-ok .cwyc-tool-result {
+  color: var(--cwyc-green);
+}
+
+.cwyc-tool-failed .cwyc-tool-result {
+  color: var(--cwyc-red);
 }
 
 .cwyc-tool-detail-block {
-  padding: 0 10px 8px;
+  padding: 2px 10px 7px;
   display: flex;
   flex-direction: column;
   gap: 3px;
 }
 
+.cwyc-tool-chip details[open] > .cwyc-tool-detail-block {
+  animation: cwyc-expand 150ms ease;
+}
+
+@keyframes cwyc-expand {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+}
+
 .cwyc-tool-detail-label {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
   text-transform: uppercase;
-  opacity: 0.8;
+  color: var(--cwyc-fg-subtle);
 }
 
 .cwyc-tool-detail-body {
   margin: 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--cwyc-mono);
   font-size: 11px;
-  line-height: 1.45;
+  line-height: 1.5;
   color: var(--cwyc-fg);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -321,8 +641,9 @@ body.nightMode {
 
 .cwyc-error-banner {
   font-size: 12px;
-  color: var(--cwyc-danger);
-  background: var(--cwyc-danger-soft);
+  color: var(--cwyc-red);
+  background: var(--cwyc-red-soft);
+  border: 1px solid var(--cwyc-red-soft);
   border-radius: 8px;
   padding: 6px 10px;
 }
@@ -331,29 +652,32 @@ body.nightMode {
 
 .cwyc-usage-chip {
   align-self: flex-start;
-  margin: 0 14px 6px;
-  font-size: 11px;
+  margin: 0 12px 8px;
+  font-family: var(--cwyc-mono);
+  font-size: 10.5px;
   color: var(--cwyc-fg-subtle);
   border: 1px solid var(--cwyc-border-subtle);
   border-radius: 999px;
   padding: 2px 9px;
-  opacity: 0.85;
 }
 
-/* ---------- proposal card ---------- */
+/* ---------- proposal card: a flashcard on the desk ---------- */
 
 .cwyc-proposal {
   border: 1px solid var(--cwyc-border);
-  border-radius: 12px;
-  background: var(--cwyc-surface-elevated);
-  padding: 10px 12px;
+  border-radius: var(--cwyc-radius);
+  background: var(--cwyc-surface-raised);
+  box-shadow: var(--cwyc-card-shadow);
+  padding: 10px 12px 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
+/* Resolved: the card is laid down flat. */
 .cwyc-proposal-resolved {
-  opacity: 0.88;
+  box-shadow: none;
+  opacity: 0.85;
 }
 
 .cwyc-proposal-head {
@@ -363,21 +687,22 @@ body.nightMode {
   min-width: 0;
 }
 
+/* The one amber hairline. */
 .cwyc-proposal-kind {
   flex: 0 0 auto;
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
   text-transform: uppercase;
-  color: var(--cwyc-accent);
-  border: 1px solid var(--cwyc-accent);
-  border-radius: 5px;
+  color: var(--cwyc-amber-ink);
+  border: 1px solid var(--cwyc-amber);
+  border-radius: 4px;
   padding: 1px 6px;
 }
 
 .cwyc-proposal-where {
   flex: 1 1 auto;
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--cwyc-fg-subtle);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -386,28 +711,28 @@ body.nightMode {
 
 .cwyc-proposal-status {
   flex: 0 0 auto;
-  font-size: 11px;
+  font-size: 10.5px;
   border-radius: 999px;
-  padding: 2px 9px;
+  padding: 1px 8px;
   background: var(--cwyc-surface);
   color: var(--cwyc-fg-subtle);
 }
 
 .cwyc-status-accepted,
 .cwyc-status-auto-accepted {
-  background: var(--cwyc-success-soft);
-  color: var(--cwyc-success);
+  background: var(--cwyc-green-soft);
+  color: var(--cwyc-green);
 }
 
 .cwyc-status-rejected {
-  background: var(--cwyc-danger-soft);
-  color: var(--cwyc-danger);
+  background: var(--cwyc-red-soft);
+  color: var(--cwyc-red);
 }
 
 .cwyc-status-undone,
 .cwyc-status-superseded {
-  background: var(--cwyc-warning-soft);
-  color: var(--cwyc-warning);
+  background: var(--cwyc-warn-soft);
+  color: var(--cwyc-warn);
 }
 
 .cwyc-proposal-rationale {
@@ -418,19 +743,90 @@ body.nightMode {
 
 .cwyc-proposal-warning {
   font-size: 11.5px;
-  color: var(--cwyc-warning);
-  background: var(--cwyc-warning-soft);
-  border-radius: 7px;
+  color: var(--cwyc-warn);
+  background: var(--cwyc-warn-soft);
+  border-radius: 6px;
   padding: 4px 8px;
 }
 
 .cwyc-proposal-error {
   font-size: 11.5px;
-  color: var(--cwyc-danger);
-  background: var(--cwyc-danger-soft);
-  border-radius: 7px;
+  color: var(--cwyc-red);
+  background: var(--cwyc-red-soft);
+  border-radius: 6px;
   padding: 4px 8px;
 }
+
+/* -- rendered-card preview: the physical flip -- */
+
+.cwyc-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cwyc-preview-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.cwyc-preview-tab {
+  border: 1px solid var(--cwyc-border-subtle);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--cwyc-fg-subtle);
+  font-size: 10.5px;
+  font-weight: 500;
+  padding: 1px 9px;
+  cursor: pointer;
+}
+
+.cwyc-preview-tab.cwyc-active {
+  border-color: var(--cwyc-amber);
+  color: var(--cwyc-amber-ink);
+  background: var(--cwyc-amber-soft);
+}
+
+.cwyc-flip {
+  perspective: 900px;
+  height: 150px;
+}
+
+.cwyc-flip-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transition: transform 350ms ease;
+}
+
+.cwyc-flip-inner.cwyc-flipped {
+  transform: rotateY(180deg);
+}
+
+.cwyc-flip-face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  border: 1px solid var(--cwyc-border);
+  border-radius: 7px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.cwyc-flip-face-back {
+  transform: rotateY(180deg);
+}
+
+.cwyc-flip-face > iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+/* -- fields -- */
 
 .cwyc-proposal-fields {
   display: flex;
@@ -445,45 +841,58 @@ body.nightMode {
 }
 
 .cwyc-field-name {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.5px;
   text-transform: uppercase;
   color: var(--cwyc-fg-subtle);
 }
 
 .cwyc-field-value {
   border: 1px solid var(--cwyc-border-subtle);
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--cwyc-bg);
   font-size: 12.5px;
   line-height: 1.5;
-  padding: 6px 8px;
+  padding: 5px 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 
+/* Field diffs stay conventional green/red (desaturated). */
 .cwyc-field-old {
-  color: var(--cwyc-fg-subtle);
+  color: var(--cwyc-red);
+  background: var(--cwyc-red-soft);
   text-decoration: line-through;
-  opacity: 0.75;
-  margin-bottom: 3px;
+  border-radius: 4px;
+  padding: 2px 5px;
+}
+
+.cwyc-field-old + .cwyc-field-new {
+  color: var(--cwyc-green);
+  background: var(--cwyc-green-soft);
+  border-radius: 4px;
+  padding: 2px 5px;
 }
 
 .cwyc-field-input {
   width: 100%;
   border: 1px solid var(--cwyc-border);
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--cwyc-bg);
   color: var(--cwyc-fg);
   font-family: var(--cwyc-font);
   font-size: 12.5px;
-  line-height: 1.45;
-  padding: 6px 8px;
+  line-height: 1.5;
+  padding: 5px 7px;
   outline: none;
   resize: vertical;
 }
 
 .cwyc-field-input:focus {
-  border-color: var(--cwyc-accent);
+  border-color: var(--cwyc-amber);
+  box-shadow: 0 0 0 2px var(--cwyc-amber-soft);
 }
 
 .cwyc-proposal-count {
@@ -491,42 +900,56 @@ body.nightMode {
   font-weight: 600;
 }
 
+/* -- actions: decisive, physical-feeling buttons -- */
+
 .cwyc-proposal-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
+  margin-top: 2px;
 }
 
 .cwyc-proposal-actions button {
   border: 1px solid var(--cwyc-border);
-  border-radius: 8px;
+  border-radius: 7px;
   background: transparent;
   color: var(--cwyc-fg);
   font-size: 12px;
-  padding: 5px 14px;
+  font-weight: 500;
+  padding: 4px 13px;
   cursor: pointer;
 }
 
 .cwyc-btn-suggest {
   margin-right: auto;
-  color: var(--cwyc-fg-subtle);
+  border-color: transparent !important;
+  color: var(--cwyc-fg-subtle) !important;
+  padding-left: 6px !important;
+  padding-right: 6px !important;
+}
+
+.cwyc-btn-suggest:hover {
+  color: var(--cwyc-fg) !important;
 }
 
 .cwyc-btn-reject:hover {
-  border-color: var(--cwyc-danger);
-  color: var(--cwyc-danger);
+  border-color: var(--cwyc-red);
+  color: var(--cwyc-red);
+  background: var(--cwyc-red-soft);
 }
 
-.cwyc-primary,
-.cwyc-btn-accept {
-  background: var(--cwyc-accent) !important;
-  border-color: var(--cwyc-accent) !important;
-  color: #fff !important;
+/* THE strongest accent use in the whole UI: the approve fill. */
+.cwyc-proposal-actions .cwyc-btn-accept {
+  background: var(--cwyc-amber);
+  border-color: var(--cwyc-amber);
+  color: var(--cwyc-on-amber);
+  font-weight: 600;
 }
 
-.cwyc-primary:hover,
-.cwyc-btn-accept:hover {
-  filter: brightness(1.08);
+.cwyc-proposal-actions .cwyc-btn-accept:hover {
+  background: var(--cwyc-amber-hover);
+  border-color: var(--cwyc-amber-hover);
 }
 
 /* ---------- composer ---------- */
@@ -535,16 +958,17 @@ body.nightMode {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   margin: 6px 12px 12px;
   border: 1px solid var(--cwyc-border);
-  border-radius: 16px;
-  background: var(--cwyc-surface-elevated);
-  padding: 9px 11px 8px;
+  border-radius: 14px;
+  background: var(--cwyc-surface-raised);
+  padding: 8px 10px 7px;
 }
 
 .cwyc-composer:focus-within {
-  border-color: var(--cwyc-accent);
+  border-color: var(--cwyc-amber);
+  box-shadow: 0 0 0 2px var(--cwyc-amber-soft);
 }
 
 .cwyc-composer-input {
@@ -556,8 +980,12 @@ body.nightMode {
   color: var(--cwyc-fg);
   font-family: var(--cwyc-font);
   font-size: 13.5px;
-  line-height: 1.4;
+  line-height: 1.45;
   max-height: 160px;
+}
+
+.cwyc-composer-input::placeholder {
+  color: var(--cwyc-fg-subtle);
 }
 
 .cwyc-composer-bar {
@@ -567,12 +995,12 @@ body.nightMode {
 
 .cwyc-send {
   flex: 0 0 auto;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border: none;
   border-radius: 50%;
-  background: var(--cwyc-accent);
-  color: #fff;
+  background: var(--cwyc-amber);
+  color: var(--cwyc-on-amber);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -580,14 +1008,31 @@ body.nightMode {
 }
 
 .cwyc-send:hover {
-  filter: brightness(1.1);
+  background: var(--cwyc-amber-hover);
 }
 
 .cwyc-send:disabled {
-  opacity: 0.5;
+  background: var(--cwyc-surface);
+  color: var(--cwyc-fg-faint);
   cursor: default;
 }
 
 .cwyc-send-stop {
   background: var(--cwyc-fg-subtle);
+  color: var(--cwyc-bg);
+}
+
+.cwyc-send-stop:hover {
+  background: var(--cwyc-fg);
+}
+
+/* ---------- reduced motion: everything still, instantly ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .cwyc-app *,
+  .cwyc-app *::before,
+  .cwyc-app *::after {
+    animation: none !important;
+    transition: none !important;
+  }
 }

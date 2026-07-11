@@ -97,7 +97,8 @@ EventCallback = Callable[[ChatEvent], None]
 
 
 def event_to_dict(event: ChatEvent) -> dict[str, Any]:
-    """Serialize an event to the JSON payload consumed by web/app.js."""
+    """Serialize an event to the JSON payload the web/next UI consumes
+    (mirrored by ui/src/events.ts)."""
     if isinstance(event, TextDelta):
         return {"type": "text_delta", "text": event.text}
     if isinstance(event, ThinkingDelta):

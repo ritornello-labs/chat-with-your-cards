@@ -1,6 +1,7 @@
 /**
  * JS <-> Python bridge, mirroring chat_with_your_cards/bridge.py exactly so
- * the Python side needs zero changes to load this UI instead of web/app.js:
+ * the Python side needed zero changes to load this UI in place of the old
+ * hand-rolled vanilla-JS UI:
  *
  *   JS -> Python: pycmd("cwyc:" + JSON.stringify({type, ...}))
  *   Python -> JS: window.chatUI.dispatch(payload)   (bridge.push, evaluated)
@@ -8,7 +9,8 @@
  *
  * This module only implements the *transport*: postCommand() always talks to
  * window.pycmd, and installChatUI() always installs the window.chatUI global
- * app.js also installs. It has no opinion about where events end up (that is
+ * the Python side (dock.py / __init__.py) drives. It has no opinion about
+ * where events end up (that is
  * store.ts) and no opinion about who answers window.pycmd:
  *
  *   - Real mode (Anki): window.pycmd is provided by AnkiWebView. Nothing else

@@ -34,7 +34,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "restore_last_chat": False,
     "open_in_claude_target": "terminal",
     "terminal_app": "",
-    "ui": "classic",
     "anthropic_api_key": "",
     "anthropic_api_key_op": "",
     "openai_api_key": "",
@@ -146,10 +145,7 @@ def _setup() -> None:
     )
     state.stats_cache.start()
 
-    state.dock = dock_mod.create_dock(
-        dock_width=int(config["dock_width"]),
-        ui_mode=str(config.get("ui", "classic")),
-    )
+    state.dock = dock_mod.create_dock(dock_width=int(config["dock_width"]))
 
     from .transcripts import TranscriptStore
 

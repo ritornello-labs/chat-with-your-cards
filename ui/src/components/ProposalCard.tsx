@@ -34,6 +34,110 @@ const STATUS_LABELS: Record<string, string> = {
  * editing or the word-diff/preview-iframe/tag-editor treatment app.js gives
  * them. That parity gap is intentional; see ui/README.md.
  */
+interface PreviewSide {
+  question?: string | null;
+  answer?: string | null;
+  css?: string | null;
+}
+
+interface PreviewsPayload {
+  before?: PreviewSide | null;
+  after?: PreviewSide | null;
+}
+
+/** Narrow ProposalPayload's `previews: unknown` (proposals.py's shape). */
+function asPreviews(value: unknown): PreviewsPayload | null {
+  if (!value || typeof value !== "object") return null;
+  const previews = value as PreviewsPayload;
+  return previews.before || previews.after ? previews : null;
+}
+
+/**
+ * Same srcdoc app.js's previewSrcdoc() builds: the real card CSS in a
+ * sandboxed (script-less) iframe, with Anki's night-mode classes mirrored
+ * onto the preview body so night-aware templates render correctly.
+ */
+function previewSrcdoc(side: string, css: string | null | undefined): string {
+  const night =
+    document.documentElement.classList.contains("night-mode") ||
+    document.body.classList.contains("nightMode") ||
+    document.body.classList.contains("night-mode");
+  return (
+    "<!doctype html><html><head><meta charset='utf-8'><style>" +
+    (css || "") +
+    "\nhtml{overflow:auto;}body{margin:10px;}" +
+    '</style></head><body class="card' +
+    (night ? " nightMode night_mode" : "") +
+    '">' +
+    side +
+    "</body></html>"
+  );
+}
+
+/**
+ * The rendered-card preview as a physical flashcard: two faces (Front/Back
+ * for creations, Before/After answer sides for edits - same face semantics
+ * as app.js's buildPreviewTabs) on a 3D CSS flip (perspective + rotateY,
+ * 350ms; instant under prefers-reduced-motion via styles.css's global
+ * reduced-motion guard). Edits default to the interesting side (After);
+ * creations start front-up like a real card on the desk.
+ */
+function PreviewFlip({ previews }: { previews: PreviewsPayload }) {
+  const faces = useMemo(() => {
+    if (previews.before && previews.after) {
+      return {
+        labels: ["Before", "After"] as const,
+        front: previewSrcdoc(previews.before.answer ?? "", previews.before.css),
+        back: previewSrcdoc(previews.after.answer ?? "", previews.after.css),
+        defaultFlipped: true,
+      };
+    }
+    if (previews.after) {
+      return {
+        labels: ["Front", "Back"] as const,
+        front: previewSrcdoc(previews.after.question ?? "", previews.after.css),
+        back: previewSrcdoc(previews.after.answer ?? "", previews.after.css),
+        defaultFlipped: false,
+      };
+    }
+    return null;
+  }, [previews]);
+  const [flippedOverride, setFlippedOverride] = useState<boolean | null>(null);
+  if (!faces) return null;
+  const flipped = flippedOverride ?? faces.defaultFlipped;
+
+  return (
+    <div className="cwyc-preview">
+      <div className="cwyc-preview-tabs">
+        <button
+          type="button"
+          className={"cwyc-preview-tab" + (flipped ? "" : " cwyc-active")}
+          onClick={() => setFlippedOverride(false)}
+        >
+          {faces.labels[0]}
+        </button>
+        <button
+          type="button"
+          className={"cwyc-preview-tab" + (flipped ? " cwyc-active" : "")}
+          onClick={() => setFlippedOverride(true)}
+        >
+          {faces.labels[1]}
+        </button>
+      </div>
+      <div className="cwyc-flip">
+        <div className={"cwyc-flip-inner" + (flipped ? " cwyc-flipped" : "")}>
+          <div className="cwyc-flip-face">
+            <iframe sandbox="" title={faces.labels[0]} srcDoc={faces.front} />
+          </div>
+          <div className="cwyc-flip-face cwyc-flip-face-back">
+            <iframe sandbox="" title={faces.labels[1]} srcDoc={faces.back} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface ProposalCardProps {
   /**
    * Deliberately NOT typed via assistant-ui's DataMessagePartProps<T>: that
@@ -70,8 +174,13 @@ export function ProposalCard({ data, store }: ProposalCardProps) {
         ? data.deck
         : data.title;
 
+  const previews = asPreviews(data.previews);
+
   return (
-    <div className={"cwyc-proposal" + (pending ? "" : " cwyc-proposal-resolved")}>
+    <div
+      className={"cwyc-proposal" + (pending ? "" : " cwyc-proposal-resolved")}
+      data-testid="proposal-card"
+    >
       <div className="cwyc-proposal-head">
         <span className="cwyc-proposal-kind">{kindLabel}</span>
         <span className="cwyc-proposal-where">{where}</span>
@@ -84,6 +193,8 @@ export function ProposalCard({ data, store }: ProposalCardProps) {
           {warning}
         </div>
       ))}
+
+      {previews ? <PreviewFlip previews={previews} /> : null}
 
       {editableFields ? (
         <div className="cwyc-proposal-fields">
@@ -122,17 +233,24 @@ export function ProposalCard({ data, store }: ProposalCardProps) {
               type="button"
               className="cwyc-btn-suggest"
               onClick={() => setEditing((e) => !e)}
+              data-testid="proposal-edit"
             >
               {editing ? "Preview" : "Edit"}
             </button>
           ) : null}
-          <button type="button" className="cwyc-btn-reject" onClick={() => store.rejectProposal(data.id)}>
+          <button
+            type="button"
+            className="cwyc-btn-reject"
+            onClick={() => store.rejectProposal(data.id)}
+            data-testid="proposal-reject"
+          >
             Reject
           </button>
           <button
             type="button"
             className="cwyc-btn-accept cwyc-primary"
             onClick={() => store.acceptProposal(data.id, values, data.kind)}
+            data-testid="proposal-approve"
           >
             {data.kind === "delete" ? "Delete" : data.kind === "deck_op" ? "Apply" : "Accept"}
           </button>

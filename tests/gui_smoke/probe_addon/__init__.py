@@ -59,6 +59,63 @@ def _eval_js(web: Any, script: str, timeout_ms: int, description: str) -> Any:
     return holder["value"]
 
 
+def _send_message(web: Any, message: str) -> None:
+    """Type `message` into the assistant-ui composer and click Send, driving
+    the same real send path a user does (composer-input -> send data-testid ->
+    pycmd bridge). ComposerPrimitive.Input is a React-controlled textarea, so
+    the DOM `.value` must be set through the native value setter plus a bubbling
+    `input` event (React tracks the native setter, not direct `.value` writes) -
+    otherwise onChange never fires and the Send button stays disabled (the
+    workaround documented in ui/README.md). After the input event React
+    re-renders asynchronously, so we poll for the Send button to enable before
+    clicking rather than assuming a synchronous DOM."""
+    typed = _eval_js(
+        web,
+        "(function() {"
+        "  var input = document.querySelector('[data-testid=composer-input]');"
+        "  if (!input) return 'no-input';"
+        "  var proto = window.HTMLTextAreaElement.prototype;"
+        "  var setter = Object.getOwnPropertyDescriptor(proto, 'value');"
+        "  if (setter && setter.set) { setter.set.call(input, " + json.dumps(message) + "); }"
+        "  else { input.value = " + json.dumps(message) + "; }"
+        "  input.dispatchEvent(new Event('input', {bubbles: true}));"
+        "  return 'typed';"
+        "})();",
+        DOM_TIMEOUT_MS,
+        "type into composer",
+    )
+    if typed != "typed":
+        raise AssertionError(f"could not type into composer-input: {typed!r}")
+
+    def _send_enabled() -> bool:
+        return bool(
+            _eval_js(
+                web,
+                "(function() {"
+                "  var b = document.querySelector('[data-testid=send]');"
+                "  return !!b && !b.disabled;"
+                "})();",
+                DOM_TIMEOUT_MS,
+                "send button enabled",
+            )
+        )
+
+    _wait_until(_send_enabled, DOM_TIMEOUT_MS, "send button to enable after typing")
+    clicked = _eval_js(
+        web,
+        "(function() {"
+        "  var b = document.querySelector('[data-testid=send]');"
+        "  if (!b || b.disabled) return false;"
+        "  b.click();"
+        "  return true;"
+        "})();",
+        DOM_TIMEOUT_MS,
+        "send click",
+    )
+    if clicked is not True:
+        raise AssertionError(f"send click did not fire: {clicked!r}")
+
+
 def _shortcut_keys() -> list[str]:
     assert mw is not None
     return [
@@ -891,12 +948,15 @@ def _run_checks() -> dict[str, Any]:
         except AssertionError:
             diagnostics = _eval_js(
                 dock.web,
-                "(function() { return {"
+                "(function() {"
+                "  var root = document.getElementById('cwyc-root');"
+                "  return {"
                 "  pycmd: typeof pycmd,"
                 "  chatUI: typeof window.chatUI,"
-                "  marked: typeof window.marked,"
                 "  stylesheets: document.styleSheets.length,"
-                "  root: document.getElementById('cwyc-root') ? true : false,"
+                "  root: root ? true : false,"
+                "  root_children: root ? root.childElementCount : -1,"
+                "  composer: document.querySelector('[data-testid=composer-input]') ? true : false,"
                 "  title: document.title"
                 "}; })();",
                 DOM_TIMEOUT_MS,
@@ -914,17 +974,7 @@ def _run_checks() -> dict[str, Any]:
 
     def _scripted_chat() -> dict[str, Any]:
         controller = state.controller
-        script = (
-            "(function() {"
-            f"  var input = document.getElementById('cwyc-input');"
-            f"  input.value = {json.dumps(DEMO_MESSAGE)};"
-            "  document.getElementById('cwyc-send').click();"
-            "  return true;"
-            "})();"
-        )
-        result = _eval_js(dock.web, script, DOM_TIMEOUT_MS, "demo send click")
-        if result is not True:
-            raise AssertionError(f"send click eval returned {result!r}")
+        _send_message(dock.web, DEMO_MESSAGE)
 
         def _stream_finished() -> bool:
             return any(type(e).__name__ == "Done" for e in controller.event_log)
@@ -947,46 +997,56 @@ def _run_checks() -> dict[str, Any]:
         QTest.qWait(300)  # allow the final render to settle
         dom = _eval_js(
             dock.web,
-            "(function() { return {"
-            "  user: document.querySelectorAll('.msg-user').length,"
-            "  assistant: document.querySelectorAll('.msg-assistant').length,"
-            "  chips: document.querySelectorAll('.tool-chip').length,"
-            "  chips_ok: document.querySelectorAll('.cwyc-tool-ok').length,"
+            "(function() {"
+            "  var compInput = document.querySelector('[data-testid=composer-input]');"
+            "  var thinkSummary = document.querySelector('[data-testid=thinking-summary]');"
+            "  return {"
+            "  user: document.querySelectorAll('[data-testid=user-message]').length,"
+            "  assistant: document.querySelectorAll('[data-testid=assistant-message]').length,"
+            "  chips: document.querySelectorAll('[data-testid=tool-chip]').length,"
+            "  chips_ok: document.querySelectorAll('[data-testid=tool-chip].cwyc-tool-ok').length,"
             "  streaming: document.querySelectorAll('.cwyc-streaming').length,"
-            "  input_style_height: document.getElementById('cwyc-input').style.height,"
-            "  input_rect: document.getElementById('cwyc-input')"
-            "    .getBoundingClientRect().height,"
-            "  input_scroll: document.getElementById('cwyc-input').scrollHeight,"
-            "  input_box_sizing: getComputedStyle("
-            "    document.getElementById('cwyc-input')).boxSizing,"
-            "  composer_rect: document.getElementById('cwyc-composer')"
-            "    .getBoundingClientRect().height,"
-            "  thinking_rows: document.querySelectorAll('.cwyc-thinking-indicator').length,"
-            "  thinking_text: (function() {"
-            "    var el = document.querySelector('.cwyc-thinking-indicator');"
-            "    return el ? el.textContent : '';"
-            "  })()"
+            "  markdown: document.querySelectorAll('[data-testid=assistant-message] .cwyc-markdown').length,"
+            "  composer_input_rect: compInput ? compInput.getBoundingClientRect().height : -1,"
+            "  send: document.querySelector('[data-testid=send]') ? true : false,"
+            "  stop: document.querySelector('[data-testid=stop]') ? true : false,"
+            "  thinking_indicator: document.querySelectorAll('[data-testid=thinking-indicator]').length,"
+            "  thinking_summary: document.querySelectorAll('[data-testid=thinking-summary]').length,"
+            "  thinking_text: thinkSummary ? thinkSummary.textContent : ''"
             "}; })();",
             DOM_TIMEOUT_MS,
             "DOM state query",
         )
-        if dom.get("composer_rect", 0) > 120:
-            raise AssertionError(f"composer blew up: {dom}")
+        # The single-row composer input must not blow up (the classic content-box
+        # regression this guard originally caught): a one-line textarea is ~20-40px.
+        if dom.get("composer_input_rect", 0) > 120:
+            raise AssertionError(f"composer input blew up: {dom}")
         if dom["user"] < 1 or dom["assistant"] < 1 or dom["chips"] < 1:
             raise AssertionError(f"transcript DOM incomplete: {dom}")
         if dom["chips_ok"] != dom["chips"]:
             raise AssertionError(f"tool chip did not finish: {dom}")
         if dom["streaming"] != 0:
             raise AssertionError(f"assistant message still marked streaming: {dom}")
+        # Assistant text renders through the markdown pipeline (TextPart.tsx ->
+        # markdown.ts: marked + DOMPurify). At least one .cwyc-markdown container
+        # must exist inside an assistant message, proving markdown rendering is live.
+        if dom["markdown"] < 1:
+            raise AssertionError(f"assistant text did not render as markdown: {dom}")
+        # The stream is done: the composer must be back to Send (not the streaming
+        # Stop button).
+        if not dom["send"] or dom["stop"]:
+            raise AssertionError(f"composer not back to Send after done: {dom}")
         # TOOL_SCRIPT (backends/fixtures.py, DEMO_MESSAGE selects it via the
         # "tool" keyword) opens with a thinking phase (empty-text,
         # growing-estimated_tokens ThinkingDelta beats - see scripted.py). By
-        # the time the stream is done and this settles, the indicator must
-        # have collapsed into the static "Thought for ~N tokens" one-liner
-        # (app.js's finalizeThinkingIndicator) - never left mid-rotation and
-        # never silently dropped (the pre-2026-07-11 bug this task fixed).
-        if dom["thinking_rows"] < 1:
-            raise AssertionError(f"thinking indicator missing after done: {dom}")
+        # the time the stream is done and this settles, ReasoningBlock.tsx must
+        # have collapsed the live thinking-indicator into the static
+        # thinking-summary "Thought for ~N tokens" one-liner - never left
+        # mid-rotation (no live indicator lingering) and never silently dropped.
+        if dom["thinking_summary"] < 1:
+            raise AssertionError(f"thinking summary missing after done: {dom}")
+        if dom["thinking_indicator"] != 0:
+            raise AssertionError(f"live thinking indicator lingered after done: {dom}")
         if "Thought for ~" not in dom["thinking_text"] or "tokens" not in dom["thinking_text"]:
             raise AssertionError(f"thinking indicator did not collapse to a token count: {dom}")
         return dom
@@ -1005,23 +1065,16 @@ def _run_checks() -> dict[str, Any]:
     check("second toggle returns focus", _focus_toggle_returns)
 
     def _proposal_round_trip() -> dict[str, Any]:
-        """Scripted propose -> proposal card -> accept -> real note + ledger."""
-        script = (
-            "(function() {"
-            "  var input = document.getElementById('cwyc-input');"
-            f"  input.value = {json.dumps(PROPOSE_MESSAGE)};"
-            "  document.getElementById('cwyc-send').click();"
-            "  return true;"
-            "})();"
-        )
-        if _eval_js(dock.web, script, DOM_TIMEOUT_MS, "propose send click") is not True:
-            raise AssertionError("propose send click failed")
+        """Scripted propose -> proposal card (data-testid=proposal-card) ->
+        approve (data-testid=proposal-approve) -> real note in the collection,
+        and the card flips to the resolved/Accepted state in the DOM."""
+        _send_message(dock.web, PROPOSE_MESSAGE)
 
         def _card_rendered() -> bool:
             return bool(
                 _eval_js(
                     dock.web,
-                    "document.querySelectorAll('.cwyc-proposal').length",
+                    "document.querySelectorAll('[data-testid=proposal-card]').length",
                     DOM_TIMEOUT_MS,
                     "proposal card count",
                 )
@@ -1031,30 +1084,34 @@ def _run_checks() -> dict[str, Any]:
         card = _eval_js(
             dock.web,
             "(function() {"
-            "  var p = document.querySelector('.cwyc-proposal');"
+            "  var p = document.querySelector('[data-testid=proposal-card]');"
             "  return {"
             "    kind: p.querySelector('.cwyc-proposal-kind').textContent,"
             "    status: p.querySelector('.cwyc-proposal-status').textContent,"
             "    fields: p.querySelectorAll('.cwyc-field').length,"
-            "    accept: p.querySelectorAll('.cwyc-btn-accept').length,"
+            "    approve: p.querySelectorAll('[data-testid=proposal-approve]').length,"
+            "    edit: p.querySelectorAll('[data-testid=proposal-edit]').length,"
+            "    reject: p.querySelectorAll('[data-testid=proposal-reject]').length,"
             "    preview_tabs: p.querySelectorAll('.cwyc-preview-tab').length"
             "  };"
             "})();",
             DOM_TIMEOUT_MS,
             "proposal card state",
         )
-        if card["kind"] != "New note" or card["fields"] < 2 or card["accept"] != 1:
+        if card["kind"] != "New note" or card["fields"] < 2 or card["approve"] != 1:
             raise AssertionError(f"proposal card malformed: {card}")
+        if card["edit"] != 1 or card["reject"] != 1:
+            raise AssertionError(f"proposal card missing edit/reject controls: {card}")
         if card["preview_tabs"] != 2:
             raise AssertionError(f"expected Front/Back preview tabs: {card}")
 
         before_ids = set(mw.col.find_notes('tag:"ai-created"'))
         _eval_js(
             dock.web,
-            "(function() { document.querySelector('.cwyc-btn-accept').click(); "
+            "(function() { document.querySelector('[data-testid=proposal-approve]').click(); "
             "return true; })();",
             DOM_TIMEOUT_MS,
-            "proposal accept click",
+            "proposal approve click",
         )
 
         def _note_created() -> bool:
@@ -1067,24 +1124,54 @@ def _run_checks() -> dict[str, Any]:
         if session_tag not in note.tags:
             raise AssertionError(f"session tag missing: {note.tags}")
 
-        QTest.qWait(300)
+        # The card must flip to the resolved/Accepted state: status text
+        # "Accepted", the resolved CSS class applied, and the pending action
+        # buttons (approve/reject/edit) gone. This is strictly stronger than the
+        # classic check's "status == Accepted && ledger visible": the classic
+        # UI's ledger strip / revert button were a classic-only surface (the new
+        # UI has no ledger strip - a documented, intentional parity gap), so we
+        # assert the accept BUTTONS disappeared and the resolved class landed
+        # instead, which proves the same accepted transition without depending
+        # on a UI element that no longer exists.
+        def _resolved_ok() -> bool:
+            r = _eval_js(
+                dock.web,
+                "(function() {"
+                "  var p = document.querySelector('[data-testid=proposal-card]');"
+                "  if (!p) return null;"
+                "  return {"
+                "    status: p.querySelector('.cwyc-proposal-status').textContent,"
+                "    approve: p.querySelectorAll('[data-testid=proposal-approve]').length,"
+                "    reject: p.querySelectorAll('[data-testid=proposal-reject]').length,"
+                "    resolved_class: p.classList.contains('cwyc-proposal-resolved')"
+                "  };"
+                "})();",
+                DOM_TIMEOUT_MS,
+                "resolved proposal state",
+            )
+            return bool(r and r.get("status") == "Accepted" and r.get("resolved_class"))
+
+        _wait_until(_resolved_ok, DOM_TIMEOUT_MS, "proposal card to resolve to Accepted")
         resolved = _eval_js(
             dock.web,
             "(function() {"
-            "  var p = document.querySelector('.cwyc-proposal');"
-            "  var ledger = document.getElementById('cwyc-ledger');"
+            "  var p = document.querySelector('[data-testid=proposal-card]');"
             "  return {"
             "    status: p.querySelector('.cwyc-proposal-status').textContent,"
-            "    revert: p.querySelectorAll('.cwyc-btn-revert').length,"
-            "    ledger_visible: !ledger.hidden,"
-            "    ledger_text: document.getElementById('cwyc-ledger-label').textContent"
+            "    approve: p.querySelectorAll('[data-testid=proposal-approve]').length,"
+            "    reject: p.querySelectorAll('[data-testid=proposal-reject]').length,"
+            "    resolved_class: p.classList.contains('cwyc-proposal-resolved')"
             "  };"
             "})();",
             DOM_TIMEOUT_MS,
             "resolved proposal state",
         )
-        if resolved["status"] != "Accepted" or not resolved["ledger_visible"]:
+        if resolved["status"] != "Accepted" or not resolved["resolved_class"]:
             raise AssertionError(f"proposal did not resolve in the UI: {resolved}")
+        if resolved["approve"] != 0 or resolved["reject"] != 0:
+            raise AssertionError(
+                f"accept/reject controls still present after resolve: {resolved}"
+            )
         return {"note_id": note_id, "card": card, "resolved": resolved}
 
     proposal_info = check("proposal accept round-trip", _proposal_round_trip)
@@ -1093,66 +1180,12 @@ def _run_checks() -> dict[str, Any]:
     # against the real disposable collection, not the unit tests' fakes.
     _collection_flow_checks(state, check)
 
-    def _next_ui_flip() -> dict[str, Any]:
-        """The assistant-ui bundle (config ui="next") loads via the same
-        stdHtml path (DESIGN.md section 9, 2026-07-10): the head-injected
-        bundle defers to DOMContentLoaded, mounts into #cwyc-root, and
-        installs window.chatUI. Runs LAST because it reloads the webview;
-        the finally-block restores the classic UI either way."""
-        assert dock is not None
-        last: dict[str, Any] = {}
-        prior = dock._ui_mode
-        dock._ui_mode = "next"
-        try:
-            dock._load_ui()
-
-            def _mounted() -> bool:
-                info = _eval_js(
-                    dock.web,
-                    "(function() {"
-                    "  var r = document.getElementById('cwyc-root');"
-                    "  return {root: !!r,"
-                    "          children: r ? r.childElementCount : -1,"
-                    "          chatui: typeof window.chatUI};"
-                    "})();",
-                    DOM_TIMEOUT_MS,
-                    "next ui mount state",
-                )
-                last.update(info or {})
-                return bool(
-                    info
-                    and info.get("root")
-                    and int(info.get("children", 0)) > 0
-                    and info.get("chatui") == "object"
-                )
-
-            _wait_until(_mounted, DOM_TIMEOUT_MS, "assistant-ui bundle mount")
-            return dict(last)
-        finally:
-            dock._ui_mode = prior
-            dock._load_ui()
-            _wait_until(
-                lambda: bool(
-                    _eval_js(
-                        dock.web,
-                        "!!document.getElementById('cwyc-input');",
-                        DOM_TIMEOUT_MS,
-                        "classic ui restored",
-                    )
-                ),
-                DOM_TIMEOUT_MS,
-                "classic UI restore after next-ui flip",
-            )
-
-    next_ui_info = check("next ui loads behind flag", _next_ui_flip)
-
     return {
         "ok": True,
         "checks": checks,
         "stream": stream_info,
         "dom": dom_info,
         "proposal": proposal_info,
-        "next_ui": next_ui_info,
         "anki_version": getattr(mw, "appVersion", None),
     }
 
