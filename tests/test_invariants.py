@@ -381,14 +381,39 @@ class AssertAllTests(unittest.TestCase):
             Expectation(note_delta=0, card_delta=1, changes_schema=True),
         )
 
-    def test_unsynced_touched_row_rolls_back(self) -> None:
+    def test_unsynced_written_row_rolls_back(self) -> None:
+        # A CREATE writes both the note and its new cards, so both are declared
+        # written; a written card left with a real usn is a genuine violation.
         col = self._created_col()
-        before = snapshot(col, Scope(deck_ids=(1,), note_ids=(2,), card_ids=(20,)))
+        before = snapshot(
+            col,
+            Scope(
+                deck_ids=(1,),
+                note_ids=(2,),
+                card_ids=(20,),
+                written_note_ids=(2,),
+                written_card_ids=(20,),
+            ),
+        )
         col.add_note(2, usn=-1)
         col.add_card(20, nid=2, did=1, odid=0, usn=3)  # not marked pending
         with self.assertRaises(InvariantViolation) as ctx:
             assert_all(col, before, Expectation(note_delta=1, card_delta=1))
         self.assertIn("touched_rows_pending_sync", str(ctx.exception))
+
+    def test_inspected_but_unwritten_rows_skip_pending_sync(self) -> None:
+        # Regression (dogfood 2026-07-11): an EDIT inspects the note's existing
+        # cards for corruption but writes only the note - update_note never
+        # re-stamps those cards, so their synced usn must NOT be a violation.
+        col = self._created_col()
+        col.add_note(2, usn=5)  # already synced
+        col.add_card(20, nid=2, did=1, odid=0, usn=5)  # already synced
+        before = snapshot(
+            col,
+            Scope(note_ids=(2,), card_ids=(20,), written_note_ids=(2,)),
+        )
+        col.set_note(2, usn=-1)  # the edit stamps the note only
+        assert_all(col, before, Expectation())  # must not raise
 
 
 if __name__ == "__main__":

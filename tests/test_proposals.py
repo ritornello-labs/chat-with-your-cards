@@ -627,6 +627,30 @@ class EditFlowTests(unittest.TestCase):
         self.assertIn("extra", note.tags)
         self.assertNotIn("analysis", note.tags)
 
+    def test_edit_accepts_when_existing_cards_already_synced(self) -> None:
+        # Regression (dogfood 2026-07-11): a field edit stamps the NOTE
+        # usn=-1 via update_note but never re-stamps the note's existing
+        # cards. A card already synced to the server (usn != -1) must not trip
+        # touched_rows_pending_sync — the note carries the change, so it still
+        # reaches other devices. Before the written-rows fix this raised
+        # "touched card(s) not pending sync" and blocked every real edit.
+        manager, col, pushed = make_manager()
+        nid = self._created_note(manager, col, pushed)
+        for card in col.get_note(nid).cards():
+            card.usn = 5  # already synced to a server USN, not -1
+        result = manager.submit_edit(
+            {"note_id": nid, "field_changes": {"Front": "Reworded?"}}
+        )
+        manager.accept(
+            {
+                "id": result["proposal_id"],
+                "fields": {"Front": "Reworded?"},
+                "accepted_fields": ["Front"],
+            }
+        )
+        self.assertFalse(pushes_of(pushed, "proposal_error"))
+        self.assertEqual(col.get_note(nid)["Front"], "Reworded?")
+
     def test_staleness_guard_blocks_and_refreshes(self) -> None:
         manager, col, pushed = make_manager()
         nid = self._created_note(manager, col, pushed)

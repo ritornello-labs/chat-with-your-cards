@@ -391,7 +391,25 @@ class ChatController:
         if isinstance(event, Done) and self._transcripts is not None:
             self._transcripts.set_backend_session(self.backend_session_id)
             self._transcripts.flush()
-        self._push(event_to_dict(event))
+        payload = event_to_dict(event)
+        if payload.get("type") == "usage" and not self._is_byok():
+            # On subscription (harness login) the CLI reports total_cost_usd as
+            # a notional API-EQUIVALENT figure - the user pays $0 per message, so
+            # showing a dollar amount is misleading. Drop it; tokens still show
+            # (they reflect real context/usage size). dogfood 2026-07-11.
+            payload["cost_usd"] = None
+        self._push(payload)
+
+    def _is_byok(self) -> bool:
+        """True when the user configured their own API key (bring-your-own-key),
+        so per-message dollar cost is real. Empty = subscription auth."""
+        keys = (
+            "anthropic_api_key",
+            "anthropic_api_key_op",
+            "openai_api_key",
+            "openai_api_key_op",
+        )
+        return any(str(self._config.get(k, "")).strip() for k in keys)
 
     def _handle_proposal_request(self, event: ProposalRequest) -> None:
         if self._proposals is None:

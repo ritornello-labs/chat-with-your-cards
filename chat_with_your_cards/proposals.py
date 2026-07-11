@@ -1506,7 +1506,11 @@ class ProposalManager:
                 return _WriteResult(
                     note_ids,
                     invariants.Expectation(),
-                    invariants.Scope(note_ids=tuple(int(n) for n in note_ids)),
+                    invariants.Scope(
+                        note_ids=tuple(int(n) for n in note_ids),
+                        # tags.rename stamps every matching note
+                        written_note_ids=tuple(int(n) for n in note_ids),
+                    ),
                 )
 
             note_ids = self._apply_write(
@@ -1554,6 +1558,8 @@ class ProposalManager:
                     invariants.Scope(
                         deck_ids=(int(deck_id),),
                         card_ids=tuple(int(c) for c in card_ids),
+                        # set_deck stamps the cards, not their notes
+                        written_card_ids=tuple(int(c) for c in card_ids),
                     ),
                 )
 
@@ -1571,7 +1577,11 @@ class ProposalManager:
                 return _WriteResult(
                     (applied, skipped),
                     invariants.Expectation(),
-                    invariants.Scope(note_ids=tuple(int(n) for n in applied)),
+                    invariants.Scope(
+                    note_ids=tuple(int(n) for n in applied),
+                    # update_note stamps each edited note
+                    written_note_ids=tuple(int(n) for n in applied),
+                ),
                     undo_steps=len(applied),
                 )
 
@@ -1811,7 +1821,11 @@ class ProposalManager:
             return _WriteResult(
                 (applied, skipped),
                 invariants.Expectation(),
-                invariants.Scope(note_ids=tuple(int(n) for n in applied)),
+                invariants.Scope(
+                    note_ids=tuple(int(n) for n in applied),
+                    # update_note stamps each edited note
+                    written_note_ids=tuple(int(n) for n in applied),
+                ),
                 undo_steps=len(applied),
             )
 
@@ -1993,7 +2007,12 @@ class ProposalManager:
             return _WriteResult(
                 None,
                 invariants.Expectation(),
-                invariants.Scope(note_ids=(note_id,), card_ids=cards),
+                invariants.Scope(
+                    note_ids=(note_id,),
+                    card_ids=cards,
+                    # update_note stamps the note, not its existing cards
+                    written_note_ids=(note_id,),
+                ),
             )
 
         self._apply_write(execute=execute, precheck=precheck, lenient_cards=True)
@@ -2515,6 +2534,9 @@ class ProposalManager:
                     deck_ids=(int(deck_id),),
                     note_ids=(int(note.id),),
                     card_ids=card_ids,
+                    # add_note stamps the note AND its freshly created cards
+                    written_note_ids=(int(note.id),),
+                    written_card_ids=card_ids,
                 ),
             )
 

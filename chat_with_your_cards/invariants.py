@@ -22,11 +22,24 @@ from typing import Any, Iterable
 @dataclass(frozen=True)
 class Scope:
     """The rows a mutation touched. Empty means nothing of that kind changed;
-    a scoped check over an empty list is a no-op."""
+    a scoped check over an empty list is a no-op.
+
+    Two distinct concerns, deliberately separated: ``deck_ids``/``note_ids``/
+    ``card_ids`` are the rows to *inspect* for corruption (filtered-home,
+    dangling-odid) — inspecting an unchanged row is harmless. ``written_*`` are
+    the rows the op actually *stamped* ``usn = -1``, and only those are checked
+    for pending-sync. A field edit (``update_note``) stamps the note but NOT its
+    existing cards; a card move (``set_deck``) stamps the cards but NOT their
+    notes — so conflating the two made pending-sync fire on rows the op never
+    wrote. Default-empty ``written_*`` means an undeclared path skips the check
+    (safe: it only guards against raw-SQL writes, which we never do) rather than
+    false-positiving on already-synced rows."""
 
     deck_ids: tuple[int, ...] = ()
     note_ids: tuple[int, ...] = ()
     card_ids: tuple[int, ...] = ()
+    written_note_ids: tuple[int, ...] = ()
+    written_card_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -207,6 +220,8 @@ def assert_all(
     if violation is not None:
         raise InvariantViolation(f"no_dangling_odid: {violation}")
 
-    violation = touched_rows_pending_sync(col, scope.note_ids, scope.card_ids)
+    violation = touched_rows_pending_sync(
+        col, scope.written_note_ids, scope.written_card_ids
+    )
     if violation is not None:
         raise InvariantViolation(f"touched_rows_pending_sync: {violation}")
