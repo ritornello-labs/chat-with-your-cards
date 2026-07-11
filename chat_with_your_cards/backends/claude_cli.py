@@ -28,6 +28,7 @@ from .base import (
     ErrorEvent,
     EventCallback,
     TextDelta,
+    ThinkingDelta,
     ToolCallFinished,
     ToolCallStarted,
     UsageUpdate,
@@ -159,6 +160,16 @@ def parse_stream_line(obj: dict[str, Any], state: ParserState) -> list[ChatEvent
                 state.streamed_chars += len(text)
                 state.turn_text_chars += len(sep) + len(text)
                 return [TextDelta(sep + text)]
+            if delta.get("type") == "thinking_delta" and delta.get("thinking"):
+                # Extended-thinking text. Deliberately bypasses
+                # _text_separator/turn_text_chars/streamed_chars: those track
+                # only the visible answer, and a thinking block's content-block
+                # index must never perturb the paragraph-break bookkeeping for
+                # text that streams before/after it. signature_delta (the
+                # cryptographic continuation token for the thinking block) and
+                # content_block_start/stop are intentionally not handled here -
+                # nothing else about the CLI's stream carries visible text.
+                return [ThinkingDelta(str(delta["thinking"]))]
         return []
 
     if kind == "assistant":
@@ -168,6 +179,11 @@ def parse_stream_line(obj: dict[str, Any], state: ParserState) -> list[ChatEvent
         for block in message.get("content") or []:
             if not isinstance(block, dict):
                 continue
+            # "thinking" blocks are intentionally skipped here: their content
+            # was already streamed (or, if the account/CLI redacts thinking
+            # text, was empty throughout) via content_block_delta above, so
+            # re-surfacing the full block would double-emit or leak it into
+            # the visible answer.
             if block.get("type") == "text" and block.get("text"):
                 unstreamed_text.append(block["text"])
             elif (
@@ -252,6 +268,9 @@ def build_cli_args(
     model: str = "",
     effort: str = "",
     web_access: bool = True,
+    mcp_inherit_user: bool = False,
+    mcp_disabled: list[str] | None = None,
+    log: Callable[[str], None] | None = None,
 ) -> list[str]:
     # The agent lives in collection-land: its own shell/write tools stay off.
     # Skill is allowed so the user's system-wide skills and our card-authoring
@@ -263,6 +282,23 @@ def build_cli_args(
         allowed += ["WebSearch", "WebFetch"]
     else:
         disallowed += ["WebSearch", "WebFetch"]
+    # MCP widening, config-file tier (DESIGN.md section 5, shipped 2026-07-10):
+    # mcp_disabled names (ours or an inherited user server) become
+    # mcp__<name> disallowedTools entries. Guard: "anki" can never be
+    # disabled this way - that would silently break every propose_*/
+    # collection tool - so it is dropped and logged instead of honored.
+    for name in mcp_disabled or []:
+        name = str(name).strip()
+        if not name:
+            continue
+        if name == "anki":
+            if log is not None:
+                log(
+                    "mcp_disabled config: ignoring 'anki' - disabling the "
+                    "built-in server would silently break proposals"
+                )
+            continue
+        disallowed.append(f"mcp__{name}")
     args = [
         cli_path,
         "-p",
@@ -276,7 +312,17 @@ def build_cli_args(
         system_prompt,
         "--mcp-config",
         mcp_config_path,
-        "--strict-mcp-config",
+    ]
+    if not mcp_inherit_user:
+        # Restrictive by default: the agent sees only our --mcp-config
+        # servers, never the user's own Claude Code MCP servers. Dropped
+        # only when the user opts in to mcp_inherit_user - card/field
+        # content is untrusted input, so silently wiring every server the
+        # user configured for coding into a context that also ingests
+        # untrusted card text is an exfiltration surface (DESIGN.md section
+        # 5's "MCP scoping" decision).
+        args.append("--strict-mcp-config")
+    args += [
         "--allowedTools",
         ",".join(allowed),
         "--disallowedTools",
@@ -291,16 +337,41 @@ def build_cli_args(
     return args
 
 
-def write_mcp_config(directory: Path, url: str, token: str) -> Path:
-    config = {
-        "mcpServers": {
-            "anki": {
-                "type": "http",
-                "url": url,
-                "headers": {"Authorization": f"Bearer {token}"},
-            }
-        }
+def write_mcp_config(
+    directory: Path,
+    url: str,
+    token: str,
+    *,
+    extra_servers: dict[str, Any] | None = None,
+    log: Callable[[str], None] | None = None,
+) -> Path:
+    """Write the CLI's --mcp-config JSON: our built-in ``anki`` server plus
+    any dock-specific servers from the ``mcp_servers`` config key (DESIGN.md
+    section 5's config-file MCP-widening tier, shipped 2026-07-10), merged
+    verbatim in Claude-Code server-spec format.
+
+    Guard: a user-supplied server named ``anki`` is dropped (logged, not
+    silently merged) rather than allowed to shadow the built-in one - every
+    propose_*/collection tool depends on that exact server. The built-in
+    entry is also assigned last, after the merge, as defense in depth.
+    """
+    servers: dict[str, Any] = {}
+    for name, spec in (extra_servers or {}).items():
+        name = str(name)
+        if name == "anki":
+            if log is not None:
+                log(
+                    "mcp_servers config: ignoring a user-supplied server "
+                    "named 'anki' - it cannot override the built-in one"
+                )
+            continue
+        servers[name] = spec
+    servers["anki"] = {
+        "type": "http",
+        "url": url,
+        "headers": {"Authorization": f"Bearer {token}"},
     }
+    config = {"mcpServers": servers}
     path = directory / "mcp-config.json"
     path.write_text(json.dumps(config), encoding="utf-8")
     return path
@@ -322,6 +393,9 @@ class ClaudeCliSession:
         web_access: bool = True,
         extra_env: dict[str, str] | None = None,
         resume_session_id: str | None = None,
+        mcp_servers: dict[str, Any] | None = None,
+        mcp_inherit_user: bool = False,
+        mcp_disabled: list[str] | None = None,
     ) -> None:
         self._cli_path = cli_path
         self._system_prompt = system_prompt
@@ -329,12 +403,20 @@ class ClaudeCliSession:
         self._effort = effort
         self._web_access = web_access
         self._extra_env = extra_env or {}
+        self._mcp_inherit_user = mcp_inherit_user
+        self._mcp_disabled = list(mcp_disabled or [])
         self._workdir = workdir
         self._workdir.mkdir(parents=True, exist_ok=True)
         self._tmpdir = Path(tempfile.mkdtemp(prefix="cwyc-claude-"))
-        self._mcp_config = write_mcp_config(self._tmpdir, mcp_url, mcp_token)
         self._run_on_ui = run_on_ui
         self._log = log or BackendLog(None)
+        self._mcp_config = write_mcp_config(
+            self._tmpdir,
+            mcp_url,
+            mcp_token,
+            extra_servers=mcp_servers,
+            log=self._log.write,
+        )
         self._stderr_tail: deque[str] = deque(maxlen=40)
         self._process: subprocess.Popen[str] | None = None
         self._reader: threading.Thread | None = None
@@ -350,6 +432,15 @@ class ClaudeCliSession:
         # the user switched mid-chat and the next send must respawn.
         self._spawned_model = model
         self._spawned_effort = effort
+        # Control-request/control-response correlation for interrupt(). Wire
+        # framing ported (field names, not implementation) from the MIT-
+        # licensed Claude Agent SDK's Query._send_control_request /
+        # _read_messages: https://raw.githubusercontent.com/anthropics/
+        # claude-agent-sdk-python/main/src/claude_agent_sdk/_internal/query.py
+        # (MIT License, Copyright (c) 2025 Anthropic, PBC).
+        self._control_request_counter = 0
+        self._pending_control: dict[str, threading.Event] = {}
+        self._pending_control_result: dict[str, dict[str, Any]] = {}
 
     @property
     def streaming(self) -> bool:
@@ -398,6 +489,9 @@ class ClaudeCliSession:
             model=self._model,
             effort=self._effort,
             web_access=self._web_access,
+            mcp_inherit_user=self._mcp_inherit_user,
+            mcp_disabled=self._mcp_disabled,
+            log=self._log.write,
         )
         env = os.environ.copy()
         env.setdefault("PYTHONUNBUFFERED", "1")
@@ -475,6 +569,13 @@ class ClaudeCliSession:
             except json.JSONDecodeError:
                 self._log.write(f"unparseable stdout line: {line[:200]}")
                 continue
+            if obj.get("type") == "control_response":
+                # Reply to a control_request we sent (currently only
+                # interrupt()). Routed here, never dispatched as a ChatEvent -
+                # the CLI still emits the aborted turn's own Done/ErrorEvent
+                # through the normal path below.
+                self._handle_control_response(obj)
+                continue
             if obj.get("type") == "result":
                 self._log.write(
                     "result subtype={} is_error={} text={}".format(
@@ -497,6 +598,17 @@ class ClaudeCliSession:
             )
             self._dispatch(Done(), generation)
 
+    def _handle_control_response(self, obj: dict[str, Any]) -> None:
+        response = obj.get("response") or {}
+        request_id = response.get("request_id")
+        if not isinstance(request_id, str):
+            return
+        event = self._pending_control.get(request_id)
+        if event is None:
+            return
+        self._pending_control_result[request_id] = response
+        event.set()
+
     def _dispatch(self, event: ChatEvent, generation: int) -> None:
         def deliver() -> None:
             if generation != self._generation:
@@ -512,11 +624,74 @@ class ClaudeCliSession:
         if self._on_event is not None:
             self._on_event(event)
 
+    def interrupt(self, timeout: float = 5.0) -> bool:
+        """Ask the running turn to stop via a control_request, keeping the
+        process (and conversation) alive - unlike cancel(), which tears the
+        process down and forces the next send() to respawn with --resume.
+
+        Wire framing (the control_request/control_response envelope and the
+        "req_<counter>_<8 hex chars>" request_id format) is ported - field
+        names only, not the implementation - from the MIT-licensed Claude
+        Agent SDK's Query._send_control_request/interrupt:
+        https://raw.githubusercontent.com/anthropics/claude-agent-sdk-python/
+        main/src/claude_agent_sdk/_internal/query.py
+        (MIT License, Copyright (c) 2025 Anthropic, PBC).
+
+        On any failure - no live process, a write error, a timeout waiting
+        for control_response (e.g. an older CLI that does not understand
+        control requests), or an explicit error subtype - falls back to
+        cancel() so the stop button can never wedge. Returns True only when
+        the CLI acknowledged the interrupt; the caller should then stay
+        silent and let the CLI's own aborted-turn Done/ErrorEvent close out
+        the UI turn through the normal read loop (no generation bump, no
+        double-emit).
+        """
+        process = self._process
+        if process is None or process.poll() is not None or process.stdin is None:
+            self.cancel()
+            return False
+        self._control_request_counter += 1
+        request_id = f"req_{self._control_request_counter}_{os.urandom(4).hex()}"
+        event = threading.Event()
+        self._pending_control[request_id] = event
+        control_request = {
+            "type": "control_request",
+            "request_id": request_id,
+            "request": {"subtype": "interrupt"},
+        }
+        try:
+            process.stdin.write(json.dumps(control_request) + "\n")
+            process.stdin.flush()
+        except (BrokenPipeError, OSError) as exc:
+            self._pending_control.pop(request_id, None)
+            self._log.write(f"interrupt write failed: {exc}")
+            self.cancel()
+            return False
+        acknowledged = event.wait(timeout)
+        response = self._pending_control_result.pop(request_id, None)
+        self._pending_control.pop(request_id, None)
+        if not acknowledged:
+            self._log.write(f"interrupt timed out after {timeout}s pid={process.pid}")
+            self.cancel()
+            return False
+        if response is not None and response.get("subtype") == "error":
+            self._log.write(f"interrupt rejected: {response.get('error')}")
+            self.cancel()
+            return False
+        self._log.write(f"interrupt acknowledged pid={process.pid}")
+        return True
+
     def cancel(self) -> None:
         self._generation += 1
         self._streaming = False
-        if self._process is not None and self._process.poll() is None:
-            self._process.terminate()
+        process = self._process
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
         self._process = None  # next send respawns with --resume
 
     def close(self) -> None:
@@ -537,6 +712,9 @@ class ClaudeCliBackend:
         model_effort: Callable[[], tuple[str, str]] | None = None,
         web_access: bool = True,
         extra_env: dict[str, str] | None = None,
+        mcp_servers: dict[str, Any] | None = None,
+        mcp_inherit_user: bool = False,
+        mcp_disabled: list[str] | None = None,
     ) -> None:
         self._cli_path = cli_path
         self._system_prompt_builder = system_prompt_builder
@@ -548,6 +726,9 @@ class ClaudeCliBackend:
         self._model_effort = model_effort or (lambda: ("", ""))
         self._web_access = web_access
         self._extra_env = extra_env or {}
+        self._mcp_servers = mcp_servers or {}
+        self._mcp_inherit_user = mcp_inherit_user
+        self._mcp_disabled = mcp_disabled or []
 
     def start_session(self, context: dict[str, Any]) -> ClaudeCliSession:
         model, effort = self._model_effort()
@@ -564,4 +745,7 @@ class ClaudeCliBackend:
             web_access=self._web_access,
             extra_env=self._extra_env,
             resume_session_id=(context or {}).get("resume_session_id"),
+            mcp_servers=self._mcp_servers,
+            mcp_inherit_user=self._mcp_inherit_user,
+            mcp_disabled=self._mcp_disabled,
         )

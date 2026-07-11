@@ -18,6 +18,11 @@ import "./dev/dev-harness.css";
 
 installDevReplayer();
 
+// Standalone marker: scopes styles.css's prefers-color-scheme block so the
+// OS dark theme only applies OUTSIDE Anki (inside Anki, night-mode classes
+// are the sole authority - see styles.css header).
+document.documentElement.classList.add("cwyc-standalone");
+
 const store = new ChatStore();
 
 const handle = installChatUI({

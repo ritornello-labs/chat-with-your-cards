@@ -34,6 +34,10 @@
   terminal handoff opens. Empty uses Terminal.app via AppleScript; any other
   app name (e.g. `"iTerm"`, `"Warp"`, `"Ghostty"`) is launched with a temporary
   `.command` script via `open -a`.
+- `ui` (default `"classic"`): which chat interface the dock loads. `"classic"`
+  is the current vanilla-JS UI; `"next"` is the new assistant-ui frontend
+  (in active development — richer streaming, collapsible reasoning, tool
+  cards). Set back to `"classic"` and restart Anki if anything misbehaves.
 - `source_fields` (default `{}` = look everywhere): optional per-note-type
   restriction of which fields may contain card sources, e.g.
   `{"0 Cloze": ["Extra"]}`. By default any URI in any field is treated as a
@@ -42,6 +46,39 @@
 - `web_access` (default `true`): allow the assistant to use web search and
   page fetching (useful for sourcing card content). Set `false` to keep the
   agent strictly inside your collection.
+- `mcp_servers` / `mcp_inherit_user` / `mcp_disabled` — **advanced, opt-in MCP
+  widening (config-file only for now; no settings-panel UI yet).** By default
+  the assistant only ever sees this add-on's own `anki` tools: the CLI is
+  launched with `--strict-mcp-config` and a config containing just that one
+  server, so nothing else you have configured for coding agents is reachable
+  from inside a chat about your cards.
+
+  **Why this matters before you widen it:** card and field content is
+  untrusted input the same way a web page or email attachment is. The
+  assistant reads whatever is in your notes to do its job, so a booby-trapped
+  shared deck could embed text aimed at *it*, not you - instructions telling
+  it to run a tool, fetch a URL, or exfiltrate data. With the default strict
+  scope, the worst it can reach is your own collection. Turn on `mcp_servers`
+  or `mcp_inherit_user` and that same prompt-injected text could try to steer
+  the assistant into your filesystem, GitHub, browser, or whatever else those
+  servers expose. Only widen this if you understand and accept that, and
+  ideally only with decks/sources you trust.
+
+  - `mcp_servers` (default `{}`): a dict of extra MCP servers to hand the
+    assistant, keyed by name, each value a server spec in the same JSON shape
+    Claude Code's own `--mcp-config` / `.mcp.json` uses (e.g.
+    `{"type": "http", "url": "...", "headers": {...}}` or a stdio
+    `{"command": "...", "args": [...]}`). Merged verbatim alongside the
+    built-in `anki` server. A server named `anki` is ignored (logged to the
+    backend log) rather than allowed to shadow the built-in one.
+  - `mcp_inherit_user` (default `false`): when `true`, drops
+    `--strict-mcp-config` so your own Claude Code MCP servers (from your
+    global/project Claude Code config) load too, in addition to `anki` and
+    anything in `mcp_servers`.
+  - `mcp_disabled` (default `[]`): a list of server names (ours or an
+    inherited one) to turn back off, e.g. `["github"]` after enabling
+    `mcp_inherit_user`. `"anki"` cannot be disabled this way - it is ignored
+    (logged) because that would silently break every card proposal.
 - `anthropic_api_key` / `openai_api_key` (default empty): paste an API key to
   bill usage to it instead of the agent's own login. Stored in Anki's
   plain-text add-on config - the less-secure option.

@@ -10,6 +10,7 @@ from chat_with_your_cards.backends import (  # noqa: E402
     Done,
     ErrorEvent,
     TextDelta,
+    ThinkingDelta,
     ToolCallFinished,
     ToolCallStarted,
 )
@@ -44,6 +45,140 @@ class ParseStreamLineTest(unittest.TestCase):
             self.state,
         )
         self.assertEqual([TextDelta("Hello ")], events)
+
+    def test_thinking_delta_with_text_emits_thinking_delta(self) -> None:
+        # Anthropic's Messages API streams extended-thinking text via
+        # delta.thinking (NOT delta.text like text_delta) - confirmed both
+        # from the API docs and from a live Claude Code CLI capture below.
+        events = parse_stream_line(
+            {
+                "type": "stream_event",
+                "event": {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {
+                        "type": "thinking_delta",
+                        "thinking": "Let me work through this step by step...",
+                    },
+                },
+            },
+            self.state,
+        )
+        self.assertEqual(
+            [ThinkingDelta("Let me work through this step by step...")], events
+        )
+        # Unlike text_delta, a thinking_delta must not touch the paragraph-
+        # break bookkeeping used for the visible answer.
+        self.assertEqual(0, self.state.turn_text_chars)
+        self.assertEqual(0, self.state.streamed_chars)
+        self.assertIsNone(self.state.last_block_index)
+
+    def test_thinking_delta_with_empty_text_emits_nothing(self) -> None:
+        # Real shape observed from the installed CLI (2.1.207, --effort max):
+        # this account/tier returns thinking_delta events with an empty
+        # "thinking" string throughout (only signature_delta carries opaque,
+        # encrypted content) - i.e. thinking is redacted, not absent. The
+        # parser must not emit a stream of empty ThinkingDelta("") noise.
+        events = parse_stream_line(
+            {
+                "type": "stream_event",
+                "event": {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {
+                        "type": "thinking_delta",
+                        "thinking": "",
+                        "estimated_tokens": 50,
+                    },
+                },
+            },
+            self.state,
+        )
+        self.assertEqual([], events)
+
+    def test_thinking_content_block_start_emits_nothing(self) -> None:
+        events = parse_stream_line(
+            {
+                "type": "stream_event",
+                "event": {
+                    "type": "content_block_start",
+                    "index": 0,
+                    "content_block": {"type": "thinking", "thinking": "", "signature": ""},
+                },
+            },
+            self.state,
+        )
+        self.assertEqual([], events)
+
+    def test_signature_delta_emits_nothing(self) -> None:
+        events = parse_stream_line(
+            {
+                "type": "stream_event",
+                "event": {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "signature_delta", "signature": "opaque-token"},
+                },
+            },
+            self.state,
+        )
+        self.assertEqual([], events)
+
+    def test_thinking_between_text_blocks_does_not_glue_or_corrupt_breaks(self) -> None:
+        # text (index 0) -> thinking (index 1, interleaved) -> text (index 2).
+        # The thinking block must not be glued into the surrounding text, and
+        # must not prevent the paragraph break the index change earns.
+        text0 = {
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "First part."},
+            },
+        }
+        thinking1 = {
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "index": 1,
+                "delta": {"type": "thinking_delta", "thinking": "pondering..."},
+            },
+        }
+        text2 = {
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "index": 2,
+                "delta": {"type": "text_delta", "text": "Second part."},
+            },
+        }
+        self.assertEqual([TextDelta("First part.")], parse_stream_line(text0, self.state))
+        self.assertEqual(
+            [ThinkingDelta("pondering...")], parse_stream_line(thinking1, self.state)
+        )
+        # last_block_index is still 0 (thinking deltas never update it), so
+        # index 2 != 0 correctly triggers a paragraph break here.
+        self.assertEqual(
+            [TextDelta("\n\nSecond part.")], parse_stream_line(text2, self.state)
+        )
+
+    def test_full_assistant_message_thinking_block_not_resurfaced(self) -> None:
+        # The full "assistant" message repeats every content block, including
+        # thinking ones. Re-surfacing it would double-emit (if streamed) or
+        # leak redacted thinking text into the visible answer.
+        events = parse_stream_line(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {"type": "thinking", "thinking": "", "signature": "tok"},
+                        {"type": "text", "text": "The answer is 42."},
+                    ]
+                },
+            },
+            self.state,
+        )
+        self.assertEqual([TextDelta("The answer is 42.")], events)
 
     def test_assistant_tool_use_starts_call_once(self) -> None:
         line = {
@@ -296,8 +431,192 @@ class ParseStreamLineTest(unittest.TestCase):
             {"type": "stream_event", "event": {"type": "message_stop"}},
             {"type": "whatever"},
             {},
+            # control_response is intercepted by ClaudeCliSession._read_loop
+            # before parse_stream_line ever sees it; asserted here too as
+            # defense in depth - it must be inert if it somehow arrived.
+            {
+                "type": "control_response",
+                "response": {"subtype": "success", "request_id": "req_1_x"},
+            },
         ):
             self.assertEqual([], parse_stream_line(obj, self.state))
+
+    def test_interrupted_turn_marker_message_is_silent(self) -> None:
+        # Real shape (captured live, CLI 2.1.207): after a successful
+        # interrupt, the CLI emits a synthetic "user" message narrating the
+        # abort instead of a tool_result. It must not surface as a tool
+        # event or any other UI-visible event.
+        events = parse_stream_line(
+            {
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "[Request interrupted by user]"}
+                    ],
+                },
+            },
+            self.state,
+        )
+        self.assertEqual([], events)
+
+    # -- Real captured stream fixtures --------------------------------
+    #
+    # Both sequences below are sanitized (session ids replaced, the
+    # signature_delta's opaque base64 payload truncated) but otherwise
+    # verbatim captures from the real installed CLI (2.1.207), run with the
+    # exact flags build_cli_args() produces, on 2026-07-11.
+
+    THINKING_BEARING_STREAM: list[dict] = [
+        # `claude -p --output-format stream-json --include-partial-messages
+        #  --verbose --effort max` on "A farmer has chickens and rabbits...".
+        # This account/CLI redacts thinking text (empty "thinking" fields
+        # throughout, real content only in the opaque signature), so no
+        # ThinkingDelta is emitted for it - see
+        # test_thinking_delta_with_empty_text_emits_nothing for that in
+        # isolation. This sequence exercises the full real ordering:
+        # thinking block fully open+close, THEN a text block, with no
+        # corruption of the text's paragraph bookkeeping.
+        {
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "thinking", "thinking": "", "signature": ""},
+            },
+        },
+        {
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {
+                    "type": "thinking_delta",
+                    "thinking": "",
+                    "estimated_tokens": 50,
+                },
+            },
+        },
+        {
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {
+                    "type": "thinking_delta",
+                    "thinking": "",
+                    "estimated_tokens": 200,
+                },
+            },
+        },
+        {
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {
+                    "type": "signature_delta",
+                    "signature": "EtQGCokBCA8YAipANMHOF5d7Blgs90F0tF...(truncated)",
+                },
+            },
+        },
+        {"type": "stream_event", "event": {"type": "content_block_stop", "index": 0}},
+        {
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_start",
+                "index": 1,
+                "content_block": {"type": "text", "text": ""},
+            },
+        },
+        {
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "index": 1,
+                "delta": {"type": "text_delta", "text": "**"},
+            },
+        },
+        {
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "index": 1,
+                "delta": {
+                    "type": "text_delta",
+                    "text": "Setting up the equations**\n\nLet c = number of "
+                    "chickens, r = number of rabbits.",
+                },
+            },
+        },
+        {"type": "stream_event", "event": {"type": "content_block_stop", "index": 1}},
+    ]
+
+    INTERRUPT_SEQUENCE: list[dict] = [
+        # Same live CLI, "Write 300 words about oak trees." interrupted ~2s
+        # in via a control_request over stdin (see claude_cli.py's
+        # interrupt()). Captured with a raw subprocess (not through
+        # ClaudeCliSession) to see the unfiltered wire bytes; the
+        # control_response line itself is consumed by _read_loop before
+        # parse_stream_line, so it is omitted from what's fed below (see
+        # test_unknown_lines_ignored for its own inertness).
+        {
+            "type": "system",
+            "subtype": "init",
+            "session_id": "sess-interrupt-demo",
+        },
+        {"type": "system", "subtype": "status", "status": "requesting"},
+        {
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [{"type": "text", "text": "[Request interrupted by user]"}],
+            },
+            "session_id": "sess-interrupt-demo",
+        },
+        {
+            "type": "result",
+            "subtype": "error_during_execution",
+            "is_error": True,
+            "session_id": "sess-interrupt-demo",
+            "total_cost_usd": 0,
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+            "terminal_reason": "aborted_streaming",
+        },
+    ]
+
+    def test_real_thinking_bearing_stream_isolates_thinking_from_text(self) -> None:
+        events: list = []
+        for obj in self.THINKING_BEARING_STREAM:
+            events.extend(parse_stream_line(obj, self.state))
+        # Redacted (empty) thinking text yields no ThinkingDelta; only the
+        # visible answer streams through, as its two real TextDelta chunks
+        # with no spurious break glued in front (first text of the turn) and
+        # none between them (same content-block index).
+        self.assertEqual(
+            [
+                TextDelta("**"),
+                TextDelta(
+                    "Setting up the equations**\n\nLet c = number of chickens, "
+                    "r = number of rabbits."
+                ),
+            ],
+            events,
+        )
+
+    def test_real_interrupt_sequence_ends_turn_cleanly(self) -> None:
+        from chat_with_your_cards.backends import UsageUpdate
+
+        events: list = []
+        for obj in self.INTERRUPT_SEQUENCE:
+            events.extend(parse_stream_line(obj, self.state))
+        self.assertEqual(3, len(events))
+        self.assertIsInstance(events[0], UsageUpdate)
+        error = events[1]
+        assert isinstance(error, ErrorEvent)
+        self.assertEqual("error_during_execution", error.message)
+        self.assertIsInstance(events[2], Done)
+        self.assertEqual("sess-interrupt-demo", self.state.session_id)
 
 
 class BuildCliArgsTest(unittest.TestCase):

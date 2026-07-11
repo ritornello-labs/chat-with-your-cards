@@ -95,6 +95,37 @@ class ScriptedBackendTest(unittest.TestCase):
         self.assertFalse(any(isinstance(e, Done) for e in events))
         self.assertFalse(session.streaming)
 
+    def test_interrupt_behaves_like_cancel_and_reports_unacknowledged(self) -> None:
+        scheduler, session = self._session()
+        events: list[ChatEvent] = []
+        session.send("explain this card", collect(events))
+
+        scheduler.run_first(3)
+        self.assertEqual(3, len(events))
+        acknowledged = session.interrupt()
+        scheduler.run_all()
+
+        self.assertFalse(
+            acknowledged, "no real CLI to ack a control_request against"
+        )
+        self.assertEqual(3, len(events), "no events may arrive after interrupt")
+        self.assertFalse(any(isinstance(e, Done) for e in events))
+        self.assertFalse(session.streaming)
+
+    def test_send_after_interrupt_streams_fresh_response(self) -> None:
+        scheduler, session = self._session()
+        first: list[ChatEvent] = []
+        session.send("explain this card", collect(first))
+        scheduler.run_first(2)
+        session.interrupt()
+        scheduler.run_all()
+
+        second: list[ChatEvent] = []
+        session.send("long version please", collect(second))
+        scheduler.run_all()
+        self.assertIsInstance(second[-1], Done)
+        self.assertGreater(len(second), 5)
+
     def test_send_after_cancel_streams_fresh_response(self) -> None:
         scheduler, session = self._session()
         first: list[ChatEvent] = []

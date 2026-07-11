@@ -17,6 +17,17 @@ class TextDelta:
 
 
 @dataclass(frozen=True)
+class ThinkingDelta:
+    """A chunk of the model's extended-thinking/reasoning stream.
+
+    Ephemeral by design: never persisted to transcripts (see controller.py),
+    and kept out of the visible answer text (see claude_cli.py's parser).
+    """
+
+    text: str
+
+
+@dataclass(frozen=True)
 class ToolCallStarted:
     call_id: str
     tool: str
@@ -65,6 +76,7 @@ class ErrorEvent:
 
 ChatEvent = Union[
     TextDelta,
+    ThinkingDelta,
     ToolCallStarted,
     ToolCallFinished,
     ProposalRequest,
@@ -80,6 +92,8 @@ def event_to_dict(event: ChatEvent) -> dict[str, Any]:
     """Serialize an event to the JSON payload consumed by web/app.js."""
     if isinstance(event, TextDelta):
         return {"type": "text_delta", "text": event.text}
+    if isinstance(event, ThinkingDelta):
+        return {"type": "thinking_delta", "text": event.text}
     if isinstance(event, ToolCallStarted):
         return {
             "type": "tool_call_started",

@@ -11,6 +11,7 @@ from chat_with_your_cards.backends import (  # noqa: E402
     Done,
     ErrorEvent,
     TextDelta,
+    ThinkingDelta,
     ToolCallFinished,
     ToolCallStarted,
     event_to_dict,
@@ -22,6 +23,12 @@ class EventToDictTest(unittest.TestCase):
         self.assertEqual(
             {"type": "text_delta", "text": "hello "},
             event_to_dict(TextDelta("hello ")),
+        )
+
+    def test_thinking_delta(self) -> None:
+        self.assertEqual(
+            {"type": "thinking_delta", "text": "hmm, let's see... "},
+            event_to_dict(ThinkingDelta("hmm, let's see... ")),
         )
 
     def test_tool_call_started(self) -> None:
@@ -58,6 +65,7 @@ class EventToDictTest(unittest.TestCase):
     def test_all_events_json_serializable(self) -> None:
         events = [
             TextDelta("x"),
+            ThinkingDelta("x"),
             ToolCallStarted("call-1", "search_notes", "q"),
             ToolCallFinished("call-1", False, "boom"),
             Done(),

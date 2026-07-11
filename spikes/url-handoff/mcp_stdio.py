@@ -90,10 +90,10 @@ def call_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         return _text(json.dumps({"verdict": fresh.state, "url": url, **fresh.public()}, indent=2))
 
     if name == "check_proposal":
-        p = server.STORE.get(args["id"])
-        if p is None:
+        found = server.STORE.get(args["id"])
+        if found is None:
             return {**_text('{"error": "no such proposal"}'), "isError": True}
-        return _text(json.dumps({"verdict": p.state, **p.public()}, indent=2))
+        return _text(json.dumps({"verdict": found.state, **found.public()}, indent=2))
 
     return {**_text(f'{{"error": "unknown tool {name}"}}'), "isError": True}
 

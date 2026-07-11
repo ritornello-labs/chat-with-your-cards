@@ -82,24 +82,82 @@ sanctions wrapping several backend calls "when you are making other changes at t
 and want to ensure they are applied completely or not at all" — exactly our case. Inner
 backend ops nest as savepoints under the outer transaction, so the SQL composes correctly.
 
-**Known wart on the rollback path (behaviorally CONFIRMED on real Anki, 2026-07-10):** on
-`db_rollback`, `rslib/src/backend/dbproxy.rs` does `clear_caches()` + `rollback_trx()` — it
-reverts the *SQL* but does **not** pop the in-memory undo entries that the inner backend ops
-already pushed. The gui_smoke probe (`make test-gui-smoke-docker`) verified both halves on a
-real collection: a forced `InvariantViolation` after `col.add_note` rolled the SQL back
+**Known wart on the rollback path — FIXED via `col.undo()`, ground-truth-counted, verified on
+real Anki 2026-07-11.** On `db_rollback`, `rslib/src/backend/dbproxy.rs` does `clear_caches()` +
+`rollback_trx()` — it reverts the *SQL* but does **not** pop the in-memory undo entries that the
+inner backend ops already pushed: each backend RPC (e.g. `add_note`) runs its own Rust-level
+`Collection::transact` (`rslib/src/collection/transact.rs`), which on success calls
+`end_undoable_operation` and pushes a real entry into the in-memory undo queue — a push that
+lives entirely outside the SQL transaction `col.db.transact` later rolls back. Behaviorally
+confirmed 2026-07-10: a forced `InvariantViolation` after `col.add_note` rolled the SQL back
 cleanly (note count unchanged, no phantom ledger entry, collection usable, follow-up accept
-succeeded), while `col.undo_status()` showed `last_step` incrementing — a dangling undo entry
-with no surviving data behind it. So the safety goal (no corruption) holds; the residue is a
-cosmetic Undo-menu entry until the next real op, and only on the rare "we caught corruption"
-backstop — preconditions raise *before* any mutation, so their rollback is clean. Fixing the
-dangling entry (e.g. drive the sandwich through `add_custom_undo_entry`/`merge_undo_entries`,
-or `col.undo()` the reversed op) is a follow-up, not a blocker.
+succeeded), while `col.undo_status()` showed a dangling "Add Note" entry with no surviving data
+behind it.
+
+Fix candidates considered:
+- **(B) a dedicated backend "clear undo" API** — does not exist. `col.undo()` / `col.undo_status()`
+  (`rslib/src/undo/mod.rs`) and the `Undo`/`Redo` RPCs (`proto/anki/collection.proto`) are the
+  entire Python-exposed surface; there is no "pop without replaying" or "truncate the queue"
+  primitive.
+- **(C) trigger the dbproxy full-queue discard** (any non-SELECT via `col.db.execute`, e.g.
+  `update col set id = id`) — wipes the whole 30-step queue (`discard_undo_and_study_queues`,
+  `rslib/src/backend/dbproxy.rs:122-167`). Rejected as needlessly destructive: it would erase the
+  user's real prior undo history over what is, for `create`/`edit`, a single dangling entry.
+- **(A) `col.undo()`, called exactly as many times as the write's `execute()` issued backend
+  RPCs — the ground truth (`ProposalManager._WriteResult.undo_steps`, `_revert_write`'s `steps`
+  argument), never a guess.** Shipped. Every reverse-change our proposals can leave dangling is a
+  no-op against the already-SQL-rolled-back state: undoing an add issues a plain
+  `DELETE ... WHERE id = ?` with no existence check (`rslib/src/notes/undo.rs` →
+  `storage/note/mod.rs::remove_note`; `storage/card/mod.rs::remove_card` likewise), and undoing an
+  edit re-writes the very fields the SQL rollback already restored
+  (`rslib/src/notes/undo.rs::update_note_undoable`). Exact-count popping (rather than "pop until
+  the queue looks back to normal") matters because the queue's only Python-visible signals are a
+  translated op-description string and a monotonically-increasing step counter that also ticks up
+  on `col.undo()` itself — neither can reliably tell "mine" from "someone else's, coincidentally
+  the same op type" apart, so guessing risks reaching into genuinely older, unrelated undo history.
+  Tracking the real count instead sidesteps that entirely.
+
+The gui_smoke probe's forced-rollback check (`make test-gui-smoke-docker`,
+`_postcondition_rollback` in `tests/gui_smoke/probe_addon/__init__.py`) now ASSERTS on this
+instead of merely observing it, and passed on real Anki 2026-07-11:
+
+```
+undo_status_before:                {"last_step": 19, "redo": null,       "undo": "Add Note"}
+undo_status_after_forced_rollback: {"last_step": 21, "redo": "Add Note", "undo": "Add Note"}
+```
+
+`undo` reads back to exactly what it was before the check ran ("Add Note", left by an earlier,
+unrelated check's real create) — the dangling entry from *this* check's own forced-rejected
+`add_note` is gone. `last_step` (a monotonic counter, ticks up on every op attempt including
+`col.undo()` itself, so it is not by itself proof of cleanliness) moved by exactly +2 - one for
+the doomed `add_note` and one for our own single `_discard_dangling_undo` → `col.undo()` call -
+independent, quantitative confirmation that cleanup fired exactly `undo_steps=1` time, not zero
+and not more. `redo` flipping `null` → `"Add Note"` is the expected, harmless side effect of
+actively calling `col.undo()` (it pushes what it just undid onto the redo queue); a real user
+could in principle click Redo and re-create the rejected note, but nothing prompts them to (they
+never saw it appear), and it is overwritten by the next real op like any other redo residue - not
+asserted on, since it does not bear on the safety goal. A follow-up accept right after still
+succeeded cleanly (`followup_accept_ok: true`), and the F3 mid-batch check (below) still passed
+unaffected, confirming its own dangling residual (not cleaned up by design - see the next
+paragraph) is unchanged and harmless. `ProposalManager._discard_dangling_undo` (proposals.py)
+is called only from an `InvariantViolation` handler in `_apply_write`/`_revert_write` — the one
+case where `execute()`/`mutate()` is *guaranteed* to have run to completion, so the ground-truth
+count is trustworthy. It is deliberately **not** called for a precondition failure (nothing was
+mutated yet, so there is nothing dangling) or for a bare backend exception raised mid-execute
+(the F3 mid-batch case below: how many of a multi-item write's RPCs already ran before the raise
+is not knowable from the outside, so cleanup is skipped rather than guessed at) — a narrower,
+documented residual, not a regression from the pre-fix behavior.
 
 The mid-batch (F3) all-or-nothing path is likewise real-Anki-verified: with a later item's
 `update_note` forced to raise, the first item's already-applied edit rolled back too. Note
 one probe finding: a *deleted* mid-batch note does NOT reach the rollback path — `_apply_items`
 deliberately treats it as a skipped stale item (the staleness guard), which is correct
-behavior, just a different path than a backend error.
+behavior, just a different path than a backend error. Unlike the postcondition-rollback case
+above, this path's dangling undo entries (if the doomed item was not the first) are **not**
+cleaned up: the bare `Exception` `_apply_write` catches here does not tell us how many of the
+batch's `update_note` calls already succeeded before the raise, and guessing would risk popping
+into real, unrelated undo history instead — a narrower residual than before the fix, kept
+deliberately rather than guessed away.
 
 The revert path is not special. It builds a proposal and calls `apply()` like everything
 else. A revert that would recreate the original corruption is simply rejected.

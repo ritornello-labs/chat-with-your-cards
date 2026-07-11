@@ -50,15 +50,31 @@ class ProposalError(Exception):
     """Validation failure reported back to the agent as a tool error."""
 
 
+# rslib's UNDO_LIMIT (undo/mod.rs): the in-memory undo queue never holds more
+# than this many steps, so it is a safe absolute cap on how many times
+# _discard_dangling_undo will ever call col.undo() - see that method.
+UNDO_DISCARD_MAX = 30
+
+
 @dataclass
 class _WriteResult:
     """What a chokepoint ``execute`` reports back: the value to return to the
     caller, the collection-wide count-delta ``Expectation`` to assert, and the
-    touched-row ``Scope`` the scoped postconditions run over."""
+    touched-row ``Scope`` the scoped postconditions run over.
+
+    ``undo_steps`` is the exact number of backend RPCs ``execute`` issued
+    when it ran to completion (default 1: almost every execute() makes one
+    mutating call - add_note, tags.rename, set_deck, remove_notes, a single
+    update_note). The two execute()s that loop over _apply_items (bulk
+    find_replace, change_set) call update_note once per applied item and set
+    this to that count. Used only to discard exactly that many dangling undo
+    entries if a postcondition rejects the write after execute() already
+    fully applied it (SAFETY.md's "Known wart", see _discard_dangling_undo)."""
 
     value: Any
     expectation: invariants.Expectation
     scope: invariants.Scope
+    undo_steps: int = 1
 
 
 @dataclass
@@ -159,7 +175,7 @@ class ProposalManager:
         config: dict[str, Any],
         save_pins: Callable[[dict[str, Any]], None] | None = None,
         after_write: Callable[[list[int]], None] | None = None,
-        checkpoint: Callable[[str, bool], None] | None = None,
+        checkpoint: Callable[[str, bool], bool] | None = None,
         observe: Callable[[dict[str, Any]], None] | None = None,
         apply_skill: Callable[["Proposal"], list[str]] | None = None,
         after_deck_change: Callable[[], None] | None = None,
@@ -175,7 +191,16 @@ class ProposalManager:
         # an Anki backup so even non-ledger-revertible ops have a way back.
         # Second arg = critical: True forces a SYNCHRONOUS backup (on disk
         # before the op proceeds) for irreversible operations like delete.
-        self._checkpoint = checkpoint or (lambda _reason, _critical: None)
+        # Returns True when the checkpoint is safe to proceed on (a backup
+        # exists or was just made - Anki's create_backup(force=True) can
+        # legitimately return False for "nothing changed since the last
+        # backup", which is NOT a failure) and False only when it actually
+        # failed (exception raised while creating it). _apply_write ABORTS
+        # a critical=True write on False (no destructive op ever proceeds
+        # without a safety net); a non-critical False leaves
+        # self._checkpoint_warning set for the caller to surface.
+        self._checkpoint = checkpoint or (lambda _reason, _critical: True)
+        self._checkpoint_warning: str | None = None
         # Learning capture (DESIGN.md section 15): "applied" after content
         # writes (snapshot what the system wrote), "resync" after reverts
         # (refresh already-tracked notes only), "reviewed" with the diff
@@ -1167,10 +1192,27 @@ class ProposalManager:
         relaxes only the card-count delta to whatever actually happened (field
         edits may legitimately activate/deactivate conditional cards, AGENTS.md;
         the drift is still surfaced as a warning by ``_stats_drift_warnings``).
+
+        ``backup_reason`` checkpoints before the transaction opens.
+        ``critical_backup=True`` (irreversible ops like delete) makes a FAILED
+        checkpoint ABORT the whole write with a ``ProposalError`` before
+        anything is touched - a destructive op must never proceed without a
+        safety net. A non-critical checkpoint failure does not block the
+        write; it is recorded in ``self._checkpoint_warning`` for the caller
+        to surface on the resolved proposal.
         """
         col = self._col()
-        if backup_reason is not None:
-            self._checkpoint(backup_reason, critical_backup)
+        self._checkpoint_warning = None
+        if backup_reason is not None and not self._checkpoint(backup_reason, critical_backup):
+            if critical_backup:
+                raise ProposalError(
+                    "backup failed; delete not performed — check disk space / "
+                    "permissions"
+                )
+            self._checkpoint_warning = (
+                f"backup checkpoint failed ({backup_reason}); proceeding "
+                "without a fresh backup — check disk space / permissions"
+            )
         ledger_mark = len(self._ledger)
         box: dict[str, Any] = {}
 
@@ -1193,23 +1235,92 @@ class ProposalManager:
         except ProposalError:
             del self._ledger[ledger_mark:]
             raise
-        except Exception as exc:  # backend error or InvariantViolation
+        except invariants.InvariantViolation as exc:
+            del self._ledger[ledger_mark:]
+            # execute() is the line right before assert_all, so it always ran
+            # to completion here: box["result"].undo_steps is the exact count
+            # of backend RPCs that already pushed a real (now dangling, see
+            # _discard_dangling_undo) undo entry before the postcondition
+            # caught the problem and rolled the SQL back.
+            result = box.get("result")
+            if result is not None:
+                self._discard_dangling_undo(col, result.undo_steps)
+            raise ProposalError(str(exc)) from None
+        except Exception as exc:  # backend error raised mid-execute: how many
+            # of a multi-item write's RPCs already ran is not knowable here
+            # (F3 mid-batch), so we do not guess at undo cleanup - guessing
+            # risks popping a genuinely older, unrelated undo entry instead
+            # of one of ours. SAFETY.md documents this narrower residual.
             del self._ledger[ledger_mark:]
             raise ProposalError(str(exc)) from None
         return box["result"].value
+
+    @staticmethod
+    def _discard_dangling_undo(col: Any, steps: int) -> None:
+        """Consume ``steps`` dangling in-memory undo entries left behind by a
+        chokepoint write whose SQL was already reverted by ``col.db.transact``
+        (SAFETY.md's "Known wart on the rollback path", fixed here).
+
+        Why this is correct: each of the ``steps`` backend RPCs that ran
+        before the postcondition rejected the write already completed its own
+        Rust-level ``Collection::transact`` (rslib/src/collection/
+        transact.rs) successfully, which pushes one real entry onto the
+        in-memory undo queue (``end_undoable_operation``) - a push that is
+        NOT part of the SQL transaction ``col.db.transact`` rolls back, so it
+        survives as a "dangling" entry describing a change that no longer
+        exists in the DB. This is only called after an ``InvariantViolation``
+        (see callers), which fires strictly after every one of those RPCs
+        already returned - so ``steps`` is a ground-truth count, never a
+        guess, and popping exactly that many can never reach into
+        genuinely older, unrelated undo history.
+
+        Why popping is safe: ``col.undo()`` pops the front (LIFO - exactly
+        the order the dangling entries were pushed in) and replays its
+        recorded reverse-change. Every reverse-change our proposals can dangle
+        is a no-op against the already-rolled-back state: undoing an add
+        issues a plain ``DELETE ... WHERE id = ?`` with no existence check
+        (rslib/src/notes/undo.rs ``remove_note_without_grave`` ->
+        storage/note/mod.rs ``remove_note``; storage/card/mod.rs
+        ``remove_card`` likewise), and undoing an update re-writes the very
+        fields the SQL rollback already restored (rslib/src/notes/undo.rs
+        ``update_note_undoable``). Behaviorally confirmed on a real
+        collection via the gui_smoke probe's forced-rollback check.
+
+        Best-effort: any failure (including a collection double with no
+        ``undo_status``/``undo``, as in the unit tests' FakeCol) is swallowed
+        so cleanup can never mask the real ``ProposalError`` already being
+        raised, and never raise a new one of its own.
+        """
+        for _ in range(min(steps, UNDO_DISCARD_MAX)):
+            try:
+                col.undo()
+            except Exception:
+                return
 
     def _revert_write(
         self,
         col: Any,
         mutate: Callable[[], None],
         scope: invariants.Scope,
+        *,
+        steps: Callable[[], int] | int = 1,
     ) -> None:
         """Guarded revert path: run ``mutate`` inside the transaction, convert
         any backend exception to a reported ``ProposalError`` (F1: a filtered
         ``set_deck`` hard-errors with ``CanNotMoveCardsInto`` and must never
         escape as an unhandled pycmd exception), and run the corruption
         postconditions over the touched rows so a revert that would recreate the
-        original corruption is rejected instead of committed."""
+        original corruption is rejected instead of committed.
+
+        ``steps`` is the exact number of backend RPCs ``mutate`` issues when it
+        runs to completion (default 1; callers whose ``mutate`` loops over
+        several set_deck/update_note calls pass the real count - as a plain
+        int when it is known upfront, or a zero-arg callable when ``mutate``
+        itself decides how many it actually issued, e.g. skipping missing
+        notes, and the count is only known after it runs). Used to discard
+        exactly that many dangling undo entries if the corruption
+        postconditions below reject the revert after ``mutate`` already fully
+        applied it (SAFETY.md's "Known wart", see _discard_dangling_undo)."""
 
         def op() -> None:
             mutate()
@@ -1224,6 +1335,15 @@ class ProposalManager:
             self._run_in_transaction(col, op)
         except ProposalError:
             raise
+        except invariants.InvariantViolation as exc:
+            # mutate() ran to completion (these checks run strictly after it),
+            # so exactly `steps` real undo entries are now dangling. Resolved
+            # lazily (after mutate() ran) so a callable `steps` can reflect
+            # how many of its calls actually happened, e.g. change-set revert
+            # skipping notes that no longer exist.
+            count = steps() if callable(steps) else steps
+            self._discard_dangling_undo(col, count)
+            raise ProposalError(str(exc)) from None
         except Exception as exc:
             raise ProposalError(str(exc)) from None
 
@@ -1393,6 +1513,8 @@ class ProposalManager:
                 execute=execute_rename, backup_reason=f"bulk {proposal.op}"
             )
             proposal.status = ACCEPTED
+            if self._checkpoint_warning:
+                proposal.warnings.append(self._checkpoint_warning)
             return note_ids
         if proposal.op == "move_cards":
             query = proposal.op_args["query"]
@@ -1439,6 +1561,8 @@ class ProposalManager:
                 execute=execute_move, backup_reason=f"bulk {proposal.op}"
             )
             proposal.status = ACCEPTED
+            if self._checkpoint_warning:
+                proposal.warnings.append(self._checkpoint_warning)
             return note_ids
         if proposal.op == "find_replace":
 
@@ -1448,6 +1572,7 @@ class ProposalManager:
                     (applied, skipped),
                     invariants.Expectation(),
                     invariants.Scope(note_ids=tuple(int(n) for n in applied)),
+                    undo_steps=len(applied),
                 )
 
             applied, skipped = self._apply_write(
@@ -1456,11 +1581,13 @@ class ProposalManager:
                 lenient_cards=True,
             )
             proposal.status = ACCEPTED
+            if self._checkpoint_warning:
+                proposal.warnings.append(self._checkpoint_warning)
             if skipped:
-                proposal.warnings = [
+                proposal.warnings.append(
                     f"{len(skipped)} note(s) changed since the preview and were "
                     "skipped: " + ", ".join(skipped[:3])
-                ]
+                )
             return applied
         raise ProposalError(f"unknown bulk op {proposal.op!r}")
 
@@ -1536,7 +1663,13 @@ class ProposalManager:
                     raise ProposalError("filtered decks have no options preset")
                 conf = col.decks.config_dict_for_deck_id(did)
                 # Shared presets have collection-wide blast radius: checkpoint.
-                self._checkpoint("deck options", False)
+                # Non-critical (reversible via the ledger below): a failed
+                # checkpoint does not block the change, just warns.
+                if not self._checkpoint("deck options", False):
+                    proposal.warnings.append(
+                        "backup checkpoint failed (deck options); proceeding "
+                        "without a fresh backup — check disk space / permissions"
+                    )
                 priors: dict[str, Any] = {}
                 for path, new in a["options"].items():
                     node, leaf = self._resolve_option(conf, path)
@@ -1679,6 +1812,7 @@ class ProposalManager:
                 (applied, skipped),
                 invariants.Expectation(),
                 invariants.Scope(note_ids=tuple(int(n) for n in applied)),
+                undo_steps=len(applied),
             )
 
         applied, skipped = self._apply_write(
@@ -1688,7 +1822,10 @@ class ProposalManager:
         )
         after = self._counts(col)
         proposal.status = ACCEPTED
-        warnings = self._stats_drift_warnings(before, after)
+        warnings = list(proposal.warnings)
+        if self._checkpoint_warning:
+            warnings.append(self._checkpoint_warning)
+        warnings.extend(self._stats_drift_warnings(before, after))
         if skipped:
             warnings.append(
                 f"{len(skipped)} note(s) changed since they were added and were "
@@ -2108,6 +2245,8 @@ class ProposalManager:
                     deck_ids=tuple(by_deck),
                     card_ids=tuple(int(c) for c in card_decks),
                 ),
+                # One set_deck RPC per distinct prior home deck, not per card.
+                steps=len(by_deck),
             )
         elif entry.kind == "change_set":
             missing_box = {"n": 0}
@@ -2127,7 +2266,16 @@ class ProposalManager:
                     col.update_note(note)
                 missing_box["n"] = missing
 
-            self._revert_write(col, mutate_change_set, invariants.Scope())
+            total_items = len(entry.data.get("items", []))
+            self._revert_write(
+                col,
+                mutate_change_set,
+                invariants.Scope(),
+                # One update_note RPC per item, minus the ones mutate_change_set
+                # skipped because the note no longer exists; only known once
+                # mutate_change_set has actually run.
+                steps=lambda: total_items - missing_box["n"],
+            )
             if missing_box["n"]:
                 self._push(
                     {

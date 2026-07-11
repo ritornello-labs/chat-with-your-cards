@@ -119,6 +119,15 @@ class ScriptedSession:
         self._generation += 1
         self._streaming = False
 
+    def interrupt(self) -> bool:
+        """No real CLI to acknowledge a control_request against, so this is
+        cancel() under another name: stop emission, no Done, no respawn to
+        model (there is no process). Always reports "not acknowledged" so
+        callers take the same fallback UI path (push a cancelled event) as
+        an old-CLI/timeout ClaudeCliSession would."""
+        self.cancel()
+        return False
+
     def close(self) -> None:
         self.cancel()
 

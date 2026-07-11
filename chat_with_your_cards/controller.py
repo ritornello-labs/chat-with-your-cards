@@ -126,6 +126,9 @@ class ChatController:
             ),
             web_access=bool(self._config.get("web_access", True)),
             extra_env=extra_env,
+            mcp_servers=self._config.get("mcp_servers") or {},
+            mcp_inherit_user=bool(self._config.get("mcp_inherit_user", False)),
+            mcp_disabled=list(self._config.get("mcp_disabled") or []),
         )
 
     def ensure_ready(self) -> None:
@@ -203,9 +206,24 @@ class ChatController:
             )
 
     def cancel(self) -> None:
-        if self._session is not None and self._session.streaming:
-            self._session.cancel()
-            self._push({"type": "cancelled"})
+        if self._session is None or not self._session.streaming:
+            return
+        # ClaudeCliSession exposes interrupt() (not part of the ChatSession
+        # Protocol, same probe pattern as prewarm/set_model_effort) so the
+        # stop button can keep the process - and the conversation - alive
+        # instead of terminate()-and-respawn-with---resume. If it
+        # acknowledges, the CLI's own aborted-turn Done/ErrorEvent will
+        # reach the UI through the normal event flow, so stay silent here
+        # to avoid a double "stopped" signal. Any falsy/missing interrupt()
+        # (ScriptedSession, an old CLI, a timeout) falls back to the
+        # original cancel()-then-push behavior.
+        interrupt = getattr(self._session, "interrupt", None)
+        if interrupt is not None:
+            if not interrupt():
+                self._push({"type": "cancelled"})
+            return
+        self._session.cancel()
+        self._push({"type": "cancelled"})
 
     def new_chat(self) -> None:
         if self._session is not None:

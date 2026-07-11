@@ -247,12 +247,21 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
         really rolls the SQL back in a REAL Anki collection - the fake
         collection in tests/test_invariants.py hand-simulates this with a
         Python dict snapshot/restore, which cannot tell us whether the real
-        rust-backend db_rollback() behaves the same way. Also records
-        col.undo_status() before/after so we learn whether SAFETY.md's "Known
-        wart on the rollback path" (a dangling undo entry left by the inner
-        backend op that ran before the postcondition failed) manifests on
-        real Anki - that part is an OBSERVATION, not an assertion, since
-        finding out is the point."""
+        rust-backend db_rollback() behaves the same way. Also ASSERTS on
+        col.undo_status() before/after: SAFETY.md's "Known wart on the
+        rollback path" (a dangling undo entry left by the inner backend op
+        that ran before the postcondition failed - db_rollback reverts the
+        SQL but not the in-memory undo queue a separate, already-completed
+        Rust-level Collection::transact pushed to) is now FIXED by
+        ProposalManager._discard_dangling_undo (proposals.py): after a
+        postcondition failure, it calls col.undo() exactly as many times as
+        the write's execute() issued backend RPCs (ground truth, never a
+        guess), consuming the dangling entry/entries. This check is the
+        empirical confirmation that a real col.undo() call against a real,
+        already-SQL-rolled-back collection is a safe no-op rather than an
+        error or a misbehavior (candidate A from the fix's decision list -
+        candidate B, a dedicated backend "clear undo" API, does not exist;
+        see rslib/src/undo/mod.rs and proto/anki/collection.proto)."""
         from chat_with_your_cards import invariants as invariants_mod
         from chat_with_your_cards.proposals import PENDING
 
@@ -325,6 +334,19 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
 
         undo_after = _undo_status_snapshot()
 
+        # The fix: exactly one dangling entry (one add_note RPC) was pushed
+        # before the postcondition rolled the SQL back; _discard_dangling_undo
+        # must have popped it, so the queue's top reads back to whatever was
+        # there before this whole check started - never left dangling, and
+        # never over-popped into older, unrelated real history.
+        if undo_after["undo"] != undo_before["undo"]:
+            raise AssertionError(
+                "dangling undo entry survived the forced rollback: expected "
+                f"the undo queue's top to read back to {undo_before['undo']!r} "
+                f"(its state before this check ran), got {undo_after['undo']!r} "
+                "- _discard_dangling_undo (proposals.py) did not clean it up"
+            )
+
         # The collection must still be usable: a normal accept right after
         # the forced rollback must still succeed cleanly.
         followup = proposals.submit_create(
@@ -355,7 +377,7 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
 
     check(
         "create: postcondition InvariantViolation rolls back real SQL "
-        "(real col.db.transact) + undo_status observation",
+        "(real col.db.transact) + dangling undo entry cleaned up",
         _postcondition_rollback,
     )
 
@@ -498,6 +520,59 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
         return {"checkpoint": cp, "backups_before": before, "backups_after": after}
 
     check("delete notes + real synchronous backup checkpoint", _delete_with_backup)
+
+    def _delete_aborts_when_real_backup_fails() -> dict[str, Any]:
+        """Job 2's abort contract, against the REAL col.create_backup (not a
+        fake): when the checkpoint before a critical (delete) write fails,
+        _apply_write must raise before col.remove_notes ever runs - the
+        destructive op never proceeds without a safety net on disk."""
+        ids = [_new_note(f"del-fail {i}", tags=["probe-del-fail"]) for i in range(2)]
+
+        real_create_backup = mw.col.create_backup
+
+        def failing_create_backup(*_a: Any, **_kw: Any) -> bool:
+            raise RuntimeError("probe-forced backup failure (disk full, say)")
+
+        mw.col.create_backup = failing_create_backup
+        try:
+            result = proposals.submit_delete_notes({"note_ids": ids})
+            with _capture_pushes(proposals) as captured:
+                proposals.accept({"id": result["proposal_id"]})
+        finally:
+            mw.col.create_backup = real_create_backup
+
+        if any(nid not in mw.col.find_notes('tag:"probe-del-fail"') for nid in ids):
+            raise AssertionError(
+                "notes were deleted despite the backup checkpoint failing - "
+                "the critical-backup abort did not block the write"
+            )
+        errors = [
+            p
+            for p in captured
+            if p.get("type") == "proposal_error" and p.get("id") == result["proposal_id"]
+        ]
+        if not errors:
+            raise AssertionError(
+                f"backup failure did not surface as a proposal_error; captured: {captured}"
+            )
+        message = str(errors[0].get("message", ""))
+        if "backup failed" not in message:
+            raise AssertionError(f"unexpected abort message: {message!r}")
+
+        # The collection must still be usable, and a real (succeeding)
+        # backup + delete right after must still work cleanly.
+        result2 = proposals.submit_delete_notes({"note_ids": ids})
+        proposals.accept({"id": result2["proposal_id"]})
+        if any(nid in mw.col.find_notes('tag:"probe-del-fail"') for nid in ids):
+            raise AssertionError(
+                "collection unusable after aborted delete: follow-up delete failed"
+            )
+        return {"abort_message": message}
+
+    check(
+        "delete aborts (no backend call) when the real backup checkpoint fails",
+        _delete_aborts_when_real_backup_fails,
+    )
 
     def _trusted_writes() -> dict[str, Any]:
         old_mode = state.config.get("permission_mode", "default")
@@ -1002,12 +1077,66 @@ def _run_checks() -> dict[str, Any]:
     # against the real disposable collection, not the unit tests' fakes.
     _collection_flow_checks(state, check)
 
+    def _next_ui_flip() -> dict[str, Any]:
+        """The assistant-ui bundle (config ui="next") loads via the same
+        stdHtml path (DESIGN.md section 9, 2026-07-10): the head-injected
+        bundle defers to DOMContentLoaded, mounts into #cwyc-root, and
+        installs window.chatUI. Runs LAST because it reloads the webview;
+        the finally-block restores the classic UI either way."""
+        assert dock is not None
+        last: dict[str, Any] = {}
+        prior = dock._ui_mode
+        dock._ui_mode = "next"
+        try:
+            dock._load_ui()
+
+            def _mounted() -> bool:
+                info = _eval_js(
+                    dock.web,
+                    "(function() {"
+                    "  var r = document.getElementById('cwyc-root');"
+                    "  return {root: !!r,"
+                    "          children: r ? r.childElementCount : -1,"
+                    "          chatui: typeof window.chatUI};"
+                    "})();",
+                    DOM_TIMEOUT_MS,
+                    "next ui mount state",
+                )
+                last.update(info or {})
+                return bool(
+                    info
+                    and info.get("root")
+                    and int(info.get("children", 0)) > 0
+                    and info.get("chatui") == "object"
+                )
+
+            _wait_until(_mounted, DOM_TIMEOUT_MS, "assistant-ui bundle mount")
+            return dict(last)
+        finally:
+            dock._ui_mode = prior
+            dock._load_ui()
+            _wait_until(
+                lambda: bool(
+                    _eval_js(
+                        dock.web,
+                        "!!document.getElementById('cwyc-input');",
+                        DOM_TIMEOUT_MS,
+                        "classic ui restored",
+                    )
+                ),
+                DOM_TIMEOUT_MS,
+                "classic UI restore after next-ui flip",
+            )
+
+    next_ui_info = check("next ui loads behind flag", _next_ui_flip)
+
     return {
         "ok": True,
         "checks": checks,
         "stream": stream_info,
         "dom": dom_info,
         "proposal": proposal_info,
+        "next_ui": next_ui_info,
         "anki_version": getattr(mw, "appVersion", None),
     }
 

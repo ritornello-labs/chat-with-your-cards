@@ -27,10 +27,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "model": "",
     "effort": "",
     "web_access": True,
+    "mcp_servers": {},
+    "mcp_inherit_user": False,
+    "mcp_disabled": [],
     "suggested_questions": True,
     "restore_last_chat": False,
     "open_in_claude_target": "terminal",
     "terminal_app": "",
+    "ui": "classic",
     "anthropic_api_key": "",
     "anthropic_api_key_op": "",
     "openai_api_key": "",
@@ -142,7 +146,10 @@ def _setup() -> None:
     )
     state.stats_cache.start()
 
-    state.dock = dock_mod.create_dock(dock_width=int(config["dock_width"]))
+    state.dock = dock_mod.create_dock(
+        dock_width=int(config["dock_width"]),
+        ui_mode=str(config.get("ui", "classic")),
+    )
 
     from .transcripts import TranscriptStore
 
@@ -588,7 +595,7 @@ def _log_line(message: str) -> None:
         pass
 
 
-def _backup_checkpoint(reason: str, critical: bool = False) -> None:
+def _backup_checkpoint(reason: str, critical: bool = False) -> bool:
     """Force an Anki backup before bulk/delete/change-set applies, so even
     non-ledger-revertible operations have a way back.
 
@@ -597,11 +604,24 @@ def _backup_checkpoint(reason: str, critical: bool = False) -> None:
     otherwise the "safety net" would be racing the delete. Reversible ops
     (ledger-undoable) back up asynchronously to avoid stalling the UI, and
     on a huge collection even that is best-effort insurance behind the
-    ledger."""
+    ledger.
+
+    Returns True when the checkpoint is safe to proceed on, False only when
+    it actually failed. ``col.create_backup(force=True, ...)`` can legitimately
+    return False for "nothing has changed since the last backup" (see its
+    pylib docstring) - that is NOT a failure, there is still a good backup on
+    disk, so we still return True. Only an exception - the documented failure
+    signal - means no safety net exists. ProposalManager (proposals.py) treats
+    False as fatal for critical=True writes (delete: the op ABORTS rather than
+    proceed with no way back) and as a surfaced warning otherwise; this
+    function's job is only to report the outcome honestly, never to swallow
+    it (previously it silently ate the exception and let the write proceed
+    regardless)."""
     state.last_checkpoint = {"reason": reason, "critical": critical,
                              "created": None, "error": None}
     if mw is None or mw.col is None:
-        return
+        state.last_checkpoint["error"] = "collection is not open"
+        return False
     try:
         created = mw.col.create_backup(
             backup_folder=mw.pm.backupFolder(),
@@ -609,11 +629,14 @@ def _backup_checkpoint(reason: str, critical: bool = False) -> None:
             wait_for_completion=critical,
         )
         state.last_checkpoint["created"] = bool(created)
+        return True
     except Exception as exc:
-        # Backups are defense-in-depth; a failure must not block the op, but
-        # it must be visible (backend log + doctor), not silently swallowed.
+        # Backups are defense-in-depth, but a failure must be visible (backend
+        # log + doctor) and, for critical writes, must block the op - see the
+        # docstring above.
         state.last_checkpoint["error"] = str(exc)
         _log_line(f"backup checkpoint failed ({reason}): {exc}")
+        return False
 
 
 def _refresh_reviewer(note_ids: list[int]) -> None:

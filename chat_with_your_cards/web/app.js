@@ -1669,6 +1669,12 @@
             case "text_delta":
                 appendDelta(payload.text);
                 break;
+            case "thinking_delta":
+                // Extended-thinking text. The classic UI has no reasoning
+                // panel (that's the new assistant-ui frontend's job, see
+                // ui/src/store.ts) - explicitly ignored here so it never
+                // leaks into the visible answer bubble or throws.
+                break;
             case "tool_call_started":
                 addToolChip(payload.call_id, payload.tool, payload.summary);
                 break;

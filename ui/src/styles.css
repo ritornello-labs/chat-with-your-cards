@@ -7,13 +7,16 @@
  * because this bundle does not yet know how the eventual Python loader will
  * wire it up (see ui/README.md "what remains for integration").
  *
- * Light/dark: `prefers-color-scheme` is the default (relevant standalone, in
- * the dev preview, or in any browser without Anki); `body.night-mode` is
- * Anki's own signal and wins whenever present, regardless of OS scheme -
- * `body.night-mode` has higher CSS specificity than the bare `:root` rules
- * below, so it always overrides them. Known gap: an Anki *light* theme
- * running inside an OS set to dark falls back to the OS signal, since Anki
- * has no equivalent "day-mode" class to detect that case explicitly.
+ * Light/dark, two authorities that never fight (2026-07-10):
+ * - Inside Anki, the ONLY signal is Anki's own night-mode marker. Anki sets
+ *   `night-mode` on document.documentElement (aqt/webview.py; the classic UI
+ *   keys `:root.night-mode` the same way) plus legacy `nightMode`/`night-mode`
+ *   body classes. prefers-color-scheme is deliberately ignored in Anki so an
+ *   Anki-light theme on a dark OS stays light (the gap the earlier scaffold
+ *   comment described is closed).
+ * - Standalone (npm run dev, plain-browser harnesses), dev-main.tsx adds
+ *   `cwyc-standalone` to <html>, which scopes the prefers-color-scheme block
+ *   below; the dev toolbar's night toggle still works via body.night-mode.
  */
 
 :root {
@@ -37,7 +40,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root.cwyc-standalone {
     --cwyc-bg: #1e1e1e;
     --cwyc-surface: #262626;
     --cwyc-surface-elevated: #2c2c2c;
@@ -56,7 +59,9 @@
   }
 }
 
-body.night-mode {
+:root.night-mode,
+body.night-mode,
+body.nightMode {
   --cwyc-bg: #1e1e1e;
   --cwyc-surface: #262626;
   --cwyc-surface-elevated: #2c2c2c;

@@ -286,6 +286,17 @@ class FakeCol:
         self._next_id = 100
         self._scm = 1000  # schema mark; no op in this suite bumps it
         self.db = FakeDB(self)
+        # Undo-queue stand-in for _discard_dangling_undo (proposals.py): real
+        # Anki's dangling-undo-entry wart (SAFETY.md) can't be reproduced by
+        # this dict-snapshot fake (there is no separate in-memory undo queue
+        # here to leave dangling), so this only counts calls to confirm
+        # ProposalManager asks for exactly the right number of pops - whether
+        # a real col.undo() call is itself safe is verified against real Anki
+        # by the gui_smoke probe.
+        self.undo_calls = 0
+
+    def undo(self) -> None:
+        self.undo_calls += 1
 
     # --- transaction rollback support (see FakeDB.transact) ---
 
@@ -407,21 +418,24 @@ def make_manager(
     config: dict[str, Any] | None = None,
     writes: list | None = None,
     checkpoints: list | None = None,
+    checkpoint_ok: bool = True,
     observes: list | None = None,
     apply_skill=None,
 ):
     col = FakeCol()
     pushed: list[dict[str, Any]] = []
+
+    def checkpoint(reason: str, critical: bool) -> bool:
+        if checkpoints is not None:
+            checkpoints.append((reason, critical))
+        return checkpoint_ok
+
     manager = ProposalManager(
         get_col=lambda: col,
         push=pushed.append,
         config=config if config is not None else {},
         after_write=(writes.append if writes is not None else None),
-        checkpoint=(
-            (lambda reason, critical: checkpoints.append((reason, critical)))
-            if checkpoints is not None
-            else None
-        ),
+        checkpoint=checkpoint,
         observe=(observes.append if observes is not None else None),
         apply_skill=apply_skill,
     )
@@ -989,6 +1003,77 @@ class DeleteTests(unittest.TestCase):
         self.assertEqual(1, len(col._notes))
         self.assertTrue(
             any("backup" in n["text"] for n in pushes_of(pushed, "notice"))
+        )
+
+    def test_delete_aborts_when_backup_checkpoint_fails(self) -> None:
+        # A critical (delete) checkpoint failure must ABORT before anything is
+        # touched - a destructive op must never proceed without a safety net.
+        checkpoints: list = []
+        manager, col, pushed = make_manager(
+            checkpoints=checkpoints, checkpoint_ok=False
+        )
+        ids = _seed_notes(manager, col, pushed, n=2)
+        ledger_mark = len(manager._ledger)
+        result = manager.submit_delete_notes({"note_ids": ids})
+        manager.accept({"id": result["proposal_id"]})
+
+        self.assertEqual(2, len(col._notes))  # nothing deleted
+        errors = pushes_of(pushed, "proposal_error")
+        self.assertTrue(errors)
+        self.assertIn("backup failed", errors[-1]["message"])
+        self.assertIn("not performed", errors[-1]["message"])
+        proposal = manager._proposals[result["proposal_id"]]
+        self.assertEqual("pending", proposal.status)  # left for retry, not lost
+        self.assertEqual(ledger_mark, len(manager._ledger))  # no phantom entry
+
+
+class BackupWarningTests(unittest.TestCase):
+    """Non-critical checkpoint failures (bulk/change-set/deck-options: all
+    ledger-revertible) must not block the write - only surface a warning on
+    the resolved proposal (Job 2's backup-abort contract, the non-critical
+    half; DeleteTests covers the critical/abort half)."""
+
+    def test_bulk_rename_tag_warns_but_still_applies(self) -> None:
+        manager, col, pushed = make_manager(checkpoint_ok=False)
+        _seed_notes(manager, col, pushed)
+        result = manager.submit_rename_tag({"old_tag": "analysis", "new_tag": "math"})
+        manager.accept({"id": result["proposal_id"]})
+
+        self.assertEqual(3, len(col.find_notes('tag:"math"')))  # still applied
+        resolved = pushes_of(pushed, "proposal_resolved")[-1]
+        self.assertTrue(
+            any("backup checkpoint failed" in w for w in resolved["warnings"])
+        )
+
+    def test_change_set_warns_but_still_applies(self) -> None:
+        manager, col, pushed = make_manager(checkpoint_ok=False)
+        ids = _seed_notes(manager, col, pushed, n=2)
+        cs = manager.open_change_set({"title": "Tidy"})
+        manager.add_to_change_set(
+            {"change_set_id": cs["change_set_id"], "note_id": ids[0],
+             "field_changes": {"Back": "tidy"}}
+        )
+        manager.close_change_set({"change_set_id": cs["change_set_id"]})
+        manager.accept({"id": cs["change_set_id"]})
+
+        self.assertEqual("tidy", col.get_note(ids[0])["Back"])  # still applied
+        resolved = pushes_of(pushed, "proposal_resolved")[-1]
+        self.assertTrue(
+            any("backup checkpoint failed" in w for w in resolved["warnings"])
+        )
+
+    def test_deck_options_warns_but_still_applies(self) -> None:
+        manager, col, pushed = make_manager(checkpoint_ok=False)
+        result = manager.submit_set_deck_options(
+            {"deck": "Default", "options": {"new.perDay": 30}}
+        )
+        manager.accept({"id": result["proposal_id"]})
+
+        conf = col.decks.config_dict_for_deck_id(col.decks.id("Default"))
+        self.assertEqual(30, conf["new"]["perDay"])  # still applied
+        resolved = pushes_of(pushed, "proposal_resolved")[-1]
+        self.assertTrue(
+            any("backup checkpoint failed" in w for w in resolved["warnings"])
         )
 
 
@@ -1615,6 +1700,88 @@ class SafetyWiringTests(unittest.TestCase):
         self.assertEqual(0, col.note_count())  # rolled back: no note committed
         self.assertEqual(0, col.card_count())
         self.assertEqual([], manager._ledger)
+        # SAFETY.md's dangling-undo-entry wart: add_note's own backend call
+        # already completed (and would have pushed a real undo entry on real
+        # Anki) before count_delta_matches caught the stray card and rolled
+        # the SQL back. _discard_dangling_undo must ask for exactly one pop.
+        self.assertEqual(1, col.undo_calls)
+
+
+class UndoDiscardTests(unittest.TestCase):
+    """SAFETY.md's "Known wart on the rollback path": a postcondition that
+    rejects a write AFTER the backend already applied it leaves a dangling
+    in-memory undo entry behind (real-Anki behavior; FakeCol has no separate
+    undo queue to reproduce that on, see FakeCol.undo_calls). These tests
+    lock in the *wiring*: _discard_dangling_undo is asked for exactly as many
+    pops as backend RPCs actually ran - never a guess, never more than that
+    (which would risk eating into real prior undo history). Whether a real
+    col.undo() call is itself a safe no-op against a real, already-rolled-
+    -back collection is verified separately by the gui_smoke probe."""
+
+    @staticmethod
+    def _force_postcondition_failure():
+        from chat_with_your_cards import proposals as proposals_mod
+
+        original = proposals_mod.invariants.assert_all
+
+        def boom(*_a: Any, **_kw: Any) -> None:
+            raise proposals_mod.invariants.InvariantViolation("forced")
+
+        proposals_mod.invariants.assert_all = boom
+        return proposals_mod, original
+
+    def test_bulk_find_replace_pops_one_per_applied_note(self) -> None:
+        manager, col, pushed = make_manager()
+        _seed_notes(manager, col, pushed, n=3)
+        result = manager.submit_find_replace({"search": "A", "replacement": "B"})
+
+        proposals_mod, original = self._force_postcondition_failure()
+        try:
+            manager.accept({"id": result["proposal_id"]})
+        finally:
+            proposals_mod.invariants.assert_all = original
+
+        self.assertTrue(pushes_of(pushed, "proposal_error"))
+        # All 3 seeded notes match "A" -> update_note ran 3 times before the
+        # postcondition raised, so exactly 3 entries are dangling.
+        self.assertEqual(3, col.undo_calls)
+
+    def test_precondition_failure_never_calls_undo(self) -> None:
+        manager, col, pushed = make_manager()
+        result = manager.submit_create(dict(CREATE_ARGS))
+        self.assertEqual("pending_user_review", result["status"])
+        # The note type vanishes between submit and accept (e.g. deleted in
+        # another window): contract.check_create's precondition rejects it
+        # INSIDE accept(), before execute() ever touches the backend. There
+        # is nothing dangling to clean up, and calling undo() here would
+        # wrongly pop a real, unrelated prior entry.
+        del col.models._models["Basic"]
+        manager.accept({"id": result["proposal_id"]})
+        self.assertTrue(pushes_of(pushed, "proposal_error"))
+        self.assertEqual(0, col.undo_calls)
+
+    def test_revert_pops_after_a_forced_corruption_check(self) -> None:
+        from chat_with_your_cards import invariants as invariants_mod
+
+        manager, col, pushed = make_manager()
+        _seed_notes(manager, col, pushed, n=1)
+        result = manager.submit_find_replace({"search": "A0", "replacement": "Z0"})
+        manager.accept({"id": result["proposal_id"]})
+        self.assertEqual(0, col.undo_calls)  # clean apply, nothing dangling yet
+
+        original = invariants_mod.no_homeless_filtered_cards
+        invariants_mod.no_homeless_filtered_cards = lambda *_a, **_kw: "forced"
+        try:
+            manager.revert({"id": result["proposal_id"]})
+        finally:
+            invariants_mod.no_homeless_filtered_cards = original
+
+        self.assertTrue(
+            any("Could not revert" in n["text"] for n in pushes_of(pushed, "notice"))
+        )
+        # mutate_change_set ran to completion (one update_note) before the
+        # forced corruption check rejected the revert.
+        self.assertEqual(1, col.undo_calls)
 
 
 if __name__ == "__main__":
