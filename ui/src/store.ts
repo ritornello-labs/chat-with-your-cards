@@ -131,10 +131,82 @@ export interface UsageSnapshot {
   readonly outputTokens: number | null;
 }
 
+// ---- UI/control state pushed by Python (controller.py / __init__.py) ----
+
+export interface AgentState {
+  readonly backend: string;
+  readonly model: string; // "" | "fable" | "opus" | "sonnet" | "haiku"
+  readonly effort: string; // "" | "low" | "medium" | "high" | "max"
+  readonly mode: string; // permission mode
+}
+
+export interface NoteTypeMeta {
+  readonly name: string;
+  readonly fields: readonly string[];
+}
+
+export interface CollectionMeta {
+  readonly decks: readonly string[];
+  readonly noteTypes: readonly NoteTypeMeta[];
+  readonly tags: readonly string[];
+}
+
+export interface PinsState {
+  readonly deck: string;
+  readonly note_type: string;
+  readonly tags: readonly string[];
+  readonly fields: Readonly<Record<string, string>>;
+}
+
+export interface HistoryEntry {
+  readonly id: string;
+  readonly title: string;
+  readonly updated_at: number;
+  readonly events: number;
+}
+
+export interface DoctorRow {
+  readonly label: string;
+  readonly status: string;
+  readonly detail: string;
+  readonly link?: string;
+}
+
+export interface UiState {
+  readonly agent: AgentState;
+  readonly openTarget: "terminal" | "desktop";
+  readonly meta: CollectionMeta;
+  readonly pins: PinsState;
+  readonly history: readonly HistoryEntry[] | null; // null = never fetched
+  readonly doctor: readonly DoctorRow[] | null; // null = never run
+  readonly notice: { text: string; seq: number } | null;
+}
+
+export const PERMISSION_MODES: readonly { id: string; label: string; hint: string }[] = [
+  { id: "ask-each-read", label: "Ask each read", hint: "Every tool call needs your OK" },
+  { id: "read-only", label: "Read-only", hint: "No write tools offered at all" },
+  { id: "default", label: "Propose", hint: "Reads free; writes as review cards" },
+  { id: "auto-accept", label: "Auto-accept", hint: "New notes apply instantly (capped)" },
+  { id: "trusted-writes", label: "Trusted writes", hint: "Writes apply under a session budget" },
+];
+
+const EMPTY_PINS: PinsState = { deck: "", note_type: "", tags: [], fields: {} };
+
+const DEFAULT_UI_STATE: UiState = {
+  agent: { backend: "auto", model: "", effort: "", mode: "default" },
+  openTarget: "terminal",
+  meta: { decks: [], noteTypes: [], tags: [] },
+  pins: EMPTY_PINS,
+  history: null,
+  doctor: null,
+  notice: null,
+};
+
 export interface ChatState {
   readonly messages: readonly ThreadMessageLike[];
   readonly isRunning: boolean;
   readonly usage: UsageSnapshot | null;
+  readonly ui: UiState;
 }
 
 export type Listener = () => void;
@@ -169,6 +241,8 @@ export class ChatStore {
   private messages: StoreMessage[] = [];
   private isRunning = false;
   private usage: UsageSnapshot | null = null;
+  private ui: UiState = DEFAULT_UI_STATE;
+  private noticeSeq = 0;
   private currentAssistantId: string | null = null;
   private readonly listeners = new Set<Listener>();
   private snapshot: ChatState;
@@ -191,6 +265,7 @@ export class ChatStore {
       messages: this.messages.map(toThreadMessageLike),
       isRunning: this.isRunning,
       usage: this.usage,
+      ui: this.ui,
     };
   }
 
@@ -242,6 +317,55 @@ export class ChatStore {
 
   rejectProposal(id: string): void {
     postCommand({ type: "proposal_reject", id });
+  }
+
+  // ---- outbound: control-surface commands (header + composer row) ----
+
+  setAgent(model: string, effort: string): void {
+    // Optimistic: Python re-pushes the authoritative "agent" state after.
+    this.ui = { ...this.ui, agent: { ...this.ui.agent, model, effort } };
+    this.emit();
+    postCommand({ type: "set_agent", model, effort });
+  }
+
+  setPermissionMode(mode: string): void {
+    this.ui = { ...this.ui, agent: { ...this.ui.agent, mode } };
+    this.emit();
+    postCommand({ type: "set_permission_mode", mode });
+  }
+
+  cyclePermissionMode(): void {
+    const ids = PERMISSION_MODES.map((m) => m.id);
+    const index = ids.indexOf(this.ui.agent.mode);
+    this.setPermissionMode(ids[(index + 1) % ids.length]);
+  }
+
+  setPins(pins: PinsState): void {
+    this.ui = { ...this.ui, pins };
+    this.emit();
+    postCommand({ type: "set_pins", pins });
+  }
+
+  openInClaude(): void {
+    postCommand({ type: "open_in_claude", target: this.ui.openTarget });
+  }
+
+  setOpenTarget(target: "terminal" | "desktop"): void {
+    this.ui = { ...this.ui, openTarget: target };
+    this.emit();
+    postCommand({ type: "set_open_in_claude_target", target });
+  }
+
+  requestHistory(): void {
+    postCommand({ type: "list_history" });
+  }
+
+  loadHistory(id: string): void {
+    postCommand({ type: "load_history", id });
+  }
+
+  runDoctor(): void {
+    postCommand({ type: "run_doctor" });
   }
 
   // ---- inbound: Python -> UI ----
@@ -298,6 +422,75 @@ export class ChatStore {
       case "reset":
         this.reset();
         break;
+      case "agent": {
+        const agent = event as { backend?: string; model?: string; effort?: string; mode?: string };
+        this.ui = {
+          ...this.ui,
+          agent: {
+            backend: String(agent.backend ?? this.ui.agent.backend),
+            model: String(agent.model ?? ""),
+            effort: String(agent.effort ?? ""),
+            mode: String(agent.mode ?? "default"),
+          },
+        };
+        this.emit();
+        break;
+      }
+      case "ui_config": {
+        const cfg = event as { open_in_claude_target?: string };
+        const target = cfg.open_in_claude_target === "desktop" ? "desktop" : "terminal";
+        this.ui = { ...this.ui, openTarget: target };
+        this.emit();
+        break;
+      }
+      case "collection_meta": {
+        const meta = event as { decks?: string[]; note_types?: NoteTypeMeta[]; tags?: string[] };
+        this.ui = {
+          ...this.ui,
+          meta: {
+            decks: meta.decks ?? [],
+            noteTypes: meta.note_types ?? [],
+            tags: meta.tags ?? [],
+          },
+        };
+        this.emit();
+        break;
+      }
+      case "pins": {
+        const pins = (event as { pins?: Partial<PinsState> }).pins ?? {};
+        this.ui = {
+          ...this.ui,
+          pins: {
+            deck: String(pins.deck ?? ""),
+            note_type: String(pins.note_type ?? ""),
+            tags: (pins.tags as string[]) ?? [],
+            fields: (pins.fields as Record<string, string>) ?? {},
+          },
+        };
+        this.emit();
+        break;
+      }
+      case "history": {
+        const sessions = ((event as { sessions?: unknown[] }).sessions ?? []) as HistoryEntry[];
+        this.ui = { ...this.ui, history: sessions };
+        this.emit();
+        break;
+      }
+      case "doctor": {
+        const results = ((event as { results?: unknown[] }).results ?? []) as DoctorRow[];
+        this.ui = { ...this.ui, doctor: results };
+        this.emit();
+        break;
+      }
+      case "notice": {
+        this.noticeSeq += 1;
+        this.ui = {
+          ...this.ui,
+          notice: { text: String((event as { text?: string }).text ?? ""), seq: this.noticeSeq },
+        };
+        this.emit();
+        break;
+      }
       default:
         // Unknown event types are ignored on purpose (forward-compatible),
         // matching app.js's dispatch() default case.

@@ -316,6 +316,89 @@ export function installDevReplayer(): void {
     switch (msg.type) {
       case "ready":
         window.chatUI?.ackReady();
+        // Mirror _mark_web_ready (__init__.py): the initial control-state
+        // pushes so the header + composer controls are exercisable in dev.
+        window.chatUI?.dispatch({
+          type: "agent",
+          backend: "claude",
+          model: "opus",
+          effort: "high",
+          mode: "default",
+        });
+        window.chatUI?.dispatch({
+          type: "ui_config",
+          suggested_questions: true,
+          open_in_claude_target: "terminal",
+        });
+        window.chatUI?.dispatch({
+          type: "collection_meta",
+          decks: ["Default", "Math::Analysis", "Data Systems", "Chinese::Hanzi"],
+          note_types: [
+            { name: "Basic", fields: ["Front", "Back"] },
+            { name: "Cloze", fields: ["Text", "Extra"] },
+            { name: "Basic (source)", fields: ["Front", "Back", "Source"] },
+          ],
+          tags: ["ai-created", "analysis", "kimball", "probe"],
+        });
+        window.chatUI?.dispatch({ type: "pins", pins: { deck: "", note_type: "", tags: [], fields: {} } });
+        break;
+      case "list_history":
+        window.chatUI?.dispatch({
+          type: "history",
+          sessions: [
+            { id: "h1", title: "Conformed dimensions recap", updated_at: Date.now() / 1000 - 3600, events: 24 },
+            { id: "h2", title: "Epsilon-delta cards", updated_at: Date.now() / 1000 - 90000, events: 51 },
+          ],
+        });
+        break;
+      case "load_history":
+        cancelPending();
+        window.chatUI?.dispatch({ type: "reset" });
+        window.chatUI?.dispatch({ type: "notice", text: "Continuing chat from history (dev stub)." });
+        break;
+      case "run_doctor":
+        window.setTimeout(() => {
+          window.chatUI?.dispatch({
+            type: "doctor",
+            results: [
+              { label: "Claude Code", status: "ok", detail: "2.1.207 at ~/.local/bin/claude" },
+              { label: "Anthropic billing", status: "ok", detail: "harness login (no API key configured)" },
+              { label: "Codex", status: "missing", detail: "not found on PATH" },
+            ],
+          });
+        }, 350);
+        break;
+      case "set_agent":
+        window.chatUI?.dispatch({
+          type: "agent",
+          backend: "claude",
+          model: msg.model,
+          effort: msg.effort,
+          mode: "default",
+        });
+        window.chatUI?.dispatch({ type: "notice", text: `Switched to ${msg.model || "the default model"}.` });
+        break;
+      case "set_permission_mode":
+        window.chatUI?.dispatch({
+          type: "agent",
+          backend: "claude",
+          model: "opus",
+          effort: "high",
+          mode: msg.mode,
+        });
+        break;
+      case "set_pins":
+        window.chatUI?.dispatch({ type: "pins", pins: msg.pins });
+        break;
+      case "set_open_in_claude_target":
+        window.chatUI?.dispatch({
+          type: "ui_config",
+          suggested_questions: true,
+          open_in_claude_target: msg.target,
+        });
+        break;
+      case "open_in_claude":
+        window.chatUI?.dispatch({ type: "notice", text: `Would open in Claude Code (${msg.target}).` });
         break;
       case "send":
         scheduleAll(compile(selectScript(String(msg.text ?? ""))));

@@ -1053,6 +1053,43 @@ def _run_checks() -> dict[str, Any]:
 
     dom_info = check("transcript DOM rendered", _dom_rendered)
 
+    def _control_surface() -> dict[str, Any]:
+        """Parity rebuild (dogfood 2026-07-11): the header (new-chat, history,
+        open-in-Claude-Code split button, doctor cog) and the composer control
+        row (permission-mode chip, Pins, model/effort picker) must render, and
+        the mode chip must reflect the authoritative "agent" push (the probe
+        profile runs permission_mode=default -> label "Propose")."""
+        controls = _eval_js(
+            dock.web,
+            "(function() {"
+            "  var ids = ['header','new-chat','history-button','open-cc',"
+            "             'open-cc-caret','settings','mode-chip','pins-button',"
+            "             'model-picker'];"
+            "  var out = {};"
+            "  ids.forEach(function(id) {"
+            "    out[id.replace(/-/g, '_')] ="
+            "      document.querySelectorAll('[data-testid=' + id + ']').length;"
+            "  });"
+            "  var chip = document.querySelector('[data-testid=mode-chip]');"
+            "  out.mode_label = chip ? chip.textContent : '';"
+            "  var cc = document.querySelector('[data-testid=open-cc]');"
+            "  out.open_cc_text = cc ? cc.textContent : '';"
+            "  return out;"
+            "})();",
+            DOM_TIMEOUT_MS,
+            "control surface query",
+        )
+        missing = [key for key, count in controls.items() if isinstance(count, int) and count != 1]
+        if missing:
+            raise AssertionError(f"control surface incomplete ({missing}): {controls}")
+        if controls["mode_label"] != "Propose":
+            raise AssertionError(f"mode chip does not reflect agent state: {controls}")
+        if "Claude Code" not in controls["open_cc_text"]:
+            raise AssertionError(f"open-in-Claude-Code button mislabeled: {controls}")
+        return controls
+
+    check("control surface present (header + composer row)", _control_surface)
+
     def _focus_toggle_returns() -> None:
         dock.web.setFocus()
         QTest.qWait(100)

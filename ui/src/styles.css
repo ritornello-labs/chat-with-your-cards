@@ -1036,3 +1036,317 @@ body.nightMode {
     transition: none !important;
   }
 }
+
+/* ---- dock header (parity rebuild, dogfood 2026-07-11) ------------------- */
+
+.cwyc-header {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px 5px;
+  border-bottom: 1px solid var(--cwyc-border-subtle);
+  background: var(--cwyc-bg);
+}
+.cwyc-header-spacer {
+  flex: 1;
+}
+.cwyc-hbtn {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--cwyc-fg-subtle);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.cwyc-hbtn:hover {
+  background: var(--cwyc-surface);
+  color: var(--cwyc-fg);
+}
+.cwyc-hbtn:focus-visible,
+.cwyc-chip:focus-visible,
+.cwyc-split-main:focus-visible,
+.cwyc-split-caret:focus-visible {
+  outline: 2px solid var(--cwyc-amber-ring);
+  outline-offset: 1px;
+}
+
+.cwyc-split {
+  display: inline-flex;
+  align-items: stretch;
+}
+.cwyc-split-main {
+  border: 1px solid var(--cwyc-border);
+  border-right: none;
+  border-radius: 7px 0 0 7px;
+  background: var(--cwyc-surface-raised);
+  color: var(--cwyc-fg);
+  font: 500 11.5px var(--cwyc-font);
+  padding: 4px 9px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cwyc-split-main:hover {
+  background: var(--cwyc-amber-soft);
+}
+.cwyc-split-caret {
+  border: 1px solid var(--cwyc-border);
+  border-radius: 0 7px 7px 0;
+  background: var(--cwyc-surface-raised);
+  color: var(--cwyc-fg-subtle);
+  padding: 0 5px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+.cwyc-split-caret:hover {
+  background: var(--cwyc-amber-soft);
+  color: var(--cwyc-fg);
+}
+
+/* ---- floating panels + menus -------------------------------------------- */
+
+.cwyc-ctl {
+  position: relative;
+  display: inline-flex;
+}
+.cwyc-panel {
+  position: absolute;
+  z-index: 40;
+  min-width: 210px;
+  max-width: 300px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--cwyc-surface-raised);
+  border: 1px solid var(--cwyc-border);
+  border-radius: 10px;
+  box-shadow: var(--cwyc-card-shadow);
+  padding: 6px;
+}
+.cwyc-panel-header {
+  top: calc(100% + 4px);
+  right: 8px;
+}
+.cwyc-panel-composer {
+  bottom: calc(100% + 6px);
+  left: 0;
+}
+.cwyc-panel-right {
+  left: auto;
+  right: 0;
+}
+.cwyc-panel-title {
+  font: 500 10.5px var(--cwyc-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--cwyc-fg-subtle);
+  padding: 4px 8px 3px;
+}
+.cwyc-panel-title-gap {
+  margin-top: 6px;
+  border-top: 1px solid var(--cwyc-border-subtle);
+  padding-top: 7px;
+}
+.cwyc-panel-subtitle {
+  font: 500 10.5px var(--cwyc-mono);
+  color: var(--cwyc-fg-subtle);
+  padding: 6px 8px 2px;
+}
+.cwyc-panel-empty {
+  font-size: 12.5px;
+  color: var(--cwyc-fg-subtle);
+  padding: 6px 8px 7px;
+}
+.cwyc-menu-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--cwyc-fg);
+  font: 400 12.5px var(--cwyc-font);
+  text-align: left;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+.cwyc-menu-item:hover {
+  background: var(--cwyc-surface);
+}
+.cwyc-menu-item.cwyc-active {
+  background: var(--cwyc-amber-soft);
+  color: var(--cwyc-amber-ink);
+}
+.cwyc-menu-label {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cwyc-menu-hint {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  color: var(--cwyc-fg-subtle);
+}
+
+/* ---- composer control row ------------------------------------------------ */
+
+.cwyc-composer-bar {
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}
+.cwyc-composer-left,
+.cwyc-composer-right {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.cwyc-chip {
+  border: 1px solid var(--cwyc-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--cwyc-fg-subtle);
+  font: 500 11px var(--cwyc-font);
+  padding: 3px 9px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cwyc-chip:hover {
+  background: var(--cwyc-surface);
+  color: var(--cwyc-fg);
+}
+.cwyc-chip-on {
+  border-color: var(--cwyc-amber);
+  color: var(--cwyc-amber-ink);
+  background: var(--cwyc-amber-soft);
+}
+.cwyc-chip-primary {
+  background: var(--cwyc-amber);
+  border-color: var(--cwyc-amber);
+  color: var(--cwyc-on-amber);
+}
+.cwyc-chip-primary:hover {
+  background: var(--cwyc-amber-hover);
+  color: var(--cwyc-on-amber);
+}
+
+/* pins panel rows */
+.cwyc-panel-pins {
+  min-width: 250px;
+}
+.cwyc-pin-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px;
+  font-size: 12px;
+  color: var(--cwyc-fg-subtle);
+}
+.cwyc-pin-row > span {
+  flex: 0 0 74px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cwyc-pin-row select,
+.cwyc-pin-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: 400 12px var(--cwyc-font);
+  color: var(--cwyc-fg);
+  background: var(--cwyc-bg);
+  border: 1px solid var(--cwyc-border);
+  border-radius: 6px;
+  padding: 3px 6px;
+}
+.cwyc-panel-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 7px 8px 3px;
+}
+
+/* the obvious stop control (dogfood: the old 26px dot was unfindable) */
+.cwyc-send-stop {
+  width: auto;
+  border-radius: 999px;
+  gap: 5px;
+  padding: 0 11px 0 9px;
+  background: var(--cwyc-amber);
+  color: var(--cwyc-on-amber);
+}
+.cwyc-send-stop:hover {
+  background: var(--cwyc-amber-hover);
+}
+.cwyc-stop-label {
+  font: 500 11.5px var(--cwyc-font);
+}
+
+/* doctor rows */
+.cwyc-doctor-row {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: 12px;
+  padding: 4px 8px;
+  color: var(--cwyc-fg);
+}
+.cwyc-doctor-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cwyc-fg-faint);
+  align-self: center;
+}
+.cwyc-doctor-ok .cwyc-doctor-dot {
+  background: var(--cwyc-green);
+}
+.cwyc-doctor-warn .cwyc-doctor-dot,
+.cwyc-doctor-warning .cwyc-doctor-dot {
+  background: var(--cwyc-warn);
+}
+.cwyc-doctor-error .cwyc-doctor-dot,
+.cwyc-doctor-missing .cwyc-doctor-dot {
+  background: var(--cwyc-red);
+}
+.cwyc-doctor-label {
+  flex: 0 0 auto;
+  font-weight: 500;
+}
+.cwyc-doctor-detail {
+  flex: 1 1 auto;
+  color: var(--cwyc-fg-subtle);
+  overflow-wrap: anywhere;
+}
+
+/* transient notice strip */
+.cwyc-notice {
+  flex: 0 0 auto;
+  margin: 0 12px 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--cwyc-border-subtle);
+  border-radius: 8px;
+  background: var(--cwyc-surface);
+  color: var(--cwyc-fg-subtle);
+  font-size: 12px;
+}
+
+/* Composer menus (mode/model): stack label over hint - at dock widths an
+   inline hint starves the label into ellipsis ("As…", "P."). Header menus
+   (history) keep the inline title+time layout. */
+.cwyc-panel-composer .cwyc-menu-item {
+  display: block;
+}
+.cwyc-panel-composer .cwyc-menu-hint {
+  display: block;
+  margin-top: 1px;
+}

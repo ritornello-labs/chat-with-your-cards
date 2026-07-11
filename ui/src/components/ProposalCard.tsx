@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { ChatStore, ProposalCardData } from "../store";
 
 const KIND_LABELS: Record<string, string> = {
@@ -103,6 +103,29 @@ function PreviewFlip({ previews }: { previews: PreviewsPayload }) {
     return null;
   }, [previews]);
   const [flippedOverride, setFlippedOverride] = useState<boolean | null>(null);
+  // Per-face scroll positions, preserved across tab toggles AND across iframe
+  // reloads (a proposal update replaces srcDoc, which resets the document).
+  // Captured continuously via a scroll listener installed on load; restored on
+  // every load. Requires sandbox="allow-same-origin" - still script-LESS (no
+  // allow-scripts), so the card HTML cannot run code; same-origin only lets
+  // *us* reach the document to save/restore scrollTop. (dogfood 2026-07-11)
+  const scrollPos = useRef<[number, number]>([0, 0]);
+  const wireScrollPersistence = (index: 0 | 1) => (frame: HTMLIFrameElement | null) => {
+    if (!frame) return;
+    frame.onload = () => {
+      const doc = frame.contentDocument;
+      if (!doc) return;
+      const el = doc.scrollingElement ?? doc.documentElement;
+      el.scrollTop = scrollPos.current[index];
+      doc.addEventListener(
+        "scroll",
+        () => {
+          scrollPos.current[index] = el.scrollTop;
+        },
+        { passive: true }
+      );
+    };
+  };
   if (!faces) return null;
   const flipped = flippedOverride ?? faces.defaultFlipped;
 
@@ -127,10 +150,20 @@ function PreviewFlip({ previews }: { previews: PreviewsPayload }) {
       <div className="cwyc-flip">
         <div className={"cwyc-flip-inner" + (flipped ? " cwyc-flipped" : "")}>
           <div className="cwyc-flip-face">
-            <iframe sandbox="" title={faces.labels[0]} srcDoc={faces.front} />
+            <iframe
+              sandbox="allow-same-origin"
+              title={faces.labels[0]}
+              srcDoc={faces.front}
+              ref={wireScrollPersistence(0)}
+            />
           </div>
           <div className="cwyc-flip-face cwyc-flip-face-back">
-            <iframe sandbox="" title={faces.labels[1]} srcDoc={faces.back} />
+            <iframe
+              sandbox="allow-same-origin"
+              title={faces.labels[1]}
+              srcDoc={faces.back}
+              ref={wireScrollPersistence(1)}
+            />
           </div>
         </div>
       </div>

@@ -1,10 +1,13 @@
+import type { KeyboardEvent } from "react";
 import { ComposerPrimitive, MessagePrimitive, ThreadPrimitive } from "@assistant-ui/react";
+import { useChatState } from "./ChatRuntimeProvider";
 import type { ChatStore } from "./store";
 import { ProposalCard } from "./components/ProposalCard";
 import { ToolCallCard } from "./components/ToolCallCard";
 import { ReasoningBlock } from "./components/ReasoningBlock";
 import { ErrorBanner } from "./components/ErrorBanner";
 import { TextPart } from "./components/TextPart";
+import { ModeChip, ModelPicker, PinsButton } from "./components/ComposerControls";
 
 function UserMessage() {
   return (
@@ -38,7 +41,21 @@ function AssistantMessage({ store }: { store: ChatStore }) {
   );
 }
 
-function Composer() {
+function Composer({ store }: { store: ChatStore }) {
+  const { isRunning } = useChatState(store);
+
+  // Make the tooltips true: Esc stops generation while streaming; Shift+Tab
+  // cycles permission modes (both classic-UI behaviors, DESIGN.md section 9).
+  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Escape" && isRunning) {
+      e.preventDefault();
+      store.cancel();
+    } else if (e.key === "Tab" && e.shiftKey) {
+      e.preventDefault();
+      store.cyclePermissionMode();
+    }
+  };
+
   return (
     <ComposerPrimitive.Root className="cwyc-composer">
       <ComposerPrimitive.Input
@@ -46,28 +63,37 @@ function Composer() {
         placeholder="Ask about this card…"
         rows={1}
         data-testid="composer-input"
+        onKeyDown={onKeyDown}
       />
       <div className="cwyc-composer-bar">
-        <ThreadPrimitive.If running={false}>
-          <ComposerPrimitive.Send
-            className="cwyc-send"
-            aria-label="Send"
-            title="Send (Enter)"
-            data-testid="send"
-          >
-            <SendIcon />
-          </ComposerPrimitive.Send>
-        </ThreadPrimitive.If>
-        <ThreadPrimitive.If running>
-          <ComposerPrimitive.Cancel
-            className="cwyc-send cwyc-send-stop"
-            aria-label="Stop"
-            title="Stop (Esc)"
-            data-testid="stop"
-          >
-            <StopIcon />
-          </ComposerPrimitive.Cancel>
-        </ThreadPrimitive.If>
+        <div className="cwyc-composer-left">
+          <ModeChip store={store} />
+          <PinsButton store={store} />
+        </div>
+        <div className="cwyc-composer-right">
+          <ModelPicker store={store} />
+          <ThreadPrimitive.If running={false}>
+            <ComposerPrimitive.Send
+              className="cwyc-send"
+              aria-label="Send"
+              title="Send (Enter)"
+              data-testid="send"
+            >
+              <SendIcon />
+            </ComposerPrimitive.Send>
+          </ThreadPrimitive.If>
+          <ThreadPrimitive.If running>
+            <ComposerPrimitive.Cancel
+              className="cwyc-send cwyc-send-stop"
+              aria-label="Stop generating"
+              title="Stop generating (Esc)"
+              data-testid="stop"
+            >
+              <StopIcon />
+              <span className="cwyc-stop-label">Stop</span>
+            </ComposerPrimitive.Cancel>
+          </ThreadPrimitive.If>
+        </div>
       </div>
     </ComposerPrimitive.Root>
   );
@@ -107,7 +133,7 @@ export function Thread({ store }: { store: ChatStore }) {
           {({ message }) => (message.role === "user" ? <UserMessage /> : <AssistantMessage store={store} />)}
         </ThreadPrimitive.Messages>
       </ThreadPrimitive.Viewport>
-      <Composer />
+      <Composer store={store} />
     </ThreadPrimitive.Root>
   );
 }
