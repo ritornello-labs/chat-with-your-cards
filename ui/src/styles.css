@@ -208,6 +208,28 @@ body.nightMode {
   overflow-wrap: break-word;
 }
 
+/* The no-real-text indicator (rotating "Thinking…" phrase while running, a
+   static "Thought for ~N tokens" once done) is a plain line, not a
+   collapsible box - lighter weight than the boxed .cwyc-reasoning <details>
+   above, matching the classic UI's equivalent (web/styles.css). */
+.cwyc-reasoning-indicator {
+  border: none;
+  padding: 2px 0;
+  font-style: italic;
+}
+
+.cwyc-reasoning-indicator.cwyc-reasoning-running {
+  color: var(--cwyc-accent);
+}
+
+.cwyc-reasoning-tokens {
+  opacity: 0.75;
+}
+
+.cwyc-reasoning-done {
+  color: var(--cwyc-fg-subtle);
+}
+
 /* ---------- tool call chips ---------- */
 
 .cwyc-tool-chip {

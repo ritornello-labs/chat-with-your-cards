@@ -11,6 +11,7 @@ from chat_with_your_cards.backends import (  # noqa: E402
     Done,
     ScriptedBackend,
     TextDelta,
+    ThinkingDelta,
     ToolCallFinished,
     ToolCallStarted,
 )
@@ -80,6 +81,19 @@ class ScriptedBackendTest(unittest.TestCase):
         self.assertEqual(1, len(finished))
         self.assertEqual(started[0].call_id, finished[0].call_id)
         self.assertLess(events.index(started[0]), events.index(finished[0]))
+
+    def test_tool_script_thinking_phase_precedes_text_and_tool(self) -> None:
+        scheduler, session = self._session()
+        events: list[ChatEvent] = []
+        session.send("please run a tool demo", collect(events))
+        scheduler.run_all()
+
+        thinking = [e for e in events if isinstance(e, ThinkingDelta)]
+        self.assertGreaterEqual(len(thinking), 2)
+        self.assertTrue(all(d.text == "" for d in thinking))
+        self.assertTrue(all(d.estimated_tokens for d in thinking))
+        first_other = next(e for e in events if not isinstance(e, ThinkingDelta))
+        self.assertLess(events.index(thinking[-1]), events.index(first_other))
 
     def test_cancel_stops_emission_and_no_done(self) -> None:
         scheduler, session = self._session()

@@ -182,6 +182,49 @@ body {
     font-style: italic;
 }
 
+/* ---------- thinking indicator ---------- */
+
+.cwyc-row-thinking {
+    max-width: 100%;
+    min-width: 0;
+}
+
+.cwyc-thinking-indicator {
+    font-size: 11px;
+    color: var(--fg-subtle, var(--fg));
+    font-style: italic;
+    opacity: 0.9;
+}
+
+.cwyc-thinking-indicator-done {
+    font-style: italic;
+}
+
+.cwyc-thinking-tokens {
+    opacity: 0.75;
+}
+
+.cwyc-thinking-details {
+    font-size: 11px;
+    color: var(--fg-subtle, var(--fg));
+}
+
+.cwyc-thinking-details summary {
+    cursor: pointer;
+    font-style: italic;
+}
+
+.cwyc-thinking-details summary:hover {
+    color: var(--fg);
+}
+
+.cwyc-thinking-text {
+    margin-top: 4px;
+    white-space: pre-wrap;
+    font-style: normal;
+    opacity: 0.9;
+}
+
 /* ---------- tool chips ---------- */
 
 .cwyc-row-tool {

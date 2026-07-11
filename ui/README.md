@@ -91,8 +91,13 @@ upgrade changes this.
 
 ## Bundle size
 
-- `bundle.js`: 441,942 bytes (431 KiB) uncompressed, 131,184 bytes (128 KiB) gzipped
-- `bundle.css`: 8,264 bytes gzipped to 2,137 bytes
+- `bundle.js`: 443,130 bytes (433 KiB) uncompressed, ~131,258 bytes (128 KiB) gzipped
+- `bundle.css`: 8,540 bytes, ~2,184 bytes gzipped
+
+(As of the thinking-indicator pass, 2026-07-11: +1,188 bytes JS / +276 bytes
+CSS over the previous 441,942 / 8,264 - the `ReasoningBlock.tsx` rewrite plus
+`store.ts`'s `appendThinking`/`THINKING_SENTINEL` addition, no new
+dependency.)
 
 ## The bridge contract
 
@@ -139,7 +144,7 @@ necessarily mounted) that maps the `ChatEvent` stream onto assistant-ui's
 | Event (`events.ts`, mirrors `backends/base.py`'s `event_to_dict()`) | UI effect |
 |---|---|
 | `text_delta` | appended to a trailing `{type:"text"}` part |
-| `thinking_delta` *(not real yet - see below)* | appended to a trailing `{type:"reasoning"}` part |
+| `thinking_delta` (real since 2026-07-11 - see below) | appended to a trailing `{type:"reasoning"}` part, `text` pinned to `THINKING_SENTINEL` while no real text has streamed |
 | `tool_call_started` | new `{type:"tool-call"}` part, `result` unset |
 | `tool_call_finished` | sets `result`/`isError` on the matching part by `call_id` |
 | `proposal` (`proposals.py`'s `Proposal.to_payload()`, same dict `app.js`'s `renderProposal()` reads) | `{type:"data", name:"proposal"}` part, created once and updated in place on repeat pushes for the same `id` |
@@ -161,12 +166,27 @@ send exactly `{type:"proposal_accept", id, fields, accepted_fields?}` /
 
 ### Impedance mismatches hit against assistant-ui's model
 
-- **`thinking_delta` does not exist upstream.** `backends/base.py`'s
-  `ChatEvent` union has no reasoning event. It is stubbed *only* in
-  `src/dev/replayer.ts` so the Reasoning primitive path (collapsible
-  `{type:"reasoning"}` parts, `components.Reasoning` on
-  `MessagePrimitive.Parts`) is proven end-to-end ahead of any real backend
-  emitting it. Real `bridge.py` traffic will never send this today.
+- **`thinking_delta` text is redacted upstream at every reasoning effort
+  level observed from the real CLI (landed 2026-07-11, `backends/base.py`'s
+  `ThinkingDelta` now carries `estimated_tokens` too).** The account/CLI
+  streams `thinking_delta` stream events with an empty `thinking` string
+  throughout - only an opaque, encrypted `signature_delta` carries the real
+  content - so `text` on the reasoning part stays empty in practice, and
+  `estimated_tokens` is the only signal a thinking phase is live.
+  assistant-ui's `fromThreadMessageLike` (`@assistant-ui/core`, not the
+  public docs - confirmed by reading the shipped source) drops any
+  `{type:"reasoning"}` part whose `text` is empty/whitespace-only when
+  converting `ThreadMessageLike` -> `ThreadMessage`, which would otherwise
+  make the part - and the indicator it carries - vanish outright while
+  `text` is empty. Worked around with `store.ts`'s `THINKING_SENTINEL` (a
+  zero-width space, not stripped by `.trim()`) standing in for `text`
+  whenever no real thinking text has accumulated; `ReasoningBlock.tsx`
+  checks for the sentinel to drive a rotating "Thinking… ~N tokens"
+  indicator instead of rendering it as visible text. `estimatedTokens`
+  itself is not part of assistant-ui's `ReasoningMessagePart` type, but
+  rides along as an extra field on the part object - `MessageParts.js`
+  spreads the whole part into the rendered component's props
+  (`jsx(Reasoning, {...part})`), so it survives untouched.
 - **Proposals aren't a message-part type assistant-ui ships.** The richest
   available primitive is `MessagePart` generic `DataMessagePart<T>`
   (`{type:"data", name, data}`) plus a `components.data.by_name` renderer

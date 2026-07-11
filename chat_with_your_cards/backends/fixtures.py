@@ -4,6 +4,11 @@ Scripts are plain data so they can be validated in unit tests and edited
 without touching backend logic. Each script is a list of steps:
 
 - {"kind": "text", "markdown": str} - streamed to the UI as small deltas
+- {"kind": "thinking", "estimated_tokens": [int, ...]} - a quiet
+  reasoning phase: one empty-text ThinkingDelta per list entry, its
+  estimated_tokens growing, mirroring the real Claude CLI's redacted-text
+  shape (DESIGN.md section 9) so both UIs' rotating "Thinking..."
+  indicator gets exercised by the scripted demo backend too
 - {"kind": "tool", "tool": str, "summary": str, "result": str,
    "ok": bool, "duration_ms": int} - rendered as a tool-call chip
 - {"kind": "propose", "proposal_kind": "create", "payload": {...}} -
@@ -39,6 +44,10 @@ DEFAULT_SCRIPT: list[Step] = [
 ]
 
 TOOL_SCRIPT: list[Step] = [
+    {
+        "kind": "thinking",
+        "estimated_tokens": [40, 95, 160],
+    },
     {
         "kind": "text",
         "markdown": "Let me look for related cards in your collection first.\n\n",

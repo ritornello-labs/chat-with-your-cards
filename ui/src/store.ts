@@ -13,7 +13,17 @@
  *
  * Event -> ThreadMessageLike part mapping:
  *   text_delta          -> appended to a trailing {type:"text"} part
- *   thinking_delta       -> appended to a trailing {type:"reasoning"} part (stub-only, see events.ts)
+ *   thinking_delta       -> appended to a trailing {type:"reasoning"} part. Text is redacted upstream at
+ *                           every reasoning effort level observed so far, so the part's `text` is kept at
+ *                           THINKING_SENTINEL (a non-empty, invisible placeholder) whenever no real thinking
+ *                           text has streamed - assistant-ui's fromThreadMessageLike DROPS any reasoning part
+ *                           whose text is empty/whitespace-only when converting ThreadMessageLike ->
+ *                           ThreadMessage (confirmed by reading @assistant-ui/core's shipped source, not the
+ *                           public docs), which would otherwise make the part - and the running indicator it
+ *                           carries - vanish outright while text is empty. estimatedTokens rides along as an
+ *                           extra field on the part object (assistant-ui's MessageParts.js spreads the whole
+ *                           part into the rendered component's props, so it survives untouched); see
+ *                           ReasoningBlock.tsx for how the sentinel/estimatedTokens pair drives the UI.
  *   tool_call_started    -> a new {type:"tool-call", result: undefined} part (renders "running": assistant-ui
  *                           derives per-part status from the *message's* running status while result is unset)
  *   tool_call_finished   -> sets `result`/`isError` on the matching tool-call part (renders "complete" immediately,
@@ -52,9 +62,22 @@ interface TextPart {
   readonly text: string;
 }
 
+/**
+ * A non-empty, effectively-invisible placeholder (U+200B, zero-width
+ * space - NOT stripped by String.prototype.trim(), unlike ordinary
+ * whitespace) used as a reasoning part's `text` while no real thinking text
+ * has streamed. See the ChatStore doc comment above for why this exists:
+ * assistant-ui drops any reasoning part whose text is empty after trim().
+ * ReasoningBlock.tsx checks for this sentinel to distinguish "no real text
+ * yet" from "real (possibly short) thinking text streamed in" - it is never
+ * rendered to the user as visible content.
+ */
+export const THINKING_SENTINEL = "\u200B"; // zero-width space
+
 interface ReasoningPart {
   readonly type: "reasoning";
   readonly text: string;
+  readonly estimatedTokens: number | null;
 }
 
 export interface ToolCallResult {
@@ -239,9 +262,11 @@ export class ChatStore {
       case "text_delta":
         this.appendText("text", String((event as { text: string }).text ?? ""));
         break;
-      case "thinking_delta":
-        this.appendText("reasoning", String((event as { text: string }).text ?? ""));
+      case "thinking_delta": {
+        const thinking = event as { text?: string; estimated_tokens?: number | null };
+        this.appendThinking(String(thinking.text ?? ""), thinking.estimated_tokens ?? null);
         break;
+      }
       case "tool_call_started":
         this.startToolCall(event as ToolCallStartedEvent);
         break;
@@ -307,7 +332,7 @@ export class ChatStore {
     this.messages = this.messages.map((m) => (m.id === id ? updater(m) : m));
   }
 
-  private appendText(kind: "text" | "reasoning", delta: string): void {
+  private appendText(kind: "text", delta: string): void {
     const current = this.ensureCurrentAssistant();
     this.updateMessage(current.id, (msg) => {
       const parts = msg.content.slice();
@@ -316,6 +341,41 @@ export class ChatStore {
         parts[parts.length - 1] = { type: kind, text: last.text + delta };
       } else {
         parts.push({ type: kind, text: delta });
+      }
+      return { ...msg, content: parts };
+    });
+    this.emit();
+  }
+
+  /**
+   * thinking_delta handling: appends to a trailing reasoning part if one is
+   * already open (same rule as appendText - a tool call or other part type
+   * interposed since the last reasoning delta starts a fresh part instead),
+   * but keeps `text` at THINKING_SENTINEL whenever no real thinking text has
+   * accumulated, so assistant-ui never drops the part outright (see the
+   * THINKING_SENTINEL doc comment above). estimatedTokens is sticky: a
+   * delta with no estimate (e.g. every content_block_start) keeps whatever
+   * the part already had rather than resetting it to null.
+   */
+  private appendThinking(delta: string, estimatedTokens: number | null): void {
+    const current = this.ensureCurrentAssistant();
+    this.updateMessage(current.id, (msg) => {
+      const parts = msg.content.slice();
+      const last = parts[parts.length - 1];
+      if (last && last.type === "reasoning") {
+        const prevText = last.text === THINKING_SENTINEL ? "" : last.text;
+        const nextText = prevText + delta;
+        parts[parts.length - 1] = {
+          type: "reasoning",
+          text: nextText.length > 0 ? nextText : THINKING_SENTINEL,
+          estimatedTokens: estimatedTokens ?? last.estimatedTokens,
+        };
+      } else {
+        parts.push({
+          type: "reasoning",
+          text: delta.length > 0 ? delta : THINKING_SENTINEL,
+          estimatedTokens,
+        });
       }
       return { ...msg, content: parts };
     });

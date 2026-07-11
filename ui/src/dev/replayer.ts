@@ -9,17 +9,24 @@
  * dev/preview.html's proposal fixtures (same demo copy, reimplemented here
  * since this module owns TypeScript timing/event-shape, not Python). Timing
  * mirrors backends/scripted.py: 25-60ms per 2-5 word delta, tool calls take
- * their declared duration_ms.
+ * their declared duration_ms; "think_tokens" beats use a slower 200-450ms
+ * cadence (mirrors backends/scripted.py's _THINK_MIN_MS/_THINK_MAX_MS) so
+ * the rotating "Thinking…" indicator has time to actually rotate during
+ * manual preview.
  *
- * thinking_delta is stubbed here ONLY - it is not part of
- * backends/base.py's ChatEvent union yet (see events.ts), so this is how the
- * Reasoning primitive path gets proven before any real backend emits it.
+ * thinking_delta mirrors backends/base.py's real ThinkingDelta event
+ * (landed 2026-07-11): "think" emits real (non-empty) thinking text, same
+ * as before; "think_tokens" emits the empty-text/growing-estimated_tokens
+ * shape the real CLI actually produces today (text redacted upstream at
+ * every effort level - see claude_cli.py's parser and DESIGN.md section 9),
+ * exercising the Reasoning primitive's no-text rotating-indicator path.
  */
 import type { ChatEvent } from "../events";
 import type { ProposalPayload } from "../events";
 
 type Step =
   | { kind: "think" | "text"; text: string }
+  | { kind: "think_tokens"; tokens: readonly number[] }
   | { kind: "tool"; tool: string; summary: string; result: string; ok: boolean; durationMs: number }
   | { kind: "proposal"; proposal: ProposalPayload }
   | { kind: "error"; message: string };
@@ -51,6 +58,14 @@ function compile(steps: readonly Step[]): Array<[number, ChatEvent]> {
     if (step.kind === "think") {
       for (const chunk of chopWords(step.text, rand)) {
         timeline.push([delay(), { type: "thinking_delta", text: chunk }]);
+      }
+    } else if (step.kind === "think_tokens") {
+      const thinkDelay = () => 200 + Math.floor(rand() * 250); // 200-450ms
+      for (const tokens of step.tokens) {
+        timeline.push([
+          thinkDelay(),
+          { type: "thinking_delta", text: "", estimated_tokens: tokens },
+        ]);
       }
     } else if (step.kind === "text") {
       for (const chunk of chopWords(step.text, rand)) {
@@ -177,6 +192,10 @@ const DEFAULT_SCRIPT: Step[] = [
 ];
 
 const TOOL_SCRIPT: Step[] = [
+  // Mirrors backends/fixtures.py's TOOL_SCRIPT: a quiet thinking phase
+  // (empty text, growing estimated_tokens) before any visible text or tool
+  // call, exercising the Reasoning primitive's rotating no-text indicator.
+  { kind: "think_tokens", tokens: [40, 95, 160] },
   { kind: "text", text: "Let me look for related cards in your collection first.\n\n" },
   {
     kind: "tool",
@@ -241,6 +260,12 @@ function selectScript(userText: string): Step[] {
 }
 
 const WELCOME_SCRIPT: Step[] = [
+  // Fires automatically on load (no typing needed), so `npm run dev` shows
+  // both thinking-indicator states in one turn: first the empty-text
+  // rotating "Thinking…N tokens" phase (today's real-CLI shape), then real
+  // thinking text streaming into the same reasoning part (future-proofing -
+  // see ReasoningBlock.tsx), before the visible answer.
+  { kind: "think_tokens", tokens: [35, 80] },
   {
     kind: "think",
     text: "No message yet - I'll greet them and mention what the scripted replayer can demo on request.",

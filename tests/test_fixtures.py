@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from chat_with_your_cards.backends import Done, TextDelta  # noqa: E402
+from chat_with_your_cards.backends import Done, TextDelta, ThinkingDelta  # noqa: E402
 from chat_with_your_cards.backends.fixtures import (  # noqa: E402
     SCRIPTS,
     select_script,
@@ -52,6 +52,27 @@ class FixtureScriptsTest(unittest.TestCase):
         self.assertIs(SCRIPTS["long"], select_script("give me the long version"))
         self.assertIs(SCRIPTS["propose"], select_script("PROPOSE a note for this"))
         self.assertIs(SCRIPTS["default"], select_script("explain this card"))
+
+    def test_tool_script_opens_with_a_thinking_phase(self) -> None:
+        # DESIGN.md section 9 / the demo/fixtures task: the scripted "tool"
+        # reply opens with empty-text, growing-estimated_tokens
+        # ThinkingDelta beats, so the rotating "Thinking..." indicator (both
+        # UIs) and the gui_smoke probe's DOM assertions have something real
+        # to exercise before any text or tool call arrives.
+        timeline = compile_script(SCRIPTS["tool"], random.Random(0))
+        events = [event for _, event in timeline]
+        thinking = [e for e in events if isinstance(e, ThinkingDelta)]
+        self.assertGreaterEqual(len(thinking), 2)
+        for delta in thinking:
+            self.assertEqual("", delta.text)
+            self.assertIsNotNone(delta.estimated_tokens)
+        tokens = [d.estimated_tokens for d in thinking]
+        self.assertEqual(sorted(tokens), tokens, "estimated_tokens must grow monotonically")
+        # The thinking phase is the script's opening step, so it must be a
+        # contiguous prefix of the compiled timeline (all thinking, then
+        # something else - text, in this script's case).
+        self.assertTrue(all(isinstance(e, ThinkingDelta) for e in events[: len(thinking)]))
+        self.assertFalse(isinstance(events[len(thinking)], ThinkingDelta))
 
     def test_propose_script_requests_a_valid_creation(self) -> None:
         from chat_with_your_cards.backends import ProposalRequest

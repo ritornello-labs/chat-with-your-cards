@@ -960,7 +960,12 @@ def _run_checks() -> dict[str, Any]:
             "  input_box_sizing: getComputedStyle("
             "    document.getElementById('cwyc-input')).boxSizing,"
             "  composer_rect: document.getElementById('cwyc-composer')"
-            "    .getBoundingClientRect().height"
+            "    .getBoundingClientRect().height,"
+            "  thinking_rows: document.querySelectorAll('.cwyc-thinking-indicator').length,"
+            "  thinking_text: (function() {"
+            "    var el = document.querySelector('.cwyc-thinking-indicator');"
+            "    return el ? el.textContent : '';"
+            "  })()"
             "}; })();",
             DOM_TIMEOUT_MS,
             "DOM state query",
@@ -973,6 +978,17 @@ def _run_checks() -> dict[str, Any]:
             raise AssertionError(f"tool chip did not finish: {dom}")
         if dom["streaming"] != 0:
             raise AssertionError(f"assistant message still marked streaming: {dom}")
+        # TOOL_SCRIPT (backends/fixtures.py, DEMO_MESSAGE selects it via the
+        # "tool" keyword) opens with a thinking phase (empty-text,
+        # growing-estimated_tokens ThinkingDelta beats - see scripted.py). By
+        # the time the stream is done and this settles, the indicator must
+        # have collapsed into the static "Thought for ~N tokens" one-liner
+        # (app.js's finalizeThinkingIndicator) - never left mid-rotation and
+        # never silently dropped (the pre-2026-07-11 bug this task fixed).
+        if dom["thinking_rows"] < 1:
+            raise AssertionError(f"thinking indicator missing after done: {dom}")
+        if "Thought for ~" not in dom["thinking_text"] or "tokens" not in dom["thinking_text"]:
+            raise AssertionError(f"thinking indicator did not collapse to a token count: {dom}")
         return dom
 
     dom_info = check("transcript DOM rendered", _dom_rendered)

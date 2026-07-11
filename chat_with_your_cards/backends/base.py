@@ -22,9 +22,17 @@ class ThinkingDelta:
 
     Ephemeral by design: never persisted to transcripts (see controller.py),
     and kept out of the visible answer text (see claude_cli.py's parser).
+
+    ``text`` is empty at every observed reasoning effort level today (the
+    CLI/account redacts the actual reasoning text upstream - only an opaque
+    encrypted signature carries it), so this must not be treated as "no
+    thinking happened": ``estimated_tokens`` is what actually proves a
+    thinking phase is live, and both UIs drive their "Thinking..." indicator
+    off it rather than off non-empty text (DESIGN.md section 9).
     """
 
-    text: str
+    text: str = ""
+    estimated_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -93,7 +101,11 @@ def event_to_dict(event: ChatEvent) -> dict[str, Any]:
     if isinstance(event, TextDelta):
         return {"type": "text_delta", "text": event.text}
     if isinstance(event, ThinkingDelta):
-        return {"type": "thinking_delta", "text": event.text}
+        return {
+            "type": "thinking_delta",
+            "text": event.text,
+            "estimated_tokens": event.estimated_tokens,
+        }
     if isinstance(event, ToolCallStarted):
         return {
             "type": "tool_call_started",

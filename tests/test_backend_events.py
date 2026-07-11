@@ -27,8 +27,18 @@ class EventToDictTest(unittest.TestCase):
 
     def test_thinking_delta(self) -> None:
         self.assertEqual(
-            {"type": "thinking_delta", "text": "hmm, let's see... "},
+            {
+                "type": "thinking_delta",
+                "text": "hmm, let's see... ",
+                "estimated_tokens": None,
+            },
             event_to_dict(ThinkingDelta("hmm, let's see... ")),
+        )
+
+    def test_thinking_delta_with_estimated_tokens(self) -> None:
+        self.assertEqual(
+            {"type": "thinking_delta", "text": "", "estimated_tokens": 150},
+            event_to_dict(ThinkingDelta("", 150)),
         )
 
     def test_tool_call_started(self) -> None:

@@ -72,6 +72,14 @@
         function replyStream() {
             var t = 0;
             var step = function (ms) { t += ms; return t; };
+            // A quiet thinking phase first: empty-text thinking_delta beats
+            // with a growing token estimate, mirroring the real Claude CLI's
+            // redacted-text shape (DESIGN.md section 9) and backends/
+            // fixtures.py's TOOL_SCRIPT, so the "Thinking…" indicator above
+            // the assistant bubble is exercised by this loop too.
+            [40, 95, 160].forEach(function (tokens) {
+                dispatchLater(step(350), { type: "thinking_delta", text: "", estimated_tokens: tokens });
+            });
             var prelude = "Let me look for related cards in your collection first.\n\n";
             prelude.split(" ").forEach(function (word) {
                 dispatchLater(step(35), { type: "text_delta", text: word + " " });

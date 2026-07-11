@@ -152,7 +152,21 @@ def parse_stream_line(obj: dict[str, Any], state: ParserState) -> list[ChatEvent
 
     if kind == "stream_event":
         event = obj.get("event") or {}
-        if event.get("type") == "content_block_delta":
+        event_type = event.get("type")
+        if event_type == "content_block_start":
+            # Opens the UI's "thinking" state the instant the block starts,
+            # even though nothing has streamed yet - at every observed
+            # reasoning effort level the CLI/account redacts thinking TEXT
+            # (delta.thinking stays "" throughout), so waiting for non-empty
+            # text would mean the indicator never appears at all. Any other
+            # content_block_start (text, tool_use, ...) carries nothing worth
+            # surfacing here - text streams via its own content_block_delta,
+            # and tool_use is only complete on the full "assistant" message.
+            block = event.get("content_block") or {}
+            if block.get("type") == "thinking":
+                return [ThinkingDelta()]
+            return []
+        if event_type == "content_block_delta":
             delta = event.get("delta") or {}
             if delta.get("type") == "text_delta" and delta.get("text"):
                 text = str(delta["text"])
@@ -160,16 +174,26 @@ def parse_stream_line(obj: dict[str, Any], state: ParserState) -> list[ChatEvent
                 state.streamed_chars += len(text)
                 state.turn_text_chars += len(sep) + len(text)
                 return [TextDelta(sep + text)]
-            if delta.get("type") == "thinking_delta" and delta.get("thinking"):
-                # Extended-thinking text. Deliberately bypasses
-                # _text_separator/turn_text_chars/streamed_chars: those track
-                # only the visible answer, and a thinking block's content-block
-                # index must never perturb the paragraph-break bookkeeping for
-                # text that streams before/after it. signature_delta (the
-                # cryptographic continuation token for the thinking block) and
-                # content_block_start/stop are intentionally not handled here -
-                # nothing else about the CLI's stream carries visible text.
-                return [ThinkingDelta(str(delta["thinking"]))]
+            if delta.get("type") == "thinking_delta":
+                # Extended-thinking text (delta.thinking) plus, when present,
+                # a live token estimate (delta.estimated_tokens) - emitted on
+                # EVERY such delta, not just non-empty text: today's CLI/
+                # account redacts the text (stays "" throughout), so
+                # estimated_tokens is the only signal that thinking is
+                # actually in progress, and both UIs drive their rotating
+                # "Thinking..." indicator off it (DESIGN.md section 9).
+                # Deliberately bypasses _text_separator/turn_text_chars/
+                # streamed_chars: those track only the visible answer, and a
+                # thinking block's content-block index must never perturb the
+                # paragraph-break bookkeeping for text that streams before/
+                # after it. signature_delta (the cryptographic continuation
+                # token for the thinking block) and content_block_stop are
+                # intentionally not handled here - nothing else about the
+                # CLI's stream carries visible text or a token estimate.
+                text = str(delta.get("thinking") or "")
+                tokens = delta.get("estimated_tokens")
+                estimated_tokens = int(tokens) if isinstance(tokens, (int, float)) else None
+                return [ThinkingDelta(text, estimated_tokens)]
         return []
 
     if kind == "assistant":

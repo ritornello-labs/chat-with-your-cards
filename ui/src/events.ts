@@ -15,14 +15,21 @@ export interface TextDeltaEvent {
 }
 
 /**
- * NOT part of backends/base.py's ChatEvent union yet - stubbed only by the
- * dev replayer (src/dev/replayer.ts) to prove out assistant-ui's Reasoning
- * primitive ahead of a real backend emitting it. Real bridge.py traffic will
- * never send this until a backend adds it upstream.
+ * Mirrors backends/base.py's ThinkingDelta (landed 2026-07-11). `text` is
+ * empty at every reasoning effort level observed from the real CLI today -
+ * the account/CLI redacts it upstream, only an opaque signature carries it -
+ * so `estimated_tokens` (not non-empty text) is the signal that a thinking
+ * phase is actually live. The parser (claude_cli.py) emits one of these on
+ * `content_block_start` for a thinking block (text "", estimated_tokens
+ * null - opens the UI's indicator immediately) and one per subsequent
+ * `thinking_delta` stream event (carrying text and/or estimated_tokens when
+ * present). store.ts drives the Reasoning part's rotating "Thinking…"
+ * header off estimated_tokens; see ReasoningBlock.tsx.
  */
 export interface ThinkingDeltaEvent {
   type: "thinking_delta";
   text: string;
+  estimated_tokens?: number | null;
 }
 
 export interface ToolCallStartedEvent {

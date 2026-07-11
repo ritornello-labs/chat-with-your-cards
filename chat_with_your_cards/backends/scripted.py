@@ -19,6 +19,7 @@ from .base import (
     EventCallback,
     ProposalRequest,
     TextDelta,
+    ThinkingDelta,
     ToolCallFinished,
     ToolCallStarted,
 )
@@ -31,6 +32,12 @@ _DELTA_MIN_WORDS = 2
 _DELTA_MAX_WORDS = 5
 _DELTA_MIN_MS = 25
 _DELTA_MAX_MS = 60
+# Thinking beats land slower than text deltas - they are meant to be read as
+# "still working", not raced through - so the rotating indicator's ~2.5s
+# phrase cadence (app.js / ReasoningBlock.tsx) has time to actually rotate
+# during manual preview iteration.
+_THINK_MIN_MS = 200
+_THINK_MAX_MS = 450
 
 
 def compile_script(steps: list[Step], rng: random.Random) -> list[tuple[int, ChatEvent]]:
@@ -41,6 +48,20 @@ def compile_script(steps: list[Step], rng: random.Random) -> list[tuple[int, Cha
         if step["kind"] == "text":
             for delta in _chop_markdown(step["markdown"], rng):
                 timeline.append((rng.randint(_DELTA_MIN_MS, _DELTA_MAX_MS), TextDelta(delta)))
+        elif step["kind"] == "thinking":
+            # A quiet thinking phase: empty-text ThinkingDelta beats with a
+            # growing token estimate, mirroring what the real Claude CLI
+            # sends today (text redacted upstream at every effort level -
+            # see claude_cli.py's parser and DESIGN.md section 9). Exercises
+            # the rotating "Thinking..." indicator in both UIs before any
+            # visible text or tool call appears.
+            for tokens in step["estimated_tokens"]:
+                timeline.append(
+                    (
+                        rng.randint(_THINK_MIN_MS, _THINK_MAX_MS),
+                        ThinkingDelta("", int(tokens)),
+                    )
+                )
         elif step["kind"] == "tool":
             call_counter += 1
             call_id = f"call-{call_counter}"

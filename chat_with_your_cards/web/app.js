@@ -71,7 +71,111 @@
         var body = el("div", "cwyc-msg cwyc-msg-assistant msg-assistant cwyc-streaming");
         row.appendChild(body);
         transcript.appendChild(row);
-        currentAssistant = { element: body, markdown: "" };
+        currentAssistant = { element: body, row: row, markdown: "", thinking: null };
+        scrollToBottomIfPinned();
+    }
+
+    /* ---- thinking indicator ----
+     * Claude's thinking/reasoning text is redacted upstream at every
+     * observed effort level (see backends/claude_cli.py, DESIGN.md section
+     * 9) - "thinking_delta" events arrive with empty text but a live
+     * estimated_tokens count. Rather than show nothing (the old behavior:
+     * thinking_delta was a silent no-op), render a small "Thinking…" row
+     * with a rotating phrase and a live token count, then collapse it into
+     * a one-line "Thought for ~N tokens" once the turn moves past the
+     * thinking phase - or drop it entirely if no tokens were ever reported.
+     * If a future backend/account ever streams real thinking text, it is
+     * accumulated too and rendered as a collapsible <details> block instead
+     * (future-proofing; today's reality is always the empty-text path).
+     */
+    var THINKING_PHRASES = [
+        "Thinking…",
+        "Reasoning it through…",
+        "Weighing the options…",
+        "Lining up the facts…",
+        "Turning the card over…",
+    ];
+    var THINKING_ROTATE_MS = 2500;
+
+    function renderThinkingPhrase() {
+        var t = currentAssistant && currentAssistant.thinking;
+        if (!t || t.finalized) {
+            return;
+        }
+        t.el.innerHTML = "";
+        t.el.appendChild(el("span", "cwyc-thinking-phrase", THINKING_PHRASES[t.phraseIndex]));
+        if (t.estimatedTokens) {
+            t.el.appendChild(
+                el("span", "cwyc-thinking-tokens", " ~" + t.estimatedTokens + " tokens")
+            );
+        }
+    }
+
+    function rotateThinkingPhrase() {
+        var t = currentAssistant && currentAssistant.thinking;
+        if (!t || t.finalized) {
+            return;
+        }
+        t.phraseIndex = (t.phraseIndex + 1) % THINKING_PHRASES.length;
+        renderThinkingPhrase();
+    }
+
+    function ensureThinkingIndicator() {
+        if (!currentAssistant) {
+            startAssistantMessage();
+        }
+        if (!currentAssistant.thinking) {
+            var row = el("div", "cwyc-row cwyc-row-thinking");
+            var indicator = el("div", "cwyc-thinking-indicator");
+            row.appendChild(indicator);
+            transcript.insertBefore(row, currentAssistant.row);
+            currentAssistant.thinking = {
+                row: row,
+                el: indicator,
+                phraseIndex: 0,
+                estimatedTokens: null,
+                hasText: false,
+                textAccum: "",
+                timer: null,
+                finalized: false,
+            };
+            renderThinkingPhrase();
+            currentAssistant.thinking.timer = window.setInterval(
+                rotateThinkingPhrase,
+                THINKING_ROTATE_MS
+            );
+        }
+        return currentAssistant.thinking;
+    }
+
+    function finalizeThinkingIndicator() {
+        var t = currentAssistant && currentAssistant.thinking;
+        if (!t || t.finalized) {
+            return;
+        }
+        t.finalized = true;
+        if (t.timer) {
+            window.clearInterval(t.timer);
+            t.timer = null;
+        }
+        if (t.hasText && t.textAccum.trim()) {
+            var details = document.createElement("details");
+            details.className = "cwyc-thinking-details";
+            var summary = document.createElement("summary");
+            summary.textContent = t.estimatedTokens
+                ? "Thought for ~" + t.estimatedTokens + " tokens"
+                : "Thought for a bit";
+            details.appendChild(summary);
+            details.appendChild(el("div", "cwyc-thinking-text", t.textAccum));
+            t.el.innerHTML = "";
+            t.el.appendChild(details);
+        } else if (t.estimatedTokens) {
+            t.el.innerHTML = "";
+            t.el.textContent = "Thought for ~" + t.estimatedTokens + " tokens";
+            t.el.classList.add("cwyc-thinking-indicator-done");
+        } else if (t.row.parentNode) {
+            t.row.parentNode.removeChild(t.row);
+        }
         scrollToBottomIfPinned();
     }
 
@@ -79,6 +183,7 @@
         if (!currentAssistant) {
             startAssistantMessage();
         }
+        finalizeThinkingIndicator();
         currentAssistant.markdown += text;
         currentAssistant.element.innerHTML = renderMarkdown(currentAssistant.markdown);
         scrollToBottomIfPinned();
@@ -86,8 +191,12 @@
 
     function breakAssistantBlock() {
         // The next text deltas belong to a fresh assistant block; the block
-        // before this row is finished, so stop its cursor.
+        // before this row is finished, so stop its cursor (and settle any
+        // still-running thinking indicator - a tool call/proposal/approval
+        // starting is just as much "past the thinking phase" as visible
+        // text arriving would be).
         if (currentAssistant) {
+            finalizeThinkingIndicator();
             currentAssistant.element.classList.remove("cwyc-streaming");
         }
         currentAssistant = null;
@@ -207,6 +316,7 @@
 
     function finalizeStream(stopped) {
         if (currentAssistant) {
+            finalizeThinkingIndicator();
             currentAssistant.element.classList.remove("cwyc-streaming");
             if (stopped) {
                 var note = el("div", "cwyc-stopped-note", "Stopped");
@@ -265,6 +375,14 @@
     }
 
     function resetTranscript() {
+        // A live thinking indicator's rotation timer must not survive a
+        // full transcript wipe (new chat, history load) - the DOM node it
+        // updates is about to be discarded, but the interval keeps firing
+        // (as a harmless no-op, since it re-reads currentAssistant each
+        // tick) unless explicitly cleared here.
+        if (currentAssistant && currentAssistant.thinking && currentAssistant.thinking.timer) {
+            window.clearInterval(currentAssistant.thinking.timer);
+        }
         transcript.innerHTML = "";
         toolChips = {};
         proposals = {};
@@ -1669,12 +1787,24 @@
             case "text_delta":
                 appendDelta(payload.text);
                 break;
-            case "thinking_delta":
-                // Extended-thinking text. The classic UI has no reasoning
-                // panel (that's the new assistant-ui frontend's job, see
-                // ui/src/store.ts) - explicitly ignored here so it never
-                // leaks into the visible answer bubble or throws.
+            case "thinking_delta": {
+                // Extended-thinking beat: text is redacted upstream at every
+                // observed effort level, but estimated_tokens proves a
+                // thinking phase is live (see backends/base.py). Drives the
+                // rotating "Thinking…" indicator above the assistant bubble
+                // - never the bubble's own markdown, so it can never leak
+                // into the visible answer.
+                var think = ensureThinkingIndicator();
+                if (payload.text) {
+                    think.hasText = true;
+                    think.textAccum += payload.text;
+                }
+                if (typeof payload.estimated_tokens === "number") {
+                    think.estimatedTokens = payload.estimated_tokens;
+                }
+                renderThinkingPhrase();
                 break;
+            }
             case "tool_call_started":
                 addToolChip(payload.call_id, payload.tool, payload.summary);
                 break;

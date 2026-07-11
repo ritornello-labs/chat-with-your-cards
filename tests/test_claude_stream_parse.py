@@ -73,12 +73,15 @@ class ParseStreamLineTest(unittest.TestCase):
         self.assertEqual(0, self.state.streamed_chars)
         self.assertIsNone(self.state.last_block_index)
 
-    def test_thinking_delta_with_empty_text_emits_nothing(self) -> None:
+    def test_thinking_delta_with_empty_text_emits_estimated_tokens(self) -> None:
         # Real shape observed from the installed CLI (2.1.207, --effort max):
         # this account/tier returns thinking_delta events with an empty
         # "thinking" string throughout (only signature_delta carries opaque,
         # encrypted content) - i.e. thinking is redacted, not absent. The
-        # parser must not emit a stream of empty ThinkingDelta("") noise.
+        # parser must still surface these (empty text, live estimated_tokens)
+        # so the UI can show a "Thinking..." indicator - dropping them (the
+        # old behavior) left the UI with no signal that thinking was
+        # happening at all (DESIGN.md section 9).
         events = parse_stream_line(
             {
                 "type": "stream_event",
@@ -94,9 +97,11 @@ class ParseStreamLineTest(unittest.TestCase):
             },
             self.state,
         )
-        self.assertEqual([], events)
+        self.assertEqual([ThinkingDelta("", 50)], events)
 
-    def test_thinking_content_block_start_emits_nothing(self) -> None:
+    def test_thinking_content_block_start_opens_indicator(self) -> None:
+        # Opens the UI's thinking state immediately, before any delta with a
+        # token estimate has arrived - text and estimated_tokens both blank.
         events = parse_stream_line(
             {
                 "type": "stream_event",
@@ -104,6 +109,20 @@ class ParseStreamLineTest(unittest.TestCase):
                     "type": "content_block_start",
                     "index": 0,
                     "content_block": {"type": "thinking", "thinking": "", "signature": ""},
+                },
+            },
+            self.state,
+        )
+        self.assertEqual([ThinkingDelta("", None)], events)
+
+    def test_non_thinking_content_block_start_emits_nothing(self) -> None:
+        events = parse_stream_line(
+            {
+                "type": "stream_event",
+                "event": {
+                    "type": "content_block_start",
+                    "index": 1,
+                    "content_block": {"type": "text", "text": ""},
                 },
             },
             self.state,
@@ -471,12 +490,13 @@ class ParseStreamLineTest(unittest.TestCase):
         # `claude -p --output-format stream-json --include-partial-messages
         #  --verbose --effort max` on "A farmer has chickens and rabbits...".
         # This account/CLI redacts thinking text (empty "thinking" fields
-        # throughout, real content only in the opaque signature), so no
-        # ThinkingDelta is emitted for it - see
-        # test_thinking_delta_with_empty_text_emits_nothing for that in
-        # isolation. This sequence exercises the full real ordering:
-        # thinking block fully open+close, THEN a text block, with no
-        # corruption of the text's paragraph bookkeeping.
+        # throughout, real content only in the opaque signature), so every
+        # ThinkingDelta below carries empty text - see
+        # test_thinking_delta_with_empty_text_emits_estimated_tokens for that
+        # in isolation. This sequence exercises the full real ordering:
+        # thinking block open (content_block_start) + two growing-estimate
+        # deltas + close, THEN a text block, with no corruption of the
+        # text's paragraph bookkeeping.
         {
             "type": "stream_event",
             "event": {
@@ -589,12 +609,17 @@ class ParseStreamLineTest(unittest.TestCase):
         events: list = []
         for obj in self.THINKING_BEARING_STREAM:
             events.extend(parse_stream_line(obj, self.state))
-        # Redacted (empty) thinking text yields no ThinkingDelta; only the
-        # visible answer streams through, as its two real TextDelta chunks
-        # with no spurious break glued in front (first text of the turn) and
-        # none between them (same content-block index).
+        # Redacted (empty) thinking text still yields ThinkingDelta events -
+        # one opening the indicator (content_block_start) and one per
+        # growing estimated_tokens delta - interleaved with, but never
+        # corrupting, the visible answer's two real TextDelta chunks (no
+        # spurious break glued in front - first text of the turn - and none
+        # between them - same content-block index).
         self.assertEqual(
             [
+                ThinkingDelta("", None),
+                ThinkingDelta("", 50),
+                ThinkingDelta("", 200),
                 TextDelta("**"),
                 TextDelta(
                     "Setting up the equations**\n\nLet c = number of chickens, "
