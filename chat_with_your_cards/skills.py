@@ -70,54 +70,175 @@ def materialize_conventions_agent_skill(agent_home: Path, text: str | None) -> P
 
 CARD_SKILL_TEMPLATE = """---
 name: anki-card-authoring
-description: How to write flashcards for this user - style, granularity, and \
-which proposal tools to use. Load whenever creating or editing cards.
+description: Design or revise individual Anki notes and cards. Load for card \
+writing, note edits, source-grounded extraction, and card-quality review.
 ---
 
-# Card authoring for this collection
+# Anki card authoring
 
-Edit this file to teach the assistant YOUR card taste. It ships as a
-starting template aimed at an experienced Anki user; everything below is
-yours to change, and the assistant treats it as the house rules.
+Use this skill for the retrieval design and wording of individual notes.
+Curriculum scope and sequencing belong to `anki-curriculum-design`; live
+rollout mechanics belong to `anki-curriculum-delivery`.
+
+This is a neutral starting point. The user's explicit request and the
+`note-conventions` skill override these defaults. Existing collection patterns
+are evidence, not laws: ask or explain the tradeoff when they conflict.
 
 ## Before writing anything
 
-1. **Calibrate against existing cards.** Search the target deck
-   (search_notes, get_note) and read a handful of the user's own recent
-   cards: note type, field usage, phrasing style, tag shape. Match what
-   you find; do not invent a new style when the deck already has one.
-2. **Check the note type's fields** with get_note_type before proposing.
-3. **Respect pins** (deck, note type, tags, field defaults) when set.
+1. Identify the learning objective: what should recall enable the learner to
+   explain, recognize, decide, or do?
+2. Inspect the target note type, fields, templates, pins, and a small sample of
+   nearby user-authored notes. Do not infer a convention from one example.
+3. Search for duplicates and prerequisite concepts. Prefer improving a useful
+   existing note over creating a competing duplicate when review history can
+   be preserved.
+4. Ground factual or time-sensitive claims in the supplied source or current
+   authoritative documentation. Distinguish the source's claim from inference.
 
-## Card quality rules
+## Design the retrieval
 
-- **One atomic fact per card.** Several small cards beat one dense card;
-  never pack multiple independent facts into one note via c1/c2/c3.
-- **Minimum information, maximum retrievability**: the front asks exactly
-  one thing; the shortest unambiguous phrasing wins.
-- **Answers are short.** Lead with the core answer; push nice-to-know
-  context into the note's extra/back-context field, visually secondary.
-- **No list-length hints in questions** ("name the X", not "name the
-  three X"), and no yes/no questions without an appended "Explain."
-- **Cloze cards**: one {{c1::...}} deletion per card unless the facts are
-  genuinely inseparable; never cloze a single mid-sentence word that
-  could be guessed from grammar alone.
-- **Formatting**: plain HTML, <b> for the key term, <ul> for enumerations,
-  italics only for untested context. No decorative styling.
+- Give the front a clear cue and one coherent grading target. Multiple parts
+  are appropriate when they form one comparison, process, example, or tightly
+  coupled explanation; split independent facts.
+- Make the answer as short as possible without becoming cryptic. Put optional
+  context, examples, caveats, and sources in a secondary field when available.
+- Definitions should usually name the broader category and the distinguishing
+  feature. Introduce required terminology before using it in later cards.
+- Prefer prompts that require recall over recognition or grammatical guessing.
+  Avoid accidental clues, ambiguous scope, and unsupported absolutes.
+- Use the note type's established HTML conventions. Use semantic lists for
+  genuine enumerations, and ordered lists only when order or numbered parts
+  matter. Do not add decorative styling inside fields.
+- For cloze notes, choose deletions that test meaningful knowledge. Use as many
+  deletions as the note type and learning objective justify; avoid turning a
+  paragraph into unrelated tests.
+- Add a small example or contrast when an abstract answer would otherwise be
+  hard to interpret, but do not make an untested example carry the definition.
 
 ## Workflow
 
-- Single cards: propose_note, one focused proposal per concept.
-- Reworking existing cards: propose_note_edit with only the fields that
-  change.
-- Sweeps across many notes: open_change_set / add_to_change_set /
-  close_change_set so the user reviews one batch, not fifty cards.
-- If a card has sources (URIs in fields - get_card_sources), ground your
-  edits in the source rather than guessing: WebFetch for pages, Read for
-  local PDFs (meta.page jumps you to the spot), read_epub for books.
-- When creating a card FROM a source, record the source richly:
-  <a href="URI#page=N" data-source='{"chapter": "...", "section": "..."}'>
-  readable title, p.N</a> in the source/extra field.
+- Use `propose_note` for a new note and `propose_note_edit` for an existing one.
+  Change only what is needed.
+- Use a change set for a coherent multi-note revision so the user can review
+  the work as one unit.
+- Use `get_card_sources` before editing a sourced note. Read local documents or
+  fetch web sources with the available harness tools.
+- When creating from a source, preserve a readable link and useful position
+  metadata in an appropriate field, for example page, chapter, or section.
+- Briefly state uncertain assumptions in the proposal rationale. Never bypass
+  the add-on's proposal tools to write to the collection.
+"""
+
+
+CURRICULUM_SKILL_TEMPLATE = """---
+name: anki-curriculum-design
+description: Design an Anki learning curriculum: goals, topic decomposition, \
+prerequisites, coverage, stages, and parallel study streams. Load when planning \
+a deck, syllabus, learning path, or broad card audit.
+---
+
+# Anki curriculum design
+
+Use this skill to decide what belongs in a learning program and in what
+conceptual order. Do not use it to settle the wording of every card or to make
+live collection changes.
+
+## Frame the curriculum
+
+1. Establish the learner's outcome, current baseline, time horizon, and scope.
+2. Separate knowledge that benefits from spaced retrieval from practice,
+   projects, reference material, and one-off setup work.
+3. Decompose the subject into concepts, distinctions, procedures, examples,
+   and decisions. Draw prerequisite edges, including vocabulary that later
+   prompts assume.
+4. Identify independent streams when one linear sequence would create false
+   dependencies. Give each stream a clear entry point and internal order.
+
+## Audit before adding
+
+- Search the collection for relevant notes and inspect representative fields,
+  tags, decks, and review history.
+- Classify material as reuse, revise, merge, add, defer, or exclude. Redundancy
+  is not automatically bad, but two cards should test meaningfully different
+  retrievals.
+- Preserve a useful older note when it can carry the improved content and its
+  review history. If a near-duplicate contains one distinct insight, isolate
+  that insight instead of repeating the shared core.
+- Check current primary documentation for tools or evolving practices when the
+  curriculum depends on them. Add missing foundational or basic-interface
+  coverage only when it serves the stated learning outcome.
+
+## Order and quality gates
+
+- Introduce a term before cards that depend on it. Prefer category and identity
+  before comparisons, mechanisms, tradeoffs, and applications.
+- Put a worked example soon after an abstract concept when it materially aids
+  understanding.
+- Run a prerequisite gate: every unexplained technical term is already known,
+  introduced earlier, or deliberately treated as incidental language.
+- Run a coverage gate: each stated outcome has enough retrieval and practice;
+  each proposed card has a reason to exist.
+- Run a load gate: distinguish an essential path from optional depth when time
+  or review capacity is constrained.
+
+## Handoff
+
+Produce a compact curriculum specification with objectives, streams or stages,
+prerequisites, existing-note decisions, proposed additions, exclusions, and
+ordering rationale. Hand individual card specifications to
+`anki-card-authoring`, then hand the accepted structure to
+`anki-curriculum-delivery`.
+"""
+
+
+DELIVERY_SKILL_TEMPLATE = """---
+name: anki-curriculum-delivery
+description: Safely realize a curriculum in a live Anki collection using tags, \
+decks, filtered decks, note edits, and reviewable change sets. Load when \
+rolling out, sequencing, reorganizing, or maintaining a multi-card program.
+---
+
+# Anki curriculum delivery
+
+Use this skill after the curriculum structure is clear. It translates an
+accepted plan into reviewable collection operations without silently changing
+the learning design.
+
+## Preserve collection state
+
+- Inspect before mutating. Record the exact query and affected counts, and
+  sample the notes or cards that will change.
+- Preserve review history by editing a suitable existing note when practical.
+  Do not delete, suspend, reposition, or reset scheduling merely because a card
+  is redundant; propose only operations the available tools actually support
+  and explain anything left for the user.
+- Keep normal home decks separate from study views. Never create or move notes
+  directly into a filtered deck; build or rebuild the filtered deck from a
+  query over persistent decks.
+- Respect pins and the add-on's permission mode. Every write goes through a
+  proposal or change set, even when the requested end state seems obvious.
+
+## Encode the program
+
+- Prefer one stable membership tag for the program plus separate stage or
+  stream tags when they are needed for querying. Reuse the collection's naming
+  conventions rather than inventing a taxonomy.
+- Use decks for durable organizational boundaries and filtered decks for a
+  temporary study queue. Keep the source-of-truth structure understandable
+  without the filtered deck.
+- Choose filtered-deck searches and order deliberately. Verify whether Anki's
+  selected order actually represents the intended conceptual sequence; tags
+  alone do not impose one.
+- Roll out prerequisites before dependents. For large programs, work in bounded
+  batches with a verification checkpoint between them.
+
+## Verify the result
+
+After each accepted batch, re-query the live collection and report exact note
+and card counts, unexpected omissions, duplicates, and unresolved manual work.
+Confirm that membership and sequence queries select the intended cards and that
+filtered cards still have valid normal home decks.
 """
 
 
@@ -130,8 +251,10 @@ observations or proposing a skill update.
 
 # Learning from the user's edits
 
-This file is the user's to edit: it controls HOW the assistant folds
-observed preferences back into the card-authoring skill.
+This file controls how the assistant folds observed preferences into the
+card-authoring skill. The curriculum and delivery defaults are not updated from
+card-edit observations because those edits do not reliably reveal curriculum
+or collection-operations preferences.
 
 ## Reading observations
 
@@ -168,19 +291,24 @@ def materialize_agent_skills(agent_home: Path) -> Path:
 
     The agent runs with cwd = agent_home, so project-level skills live in
     agent_home/.claude/skills/ (system-wide user skills load as usual from
-    the user's home). Templates are written once and then left alone -
-    they are the user's files to edit to their taste.
+    the user's home). Templates are written once and then left alone: after
+    first install they are user-owned files. Adding a new factory skill is
+    therefore safe for an existing install, while upgrades never overwrite
+    customized skills.
     """
     skills_root = agent_home / ".claude" / "skills"
-    skill_path = skills_root / "anki-card-authoring" / "SKILL.md"
-    if not skill_path.exists():
-        skill_path.parent.mkdir(parents=True, exist_ok=True)
-        skill_path.write_text(CARD_SKILL_TEMPLATE, encoding="utf-8")
-    maintenance_path = skills_root / "skill-maintenance" / "SKILL.md"
-    if not maintenance_path.exists():
-        maintenance_path.parent.mkdir(parents=True, exist_ok=True)
-        maintenance_path.write_text(SKILL_MAINTENANCE_TEMPLATE, encoding="utf-8")
-    return skill_path
+    templates = {
+        "anki-card-authoring": CARD_SKILL_TEMPLATE,
+        "anki-curriculum-design": CURRICULUM_SKILL_TEMPLATE,
+        "anki-curriculum-delivery": DELIVERY_SKILL_TEMPLATE,
+        "skill-maintenance": SKILL_MAINTENANCE_TEMPLATE,
+    }
+    for name, template in templates.items():
+        path = skills_root / name / "SKILL.md"
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(template, encoding="utf-8")
+    return skills_root / "anki-card-authoring" / "SKILL.md"
 
 
 def load_conventions(user_files: Path, config_prompt: str) -> str | None:

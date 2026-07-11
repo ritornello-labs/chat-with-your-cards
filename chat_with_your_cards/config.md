@@ -104,6 +104,10 @@
 - `conventions_prompt` (default empty): your note-authoring conventions (style,
   field usage, tagging). Injected into the assistant's instructions for every
   proposal and materialized as `user_files/skills/note-conventions/SKILL.md`.
+  This is the personal override layer. On first run, the add-on separately
+  seeds neutral skills for card authoring, curriculum design, curriculum
+  delivery, and learning recurring card-writing preferences. Those files are
+  created only when absent and are never overwritten on upgrade.
 - `created_tag` (default `ai-created`): tag stamped on every note the assistant
   creates. Set to an empty string to add no created-by-AI tag.
 - `edited_tag` (default `ai-edited`): tag stamped on any existing note the

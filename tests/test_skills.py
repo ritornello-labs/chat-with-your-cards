@@ -108,17 +108,42 @@ class LoadConventionsIntegrationTest(unittest.TestCase):
 
 
 class MaterializeAgentSkillsTest(unittest.TestCase):
-    """Sanity check that the card-authoring template writer this module
-    also owns is untouched by the conventions-skill changes above."""
+    """The fresh-install skill set and its user-owned upgrade behavior."""
 
-    def test_seeds_card_authoring_and_skill_maintenance_templates(self) -> None:
+    def test_seeds_task_and_maintenance_skills(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             agent_home = Path(tmp) / "agent-home"
             path = materialize_agent_skills(agent_home)
             self.assertTrue(path.exists())
-            self.assertTrue(
-                (agent_home / ".claude" / "skills" / "skill-maintenance" / "SKILL.md").exists()
-            )
+            skills_root = agent_home / ".claude" / "skills"
+            for name in (
+                "anki-card-authoring",
+                "anki-curriculum-design",
+                "anki-curriculum-delivery",
+                "skill-maintenance",
+            ):
+                body = (skills_root / name / "SKILL.md").read_text(encoding="utf-8")
+                self.assertTrue(body.startswith(f"---\nname: {name}\n"))
+
+    def test_card_defaults_are_adaptive_not_personal_taste(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            agent_home = Path(tmp) / "agent-home"
+            path = materialize_agent_skills(agent_home)
+            body = path.read_text(encoding="utf-8")
+            self.assertIn("`note-conventions` skill override", body)
+            self.assertIn("one coherent grading target", body)
+            self.assertIn("ordered lists only when order", body)
+            self.assertNotIn("One atomic fact per card", body)
+            self.assertNotIn("YOUR card taste", body)
+
+    def test_existing_user_owned_skill_is_not_overwritten(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            agent_home = Path(tmp) / "agent-home"
+            path = agent_home / ".claude" / "skills" / "anki-curriculum-design" / "SKILL.md"
+            path.parent.mkdir(parents=True)
+            path.write_text("custom curriculum rules\n", encoding="utf-8")
+            materialize_agent_skills(agent_home)
+            self.assertEqual(path.read_text(encoding="utf-8"), "custom curriculum rules\n")
 
 
 if __name__ == "__main__":

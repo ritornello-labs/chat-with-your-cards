@@ -5,7 +5,7 @@ An Anki add-on that adds a collapsible, modern chat dock/sidebar for talking to 
 - The current card under review is prominently in context — discussing the card is the flagship use case, but any question works.
 - The agent has tools to query the collection (Anki search syntax, note/card lookup, deck/tag/stat overviews), allowed by default with configurable permission modes.
 - It receives a cached, annotated description of the collection: full deck and tag hierarchies with note counts, card counts, and review-time buckets, refreshed by an in-process background job.
-- It can propose new notes that follow the user's conventions (supplied as an Agent Skill), with pinnable deck/tags/note type/field defaults (set through Anki-editor-like selectors) and an optional auto-accept mode with safeguards.
+- It ships neutral Agent Skills for individual card authoring, curriculum design, and safe curriculum delivery, with a separate user-conventions overlay that can learn from accepted-card edits. It can propose new notes with pinnable deck/tags/note type/field defaults (set through Anki-editor-like selectors) and an optional auto-accept mode with safeguards.
 - It can see the images on a card (fetched on demand as real image content), not just their filenames; audio is out of scope for now.
 - Context-aware keyboard shortcuts: one chord toggles between chatting and reviewing; another starts a fresh chat.
 - Backends: CLI agents (Claude Code first, Codex next) via a local MCP server, with a BYOK direct-API backend planned. See [DESIGN.md](DESIGN.md) for the trade-off analysis.

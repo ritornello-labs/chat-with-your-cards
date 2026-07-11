@@ -91,12 +91,25 @@ def gather_report(
             "detail": mcp_url or "starts with the first real chat",
         }
     )
-    skills = agent_home / ".claude" / "skills" / "anki-card-authoring" / "SKILL.md"
+    skills_root = agent_home / ".claude" / "skills"
+    factory_skills = (
+        "anki-card-authoring",
+        "anki-curriculum-design",
+        "anki-curriculum-delivery",
+        "skill-maintenance",
+    )
+    present_skills = [
+        name for name in factory_skills if (skills_root / name / "SKILL.md").exists()
+    ]
     rows.append(
         {
-            "label": "Card-authoring skill",
-            "status": "ok" if skills.exists() else "warn",
-            "detail": str(skills) if skills.exists() else "not materialized yet",
+            "label": "Built-in Anki skills",
+            "status": "ok" if len(present_skills) == len(factory_skills) else "warn",
+            "detail": (
+                f"{len(present_skills)}/{len(factory_skills)} materialized under {skills_root}"
+                if present_skills
+                else "not materialized yet"
+            ),
         }
     )
     if learning is not None:
