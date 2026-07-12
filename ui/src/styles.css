@@ -1069,37 +1069,57 @@ body.nightMode {
   color: var(--cwyc-fg);
 }
 .cwyc-hbtn:focus-visible,
-.cwyc-chip:focus-visible,
-.cwyc-split-main:focus-visible,
-.cwyc-split-caret:focus-visible {
+.cwyc-chip:focus-visible {
   outline: 2px solid var(--cwyc-amber-ring);
   outline-offset: 1px;
 }
+.cwyc-split-main:focus-visible,
+.cwyc-split-caret:focus-visible {
+  outline: 2px solid var(--cwyc-amber-ring);
+  outline-offset: -2px; /* the capsule clips overflow; keep the ring inside */
+}
 
+/* One capsule, two hit areas: border/radius/background live on the CONTAINER
+   so the segments read as a single control, separated by a hairline divider. */
 .cwyc-split {
   display: inline-flex;
   align-items: stretch;
+  border: 1px solid var(--cwyc-border);
+  border-radius: 7px;
+  background: var(--cwyc-surface-raised);
+  overflow: hidden;
 }
 .cwyc-split-main {
-  border: 1px solid var(--cwyc-border);
-  border-right: none;
-  border-radius: 7px 0 0 7px;
-  background: var(--cwyc-surface-raised);
+  border: none;
+  background: transparent;
   color: var(--cwyc-fg);
   font: 500 11.5px var(--cwyc-font);
-  padding: 4px 9px;
+  padding: 4px 7px 4px 8px;
   cursor: pointer;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.cwyc-split-main svg {
+  flex: none;
+  color: var(--cwyc-fg-subtle);
 }
 .cwyc-split-main:hover {
   background: var(--cwyc-amber-soft);
 }
+.cwyc-split-main:hover svg {
+  color: var(--cwyc-fg);
+}
+.cwyc-split-out {
+  margin-left: -1px;
+}
 .cwyc-split-caret {
-  border: 1px solid var(--cwyc-border);
-  border-radius: 0 7px 7px 0;
-  background: var(--cwyc-surface-raised);
+  border: none;
+  border-left: 1px solid var(--cwyc-border);
+  background: transparent;
   color: var(--cwyc-fg-subtle);
-  padding: 0 5px;
+  padding: 0 6px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -1107,6 +1127,16 @@ body.nightMode {
 .cwyc-split-caret:hover {
   background: var(--cwyc-amber-soft);
   color: var(--cwyc-fg);
+}
+
+.cwyc-menu-label-glyph {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.cwyc-menu-label-glyph svg {
+  flex: none;
+  color: var(--cwyc-fg-subtle);
 }
 
 /* ---- floating panels + menus -------------------------------------------- */

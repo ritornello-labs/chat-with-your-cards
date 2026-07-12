@@ -108,6 +108,25 @@ function HeaderButton(props: {
   );
 }
 
+function TargetGlyph({ target }: { target: "terminal" | "desktop" }) {
+  // Generic glyphs, deliberately NOT Anthropic's logo (COMPLIANCE.md rule 4:
+  // naming the launch target is nominative use; their mark is not cleared).
+  // The glyph doubles as the current-target indicator: terminal prompt vs
+  // app window, readable without opening the chooser.
+  return target === "terminal" ? (
+    <svg viewBox="0 0 14 14" width="13" height="13" aria-hidden="true">
+      <rect x="1" y="2" width="12" height="10" rx="2" stroke="currentColor" strokeWidth="1.2" fill="none" />
+      <path d="M3.6 5.4 5.8 7.2 3.6 9M7.2 9.2h3.2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" fill="none" />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 14 14" width="13" height="13" aria-hidden="true">
+      <rect x="1" y="2" width="12" height="10" rx="2" stroke="currentColor" strokeWidth="1.2" fill="none" />
+      <path d="M1 5.2h12" stroke="currentColor" strokeWidth="1.2" fill="none" />
+      <circle cx="3.2" cy="3.6" r="0.7" fill="currentColor" />
+    </svg>
+  );
+}
+
 export function Header({ store }: { store: ChatStore }) {
   const [open, setOpen] = useState<"history" | "doctor" | "cc" | null>(null);
   const ref = useDismiss(open !== null, () => setOpen(null));
@@ -146,11 +165,16 @@ export function Header({ store }: { store: ChatStore }) {
         <button
           type="button"
           className="cwyc-split-main"
-          title={`Open this chat in Claude Code (${targetLabel})`}
+          title={`Open this chat in Claude Code — ${targetLabel}`}
+          aria-label={`Open this chat in Claude Code (${targetLabel})`}
           data-testid="open-cc"
           onClick={() => store.openInClaude()}
         >
-          Open in Claude Code
+          <TargetGlyph target={ui.openTarget === "desktop" ? "desktop" : "terminal"} />
+          <span>Claude Code</span>
+          <svg className="cwyc-split-out" viewBox="0 0 10 10" width="9" height="9" aria-hidden="true">
+            <path d="M4 2h4v4M8 2 3.2 6.8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" fill="none" />
+          </svg>
         </button>
         <button
           type="button"
@@ -195,7 +219,10 @@ export function Header({ store }: { store: ChatStore }) {
                 setOpen(null);
               }}
             >
-              <span className="cwyc-menu-label">{target === "terminal" ? "Terminal" : "Desktop app"}</span>
+              <span className="cwyc-menu-label cwyc-menu-label-glyph">
+                <TargetGlyph target={target} />
+                {target === "terminal" ? "Terminal" : "Desktop app"}
+              </span>
               {ui.openTarget === target ? <span className="cwyc-menu-hint">current</span> : null}
             </button>
           ))}
