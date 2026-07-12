@@ -197,7 +197,7 @@ export function Header({ store }: { store: ChatStore }) {
           <path
             d="M8 10.2A2.2 2.2 0 1 0 8 5.8a2.2 2.2 0 0 0 0 4.4zm5.4-2.2.9-1.6-1.4-1.4-1.6.9a4.7 4.7 0 0 0-1-.6L10 3.5H8l-.3 1.8a4.7 4.7 0 0 0-1 .6l-1.6-.9-1.4 1.4.9 1.6a4.7 4.7 0 0 0-.6 1L2.2 9v2h1.8"
             stroke="currentColor"
-            strokeWidth="1.2"
+            strokeWidth="1.45"
             strokeLinecap="round"
             fill="none"
           />

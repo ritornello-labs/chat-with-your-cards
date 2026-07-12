@@ -189,6 +189,37 @@ body.nightMode {
   box-sizing: border-box;
 }
 
+/* Anki's injected webview.css styles every <button> (margins, background,
+   border, border-radius — including on :hover — and `outline: none
+   !important`). The dev preview never loads it, so the bleed only shows
+   inside real Anki; `make test-gui-smoke-docker` or the injected-CSS
+   simulation in the dev harness is where it reproduces. Strategy: this ID
+   reset (1,0,1) neutralizes EVERY visual property Anki touches, and every
+   button-styling component selector in this file carries a `#cwyc-root `
+   prefix (1,1,0) so it outranks both the reset and Anki. IF YOU ADD A NEW
+   BUTTON STYLE, PREFIX ITS SELECTORS WITH #cwyc-root or it will render as
+   an unstyled inline button inside Anki (correct in the dev preview!). */
+#cwyc-root button,
+#cwyc-root button:hover,
+#cwyc-root button:active {
+  margin: 0;
+  -webkit-appearance: none;
+  appearance: none;
+  min-height: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  padding: 0;
+  box-shadow: none;
+  font: inherit;
+  color: inherit;
+}
+#cwyc-root button:focus-visible {
+  /* Anki's `outline: none !important` would erase focus rings entirely. */
+  outline: 2px solid var(--cwyc-amber-ring) !important;
+  outline-offset: -2px;
+}
+
 .cwyc-app {
   display: flex;
   flex-direction: column;
@@ -200,7 +231,7 @@ body.nightMode {
   background: var(--cwyc-bg);
 }
 
-.cwyc-app button {
+#cwyc-root .cwyc-app button {
   font-family: inherit;
   font-size: inherit;
 }
@@ -773,7 +804,7 @@ body.nightMode {
   gap: 4px;
 }
 
-.cwyc-preview-tab {
+#cwyc-root .cwyc-preview-tab {
   border: 1px solid var(--cwyc-border-subtle);
   border-radius: 6px;
   background: transparent;
@@ -784,7 +815,7 @@ body.nightMode {
   cursor: pointer;
 }
 
-.cwyc-preview-tab.cwyc-active {
+#cwyc-root .cwyc-preview-tab.cwyc-active {
   border-color: var(--cwyc-amber);
   color: var(--cwyc-amber-ink);
   background: var(--cwyc-amber-soft);
@@ -913,7 +944,7 @@ body.nightMode {
   margin-top: 2px;
 }
 
-.cwyc-proposal-actions button {
+#cwyc-root .cwyc-proposal-actions button {
   border: 1px solid var(--cwyc-border);
   border-radius: 7px;
   background: transparent;
@@ -924,7 +955,7 @@ body.nightMode {
   cursor: pointer;
 }
 
-.cwyc-btn-suggest {
+#cwyc-root .cwyc-btn-suggest {
   margin-right: auto;
   border-color: transparent !important;
   color: var(--cwyc-fg-subtle) !important;
@@ -932,25 +963,25 @@ body.nightMode {
   padding-right: 6px !important;
 }
 
-.cwyc-btn-suggest:hover {
+#cwyc-root .cwyc-btn-suggest:hover {
   color: var(--cwyc-fg) !important;
 }
 
-.cwyc-btn-reject:hover {
+#cwyc-root .cwyc-btn-reject:hover {
   border-color: var(--cwyc-red);
   color: var(--cwyc-red);
   background: var(--cwyc-red-soft);
 }
 
 /* THE strongest accent use in the whole UI: the approve fill. */
-.cwyc-proposal-actions .cwyc-btn-accept {
+#cwyc-root .cwyc-proposal-actions .cwyc-btn-accept {
   background: var(--cwyc-amber);
   border-color: var(--cwyc-amber);
   color: var(--cwyc-on-amber);
   font-weight: 600;
 }
 
-.cwyc-proposal-actions .cwyc-btn-accept:hover {
+#cwyc-root .cwyc-proposal-actions .cwyc-btn-accept:hover {
   background: var(--cwyc-amber-hover);
   border-color: var(--cwyc-amber-hover);
 }
@@ -996,7 +1027,7 @@ body.nightMode {
   justify-content: flex-end;
 }
 
-.cwyc-send {
+#cwyc-root .cwyc-send {
   flex: 0 0 auto;
   width: 26px;
   height: 26px;
@@ -1010,11 +1041,11 @@ body.nightMode {
   justify-content: center;
 }
 
-.cwyc-send:hover {
+#cwyc-root .cwyc-send:hover {
   background: var(--cwyc-amber-hover);
 }
 
-.cwyc-send:disabled {
+#cwyc-root .cwyc-send:disabled {
   background: var(--cwyc-surface);
   color: var(--cwyc-fg-faint);
   cursor: default;
@@ -1055,7 +1086,7 @@ body.nightMode {
 .cwyc-header-spacer {
   flex: 1;
 }
-.cwyc-hbtn {
+#cwyc-root .cwyc-hbtn {
   width: 26px;
   height: 26px;
   border: none;
@@ -1067,17 +1098,19 @@ body.nightMode {
   align-items: center;
   justify-content: center;
 }
-.cwyc-hbtn:hover {
-  background: var(--cwyc-surface);
+#cwyc-root .cwyc-hbtn:hover {
+  /* --cwyc-surface was invisible against the page bg; use the same warm
+     tint language as the rest of the header so the hit state actually reads. */
+  background: var(--cwyc-amber-soft);
   color: var(--cwyc-fg);
 }
-.cwyc-hbtn:focus-visible,
-.cwyc-chip:focus-visible {
+#cwyc-root .cwyc-hbtn:focus-visible ,
+#cwyc-root .cwyc-chip:focus-visible {
   outline: 2px solid var(--cwyc-amber-ring);
   outline-offset: 1px;
 }
-.cwyc-split-main:focus-visible,
-.cwyc-split-caret:focus-visible {
+#cwyc-root .cwyc-split-main:focus-visible ,
+#cwyc-root .cwyc-split-caret:focus-visible {
   outline: 2px solid var(--cwyc-amber-ring);
   outline-offset: -2px; /* the capsule clips overflow; keep the ring inside */
 }
@@ -1097,8 +1130,9 @@ body.nightMode {
 .cwyc-split:hover {
   background: var(--cwyc-amber-soft2);
 }
-.cwyc-split-main {
+#cwyc-root .cwyc-split-main {
   border: none;
+  border-radius: 0; /* Anki's webview.css rounds every button; the pill container clips */
   background: transparent;
   color: var(--cwyc-fg);
   font: 500 11.5px var(--cwyc-font);
@@ -1109,21 +1143,22 @@ body.nightMode {
   align-items: center;
   gap: 5px;
 }
-.cwyc-split-main svg {
+#cwyc-root .cwyc-split-main svg {
   flex: none;
   color: var(--cwyc-fg-subtle);
 }
-.cwyc-split-main:hover {
+#cwyc-root .cwyc-split-main:hover {
   background: var(--cwyc-amber-soft);
 }
-.cwyc-split-main:hover svg {
+#cwyc-root .cwyc-split-main:hover svg {
   color: var(--cwyc-fg);
 }
 .cwyc-split-out {
   margin-left: -1px;
 }
-.cwyc-split-caret {
+#cwyc-root .cwyc-split-caret {
   border: none;
+  border-radius: 0; /* see .cwyc-split-main */
   background: var(--cwyc-amber-soft); /* stacks on the pill fill: same hue, deeper */
   color: var(--cwyc-fg-subtle);
   padding: 0 7px 0 6px;
@@ -1131,7 +1166,7 @@ body.nightMode {
   display: inline-flex;
   align-items: center;
 }
-.cwyc-split-caret:hover {
+#cwyc-root .cwyc-split-caret:hover {
   background: var(--cwyc-amber-soft2);
   color: var(--cwyc-fg);
 }
@@ -1199,7 +1234,7 @@ body.nightMode {
   color: var(--cwyc-fg-subtle);
   padding: 6px 8px 7px;
 }
-.cwyc-menu-item {
+#cwyc-root .cwyc-menu-item {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -1214,10 +1249,10 @@ body.nightMode {
   padding: 5px 8px;
   cursor: pointer;
 }
-.cwyc-menu-item:hover {
+#cwyc-root .cwyc-menu-item:hover {
   background: var(--cwyc-surface);
 }
-.cwyc-menu-item.cwyc-active {
+#cwyc-root .cwyc-menu-item.cwyc-active {
   background: var(--cwyc-amber-soft);
   color: var(--cwyc-amber-ink);
 }
@@ -1246,7 +1281,7 @@ body.nightMode {
   align-items: center;
   gap: 5px;
 }
-.cwyc-chip {
+#cwyc-root .cwyc-chip {
   border: 1px solid var(--cwyc-border);
   border-radius: 999px;
   background: transparent;
@@ -1256,7 +1291,7 @@ body.nightMode {
   cursor: pointer;
   white-space: nowrap;
 }
-.cwyc-chip:hover {
+#cwyc-root .cwyc-chip:hover {
   background: var(--cwyc-surface);
   color: var(--cwyc-fg);
 }
@@ -1327,22 +1362,27 @@ body.nightMode {
   font: 500 11.5px var(--cwyc-font);
 }
 
-/* doctor rows */
+/* doctor rows: label line with the status dot, detail stacked BELOW it -
+   long values (paths, URLs) wrap under the label instead of fighting a
+   side-by-side column, and the dot stays glued to the label line rather
+   than floating vertically centered next to a six-line value. */
 .cwyc-doctor-row {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
+  display: grid;
+  grid-template-columns: 7px 1fr;
+  column-gap: 7px;
+  row-gap: 1px;
   font-size: 12px;
-  padding: 4px 8px;
+  padding: 5px 8px;
   color: var(--cwyc-fg);
 }
 .cwyc-doctor-dot {
-  flex: 0 0 auto;
+  grid-column: 1;
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--cwyc-fg-faint);
   align-self: center;
+  margin-top: 1px;
 }
 .cwyc-doctor-ok .cwyc-doctor-dot {
   background: var(--cwyc-green);
@@ -1356,11 +1396,14 @@ body.nightMode {
   background: var(--cwyc-red);
 }
 .cwyc-doctor-label {
-  flex: 0 0 auto;
+  grid-column: 2;
+  grid-row: 1;
   font-weight: 500;
 }
 .cwyc-doctor-detail {
-  flex: 1 1 auto;
+  grid-column: 2;
+  grid-row: 2;
+  font: 11px/1.5 var(--cwyc-mono);
   color: var(--cwyc-fg-subtle);
   overflow-wrap: anywhere;
 }
@@ -1380,7 +1423,7 @@ body.nightMode {
 /* Composer menus (mode/model): stack label over hint - at dock widths an
    inline hint starves the label into ellipsis ("As…", "P."). Header menus
    (history) keep the inline title+time layout. */
-.cwyc-panel-composer .cwyc-menu-item {
+#cwyc-root .cwyc-panel-composer .cwyc-menu-item {
   display: block;
 }
 .cwyc-panel-composer .cwyc-menu-hint {

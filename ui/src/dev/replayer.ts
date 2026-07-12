@@ -362,6 +362,24 @@ export function installDevReplayer(): void {
             type: "doctor",
             results: [
               { label: "Claude Code", status: "ok", detail: "2.1.207 at ~/.local/bin/claude" },
+              // Long values on purpose: the panel layout must survive real
+              // paths/URLs (dogfood 2026-07-12 found side-by-side wrapping).
+              {
+                label: "Collection tool server (MCP)",
+                status: "ok",
+                detail: "http://127.0.0.1:61674/mcp",
+              },
+              {
+                label: "Built-in Anki skills",
+                status: "ok",
+                detail: "4/4 materialized under user_files/agent-home/.claude/skills",
+              },
+              {
+                label: "Edit-pattern learning",
+                status: "ok",
+                detail:
+                  "3 AI-written note(s) watched, 1 pending observation(s), 4 KB on disk (uncapped by design - grows only with AI-written notes)",
+              },
               { label: "Anthropic billing", status: "ok", detail: "harness login (no API key configured)" },
               { label: "Codex", status: "missing", detail: "not found on PATH" },
             ],

@@ -101,12 +101,19 @@ def gather_report(
     present_skills = [
         name for name in factory_skills if (skills_root / name / "SKILL.md").exists()
     ]
+    # The doctor panel is ~360px wide; an absolute path wraps over six lines.
+    # Show the path relative to the add-on package when it lives inside it
+    # (the normal case), falling back to the absolute path for exotic setups.
+    try:
+        skills_disp = str(skills_root.relative_to(Path(__file__).resolve().parent))
+    except ValueError:
+        skills_disp = str(skills_root)
     rows.append(
         {
             "label": "Built-in Anki skills",
             "status": "ok" if len(present_skills) == len(factory_skills) else "warn",
             "detail": (
-                f"{len(present_skills)}/{len(factory_skills)} materialized under {skills_root}"
+                f"{len(present_skills)}/{len(factory_skills)} materialized under {skills_disp}"
                 if present_skills
                 else "not materialized yet"
             ),
