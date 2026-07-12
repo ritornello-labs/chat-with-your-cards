@@ -210,7 +210,13 @@ body.nightMode {
   border-radius: 0;
   background: none;
   padding: 0;
-  box-shadow: none;
+  /* Anki's `.fancy` buttons grow an elevation box-shadow on :hover, forced to
+     animate via `transition: box-shadow !important`. QtWebEngine garbles that
+     animating shadow (visible on hover in real Anki, 2026-07-12), so kill both
+     the shadow AND the forced transition with our own !important. Our buttons
+     have no intended transitions (motion budget is caret/chip/flip/ember). */
+  box-shadow: none !important;
+  transition: none !important;
   font: inherit;
   color: inherit;
 }
@@ -1125,14 +1131,17 @@ body.nightMode {
   border: none;
   border-radius: 999px;
   background: var(--cwyc-amber-soft);
-  overflow: hidden;
+  /* NO overflow:hidden. Clipping rounded overflow while a child background
+     transitions is what QtWebEngine garbles on hover (real Anki, 2026-07-12).
+     Instead each segment rounds its own outer corners, so there is nothing to
+     re-clip per frame. */
 }
 .cwyc-split:hover {
   background: var(--cwyc-amber-soft2);
 }
 #cwyc-root .cwyc-split-main {
   border: none;
-  border-radius: 0; /* Anki's webview.css rounds every button; the pill container clips */
+  border-radius: 999px 0 0 999px; /* round own left; caret rounds its right */
   background: transparent;
   color: var(--cwyc-fg);
   font: 500 11.5px var(--cwyc-font);
@@ -1158,7 +1167,7 @@ body.nightMode {
 }
 #cwyc-root .cwyc-split-caret {
   border: none;
-  border-radius: 0; /* see .cwyc-split-main */
+  border-radius: 0 999px 999px 0; /* round own right; main rounds its left */
   background: var(--cwyc-amber-soft); /* stacks on the pill fill: same hue, deeper */
   color: var(--cwyc-fg-subtle);
   padding: 0 7px 0 6px;

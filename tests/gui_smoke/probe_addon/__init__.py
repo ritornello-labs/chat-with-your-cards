@@ -1234,6 +1234,36 @@ def _run_checks() -> dict[str, Any]:
     }
 
 
+def _hover_grab(result: dict[str, Any], light_path: Path, testid: str) -> None:
+    """Move the real mouse over a control and grab it, to reproduce hover-only
+    rendering (Anki's `.fancy` buttons grow an elevation box-shadow on :hover,
+    transitioned; QtWebEngine can garble that inside our clipped pill). Static
+    grabs never show this - dogfood 2026-07-12."""
+    import importlib
+
+    from aqt.qt import QPoint
+
+    addon = importlib.import_module(ADDON_PACKAGE)
+    web = addon.state.dock.web
+    rect = _eval_js(
+        web,
+        "(function(){var b=document.querySelector('[data-testid=" + testid + "]');"
+        "if(!b)return null;var r=b.getBoundingClientRect();"
+        "return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};})();",
+        DOM_TIMEOUT_MS,
+        f"hover rect {testid}",
+    )
+    if not rect:
+        result[f"hover_{testid}_error"] = "control not found"
+        return
+    target = web.focusProxy() or web
+    QTest.mouseMove(target, QPoint(int(rect["x"]), int(rect["y"])))
+    QTest.qWait(700)  # let Anki's box-shadow transition settle
+    hover_path = light_path.with_name(f"hover-{testid}.png")
+    if mw.grab().save(str(hover_path), "PNG"):
+        result[f"hover_{testid}"] = str(hover_path)
+
+
 def _save_screenshots(result: dict[str, Any]) -> None:
     path = os.environ.get("ANKI_ADDON_WORKBENCH_SCREENSHOT")
     if not path or mw is None:
@@ -1244,6 +1274,13 @@ def _save_screenshots(result: dict[str, Any]) -> None:
     if not mw.grab().save(str(light_path), "PNG"):
         raise RuntimeError(f"failed to save screenshot to {light_path}")
     result["screenshot"] = str(light_path)
+
+    if os.environ.get("CWYC_SMOKE_HOVER"):
+        for tid in ("open-cc", "new-chat", "settings"):
+            try:
+                _hover_grab(result, light_path, tid)
+            except Exception as exc:
+                result[f"hover_{tid}_error"] = str(exc)
 
     try:
         from aqt.theme import Theme, theme_manager
