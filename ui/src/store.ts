@@ -422,6 +422,9 @@ export class ChatStore {
       case "reset":
         this.reset();
         break;
+      case "history_load":
+        this.replayHistory(((event as { events?: unknown[] }).events ?? []) as unknown[]);
+        break;
       case "agent": {
         const agent = event as { backend?: string; model?: string; effort?: string; mode?: string };
         this.ui = {
@@ -703,6 +706,46 @@ export class ChatStore {
     this.currentAssistantId = null;
     this.isRunning = false;
     this.usage = null;
+    this.emit();
+  }
+
+  /**
+   * Rebuild the message list from a saved chat's recorded events (Python's
+   * `history_load` push after the user picks a chat from History). The parity
+   * rebuild dropped this handler, so clicking a chat did nothing but blank the
+   * pane (dogfood 2026-07-12). Mirrors classic app.js `replayHistory`: a
+   * user_message clears the current turn so the NEXT assistant content lazily
+   * opens a fresh (completed) assistant bubble - interrupted turns with no
+   * reply therefore leave no empty bubble. Everything else (assistant_text,
+   * tool_call_*, proposal, proposal_resolved, usage) routes through the same
+   * handlers the live stream uses, so replay and live render identically.
+   * Recorded types: see transcripts.py RECORDED_TYPES.
+   */
+  private replayHistory(events: readonly unknown[]): void {
+    this.reset();
+    for (const raw of events) {
+      const ev = raw as { type?: string; text?: string };
+      if (!ev || typeof ev.type !== "string") continue;
+      if (ev.type === "user_message") {
+        const userMsg: StoreMessage = {
+          id: nextId("u"),
+          role: "user",
+          content: [{ type: "text", text: String(ev.text ?? "") }],
+          createdAt: new Date(),
+        };
+        this.messages = [...this.messages, userMsg];
+        this.currentAssistantId = null; // next assistant content opens a fresh bubble
+      } else if (ev.type === "assistant_text") {
+        this.appendText("text", String(ev.text ?? ""));
+      } else {
+        // tool_call_started/finished, proposal, proposal_resolved, usage:
+        // identical shapes to the live stream; reuse those handlers. isRunning
+        // is false, so ensureCurrentAssistant marks new bubbles complete.
+        this.dispatch(raw);
+      }
+    }
+    this.currentAssistantId = null;
+    this.isRunning = false;
     this.emit();
   }
 }

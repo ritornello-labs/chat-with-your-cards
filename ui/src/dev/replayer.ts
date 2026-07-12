@@ -353,8 +353,47 @@ export function installDevReplayer(): void {
         break;
       case "load_history":
         cancelPending();
+        // Mirror Python: reset, then a history_load carrying recorded events
+        // (the transcripts.py RECORDED_TYPES shapes) for the store to replay.
         window.chatUI?.dispatch({ type: "reset" });
-        window.chatUI?.dispatch({ type: "notice", text: "Continuing chat from history (dev stub)." });
+        window.chatUI?.dispatch({
+          type: "history_load",
+          events: [
+            { type: "user_message", text: "Remind me what a conformed dimension is." },
+            {
+              type: "assistant_text",
+              text: "A **conformed dimension** is a dimension table shared across multiple fact tables with identical keys and meaning.",
+            },
+            { type: "tool_call_started", call_id: "h-1", tool: "search_notes", summary: "conformed dimension" },
+            { type: "tool_call_finished", call_id: "h-1", ok: true, summary: "3 notes" },
+            { type: "user_message", text: "Add a card for it." },
+            {
+              type: "proposal",
+              proposal: {
+                id: "hp-1",
+                kind: "create",
+                note_type: "Basic",
+                deck: "Data Modeling",
+                status: "accepted",
+                rationale: "Captures the definition as one recall step.",
+                warnings: [],
+                fields: [
+                  { name: "Front", old: "", new: "What is a conformed dimension?" },
+                  { name: "Back", old: "", new: "A dimension shared across fact tables with identical keys and meaning." },
+                ],
+                previews: {
+                  after: {
+                    question: "What is a conformed dimension?",
+                    answer: "A dimension shared across fact tables with identical keys and meaning.",
+                    css: ".card{font-family:sans-serif;}",
+                  },
+                },
+              },
+            },
+            { type: "proposal_resolved", id: "hp-1", status: "accepted" },
+            { type: "usage", cost_usd: null, input_tokens: 1840, output_tokens: 260 },
+          ],
+        });
         break;
       case "run_doctor":
         window.setTimeout(() => {

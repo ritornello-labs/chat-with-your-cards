@@ -186,9 +186,14 @@ interface ProposalCardProps {
 }
 
 export function ProposalCard({ data, store }: ProposalCardProps) {
+  // Tolerate partial/legacy payloads: a replayed transcript or a schema drift
+  // must never let `.map` on a missing array throw and blank the whole app
+  // (the error boundary in App.tsx is the backstop; this is the near guard).
+  const fields = Array.isArray(data.fields) ? data.fields : [];
+  const warnings = Array.isArray(data.warnings) ? data.warnings : [];
   const editableFields = data.kind === "create" || data.kind === "edit";
   const initialValues = useMemo(
-    () => Object.fromEntries(data.fields.map((f) => [f.name, f.new])),
+    () => Object.fromEntries(fields.map((f) => [f.name, f.new])),
     // Re-seed only when the proposal identity changes, not on every
     // status/warning update (that would clobber in-progress edits).
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -221,7 +226,7 @@ export function ProposalCard({ data, store }: ProposalCardProps) {
       </div>
 
       {data.rationale ? <div className="cwyc-proposal-rationale">{data.rationale}</div> : null}
-      {data.warnings.map((warning, i) => (
+      {warnings.map((warning, i) => (
         <div className="cwyc-proposal-warning" key={i}>
           {warning}
         </div>
@@ -231,7 +236,7 @@ export function ProposalCard({ data, store }: ProposalCardProps) {
 
       {editableFields ? (
         <div className="cwyc-proposal-fields">
-          {data.fields.map((field) => (
+          {fields.map((field) => (
             <div className="cwyc-field" key={field.name}>
               <div className="cwyc-field-name">{field.name}</div>
               {editing ? (

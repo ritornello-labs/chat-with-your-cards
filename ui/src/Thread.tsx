@@ -6,6 +6,7 @@ import { ProposalCard } from "./components/ProposalCard";
 import { ToolCallCard } from "./components/ToolCallCard";
 import { ReasoningBlock } from "./components/ReasoningBlock";
 import { ErrorBanner } from "./components/ErrorBanner";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { TextPart } from "./components/TextPart";
 import { ModeChip, ModelPicker, PinsButton } from "./components/ComposerControls";
 
@@ -30,7 +31,23 @@ function AssistantMessage({ store }: { store: ChatStore }) {
             tools: { Fallback: ToolCallCard },
             data: {
               by_name: {
-                proposal: (props) => <ProposalCard {...props} store={store} />,
+                // A malformed proposal must degrade to a one-liner, not blank
+                // the dock (dogfood 2026-07-12). resetKey = proposal id so a
+                // fresh card retries rather than staying failed.
+                proposal: (props) => (
+                  <ErrorBoundary
+                    resetKey={(props as { data?: { id?: string } }).data?.id}
+                    fallback={
+                      <div className="cwyc-proposal cwyc-proposal-resolved" data-testid="proposal-card">
+                        <div className="cwyc-proposal-warning">
+                          This proposal card couldn’t be displayed.
+                        </div>
+                      </div>
+                    }
+                  >
+                    <ProposalCard {...props} store={store} />
+                  </ErrorBoundary>
+                ),
                 error: ErrorBanner,
               },
             },

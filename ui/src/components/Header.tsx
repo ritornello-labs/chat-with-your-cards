@@ -43,7 +43,7 @@ function when(entry: HistoryEntry): string {
 function HistoryPanel({ store, onClose }: { store: ChatStore; onClose: () => void }) {
   const history = useChatState(store).ui.history;
   return (
-    <div className="cwyc-panel cwyc-panel-header" role="menu">
+    <div className="cwyc-panel cwyc-panel-header cwyc-panel-header-left" role="menu">
       <div className="cwyc-panel-title">Chats</div>
       {history === null ? (
         <div className="cwyc-panel-empty">Loading…</div>

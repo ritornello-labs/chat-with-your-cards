@@ -1221,6 +1221,12 @@ body.nightMode {
   top: calc(100% + 4px);
   right: 8px;
 }
+/* History opens from the clock button on the LEFT, so anchor left, not right
+   (dogfood 2026-07-12: it was rendering under the right-side controls). */
+.cwyc-panel-header-left {
+  left: 8px;
+  right: auto;
+}
 .cwyc-panel-composer {
   bottom: calc(100% + 6px);
   left: 0;
