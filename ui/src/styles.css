@@ -95,6 +95,7 @@
   --cwyc-amber-hover: #c98c1f;
   --cwyc-amber-ink: #8a5f10;
   --cwyc-amber-soft: rgba(217, 154, 43, 0.14);
+  --cwyc-amber-soft2: rgba(217, 154, 43, 0.24);
   --cwyc-amber-ring: rgba(217, 154, 43, 0.35);
   --cwyc-on-amber: #241a08;
 
@@ -134,6 +135,7 @@
     --cwyc-amber-hover: #eec06f;
     --cwyc-amber-ink: #e6b45c;
     --cwyc-amber-soft: rgba(230, 180, 92, 0.16);
+    --cwyc-amber-soft2: rgba(230, 180, 92, 0.28);
     --cwyc-amber-ring: rgba(230, 180, 92, 0.4);
     --cwyc-on-amber: #241a08;
 
@@ -165,6 +167,7 @@ body.nightMode {
   --cwyc-amber-hover: #eec06f;
   --cwyc-amber-ink: #e6b45c;
   --cwyc-amber-soft: rgba(230, 180, 92, 0.16);
+  --cwyc-amber-soft2: rgba(230, 180, 92, 0.28);
   --cwyc-amber-ring: rgba(230, 180, 92, 0.4);
   --cwyc-on-amber: #241a08;
 
@@ -1079,22 +1082,27 @@ body.nightMode {
   outline-offset: -2px; /* the capsule clips overflow; keep the ring inside */
 }
 
-/* One capsule, two hit areas: border/radius/background live on the CONTAINER
-   so the segments read as a single control, separated by a hairline divider. */
+/* One FILLED pill, two hit areas (reference: classic Send|v split buttons).
+   No outline, no divider line: the container carries the warm fill, the caret
+   half is simply a deeper shade of the same fill (alpha tints stack), and
+   hover deepens the whole pill - so the halves are physically one object. */
 .cwyc-split {
   display: inline-flex;
   align-items: stretch;
-  border: 1px solid var(--cwyc-border);
-  border-radius: 7px;
-  background: var(--cwyc-surface-raised);
+  border: none;
+  border-radius: 999px;
+  background: var(--cwyc-amber-soft);
   overflow: hidden;
+}
+.cwyc-split:hover {
+  background: var(--cwyc-amber-soft2);
 }
 .cwyc-split-main {
   border: none;
   background: transparent;
   color: var(--cwyc-fg);
   font: 500 11.5px var(--cwyc-font);
-  padding: 4px 7px 4px 8px;
+  padding: 4px 8px 4px 10px;
   cursor: pointer;
   white-space: nowrap;
   display: inline-flex;
@@ -1116,16 +1124,15 @@ body.nightMode {
 }
 .cwyc-split-caret {
   border: none;
-  border-left: 1px solid var(--cwyc-border);
-  background: transparent;
+  background: var(--cwyc-amber-soft); /* stacks on the pill fill: same hue, deeper */
   color: var(--cwyc-fg-subtle);
-  padding: 0 6px;
+  padding: 0 7px 0 6px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
 }
 .cwyc-split-caret:hover {
-  background: var(--cwyc-amber-soft);
+  background: var(--cwyc-amber-soft2);
   color: var(--cwyc-fg);
 }
 
