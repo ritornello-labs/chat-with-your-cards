@@ -1231,6 +1231,12 @@ body.nightMode {
   bottom: calc(100% + 6px);
   left: 0;
 }
+/* Flipped variant: useSmartPanel() applies this when there is not enough room
+   above the composer (short/empty dock - dogfood 2026-07-12). */
+.cwyc-panel-composer-down {
+  bottom: auto;
+  top: calc(100% + 6px);
+}
 .cwyc-panel-right {
   left: auto;
   right: 0;
