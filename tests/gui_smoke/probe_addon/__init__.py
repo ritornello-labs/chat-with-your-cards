@@ -1220,6 +1220,44 @@ def _run_checks() -> dict[str, Any]:
 
     proposal_info = check("proposal accept round-trip", _proposal_round_trip)
 
+    def _hover_geometry_stable() -> dict[str, Any]:
+        """Hovering a header button must change ONLY its background - never
+        padding, font, size, or radius. A geometry change on hover shrinks the
+        control out from under the cursor and starts a flicker loop (the
+        `#cwyc-root button:hover` specificity trap, real Anki, 2026-07-12).
+        This drives the REAL mouse and compares computed styles + rect."""
+        from aqt.qt import QPoint
+
+        web = state.dock.web
+        target = web.focusProxy() or web
+        diffs = {}
+        for tid in ("open-cc", "new-chat", "settings"):
+            QTest.mouseMove(target, QPoint(2, 2))
+            QTest.qWait(150)
+            rest = _measure(web, tid)
+            r = _eval_js(
+                web,
+                "(function(){var b=document.querySelector('[data-testid=" + tid + "]');"
+                "var q=b.getBoundingClientRect();return {x:Math.round(q.left+q.width/2),"
+                "y:Math.round(q.top+q.height/2)};})();",
+                DOM_TIMEOUT_MS,
+                f"rect {tid}",
+            )
+            QTest.mouseMove(target, QPoint(int(r["x"]), int(r["y"])))
+            QTest.qWait(250)
+            hover = _measure(web, tid)
+            changed = {k for k in rest if rest.get(k) != hover.get(k)}
+            geom = changed - {"backgroundColor"}
+            if geom:
+                raise AssertionError(
+                    f"{tid} changes {sorted(geom)} on hover (not just background): "
+                    f"{ {k:[rest[k],hover[k]] for k in geom} } - hover flicker risk"
+                )
+            diffs[tid] = sorted(changed)
+        return diffs
+
+    check("hover changes background only (no geometry)", _hover_geometry_stable)
+
     # Real-collection stress tests: the collection-mutation paths driven
     # against the real disposable collection, not the unit tests' fakes.
     _collection_flow_checks(state, check)
@@ -1234,31 +1272,65 @@ def _run_checks() -> dict[str, Any]:
     }
 
 
+_MEASURE_JS = """
+(function(tid){
+  var b = document.querySelector('[data-testid='+tid+']');
+  if(!b) return null;
+  var cs = getComputedStyle(b), r = b.getBoundingClientRect();
+  var p = ['width','height','paddingTop','paddingRight','paddingBottom','paddingLeft',
+    'marginTop','marginRight','marginBottom','marginLeft','borderTopWidth','borderRightWidth',
+    'borderBottomWidth','borderLeftWidth','fontSize','fontFamily','fontWeight','lineHeight',
+    'boxSizing','boxShadow','transform','transition','minWidth','minHeight','borderRadius',
+    'backgroundColor'];
+  var o = {rectW: +r.width.toFixed(2), rectH: +r.height.toFixed(2)};
+  p.forEach(function(k){ o[k] = cs[k]; });
+  return o;
+})(%s);
+"""
+
+
+def _measure(web: Any, testid: str) -> Any:
+    return _eval_js(web, _MEASURE_JS % json.dumps(testid), DOM_TIMEOUT_MS, f"measure {testid}")
+
+
 def _hover_grab(result: dict[str, Any], light_path: Path, testid: str) -> None:
-    """Move the real mouse over a control and grab it, to reproduce hover-only
-    rendering (Anki's `.fancy` buttons grow an elevation box-shadow on :hover,
-    transitioned; QtWebEngine can garble that inside our clipped pill). Static
-    grabs never show this - dogfood 2026-07-12."""
+    """Reproduce hover-ONLY behavior in real Anki and MEASURE it. A static grab
+    can't show flicker or a geometry hover-loop; the computed-style + rect DIFF
+    between rest and hover names the exact property that changes (dogfood
+    2026-07-12: 'changes size, shape, font on hover; flickers on the divider')."""
     import importlib
 
     from aqt.qt import QPoint
 
     addon = importlib.import_module(ADDON_PACKAGE)
     web = addon.state.dock.web
+
+    # 1. rest snapshot (mouse parked far away)
+    target = web.focusProxy() or web
+    QTest.mouseMove(target, QPoint(2, 2))
+    QTest.qWait(200)
+    rest = _measure(web, testid)
+    if not rest:
+        result[f"hover_{testid}_error"] = "control not found"
+        return
+
+    # 2. hover snapshot
     rect = _eval_js(
         web,
         "(function(){var b=document.querySelector('[data-testid=" + testid + "]');"
-        "if(!b)return null;var r=b.getBoundingClientRect();"
+        "var r=b.getBoundingClientRect();"
         "return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};})();",
         DOM_TIMEOUT_MS,
         f"hover rect {testid}",
     )
-    if not rect:
-        result[f"hover_{testid}_error"] = "control not found"
-        return
-    target = web.focusProxy() or web
     QTest.mouseMove(target, QPoint(int(rect["x"]), int(rect["y"])))
-    QTest.qWait(700)  # let Anki's box-shadow transition settle
+    QTest.qWait(400)
+    hover = _measure(web, testid)
+
+    # 3. the diff IS the diagnosis
+    diff = {k: [rest.get(k), hover.get(k)] for k in rest if rest.get(k) != hover.get(k)}
+    result[f"hoverdiff_{testid}"] = diff or "identical (geometry stable)"
+
     hover_path = light_path.with_name(f"hover-{testid}.png")
     if mw.grab().save(str(hover_path), "PNG"):
         result[f"hover_{testid}"] = str(hover_path)

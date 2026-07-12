@@ -198,10 +198,18 @@ body.nightMode {
    button-styling component selector in this file carries a `#cwyc-root `
    prefix (1,1,0) so it outranks both the reset and Anki. IF YOU ADD A NEW
    BUTTON STYLE, PREFIX ITS SELECTORS WITH #cwyc-root or it will render as
-   an unstyled inline button inside Anki (correct in the dev preview!). */
-#cwyc-root button,
-#cwyc-root button:hover,
-#cwyc-root button:active {
+   an unstyled inline button inside Anki (correct in the dev preview!).
+
+   CRITICAL: this reset selector must NOT include `:hover`/`:active`. `:hover`
+   is a pseudo-CLASS, so `#cwyc-root button:hover` scores (1,1,1) and would
+   OUTRANK component base rules like `#cwyc-root .cwyc-split-main` (1,1,0) the
+   instant you hover — stripping their padding/font/radius, shrinking the
+   button, and starting a geometry hover-flicker loop (real Anki, measured
+   2026-07-12). The bare `#cwyc-root button` (1,0,1) already beats every Anki
+   `button`/`button:hover` rule via the ID and applies in all states, and its
+   `!important` box-shadow/transition kill Anki's elevation regardless of
+   pseudo-class. Never add a state pseudo-class here. */
+#cwyc-root button {
   margin: 0;
   -webkit-appearance: none;
   appearance: none;
