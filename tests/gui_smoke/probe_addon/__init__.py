@@ -1012,7 +1012,14 @@ def _run_checks() -> dict[str, Any]:
             "  stop: document.querySelector('[data-testid=stop]') ? true : false,"
             "  thinking_indicator: document.querySelectorAll('[data-testid=thinking-indicator]').length,"
             "  thinking_summary: document.querySelectorAll('[data-testid=thinking-summary]').length,"
-            "  thinking_text: thinkSummary ? thinkSummary.textContent : ''"
+            "  thinking_text: thinkSummary ? thinkSummary.textContent : '',"
+            # Did the bundled IBM Plex actually load in Anki's webview, or did
+            # it silently fall back to a system sans? document.fonts.check is
+            # the ground truth. If false, the dock renders in a fallback face
+            # and every browser-preview measurement is off (dogfood 2026-07-12).
+            "  plex_sans_loaded: document.fonts.check('13px \"IBM Plex Sans\"'),"
+            "  plex_mono_loaded: document.fonts.check('11px \"IBM Plex Mono\"'),"
+            "  body_font: compInput ? getComputedStyle(compInput).fontFamily : ''"
             "}; })();",
             DOM_TIMEOUT_MS,
             "DOM state query",
@@ -1247,10 +1254,15 @@ def _save_screenshots(result: dict[str, Any]) -> None:
         addon = importlib.import_module(ADDON_PACKAGE)
         result["dark_page_state"] = _eval_js(
             addon.state.dock.web,
-            "(function() { return {"
+            # appBg is the tokens verdict: dark charcoal here + light pixels
+            # in the grab = stale QtWebEngine tiles; light here = OUR css bug.
+            "(function() { var app = document.querySelector('.cwyc-app');"
+            " return {"
             "  htmlClass: document.documentElement.className,"
+            "  bodyClass: document.body.className,"
             "  canvas: getComputedStyle(document.documentElement)"
-            "    .getPropertyValue('--canvas').trim()"
+            "    .getPropertyValue('--canvas').trim(),"
+            "  appBg: app ? getComputedStyle(app).backgroundColor : null"
             "}; })();",
             DOM_TIMEOUT_MS,
             "dark page state",
@@ -1263,12 +1275,18 @@ def _save_screenshots(result: dict[str, Any]) -> None:
             "  document.body.style.display = 'none';"
             "  void document.body.offsetHeight;"
             "  document.body.style.display = '';"
+            # Display-toggling alone left stale light tiles in the large,
+            # lazily-rasterized message list (observed on Anki 25.09,
+            # 2026-07-12); jiggle the scroll viewport to invalidate them too.
+            "  var vp = document.querySelector("
+            "    '.cwyc-thread, .cwyc-messages, [class*=viewport]');"
+            "  if (vp) { vp.scrollTop += 1; vp.scrollTop -= 1; }"
             "  return true;"
             "})();",
             DOM_TIMEOUT_MS,
             "dark repaint force",
         )
-        QTest.qWait(500)
+        QTest.qWait(1500)
         dark_path = light_path.with_name(light_path.stem + "-dark.png")
         if not mw.grab().save(str(dark_path), "PNG"):
             raise RuntimeError(f"failed to save screenshot to {dark_path}")
@@ -1290,6 +1308,23 @@ def _finish() -> None:
 
 
 def _run_and_quit() -> None:
+    # CWYC_SMOKE_THEME=dark: switch theme BEFORE any chat content renders, so
+    # the final grab shows dark pixels that were never light. The mid-session
+    # flip further down stays as a state assertion, but its mw.grab() is NOT
+    # pixel-truth: QWidget::grab photographs the GPU compositor's tiles, and
+    # after a live theme flip those stay stale-light no matter how hard we
+    # force reflows (verified 2026-07-12: computed .cwyc-app background was
+    # dark charcoal while the grab stayed light). Fresh-render grabs are
+    # honest; post-flip grabs are not.
+    if os.environ.get("CWYC_SMOKE_THEME") == "dark":
+        try:
+            from aqt.theme import Theme, theme_manager
+
+            mw.pm.set_theme(Theme.DARK)
+            theme_manager.apply_style()
+            QTest.qWait(400)
+        except Exception:
+            pass
     try:
         result = _run_checks()
     except Exception as exc:

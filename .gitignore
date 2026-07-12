@@ -15,3 +15,4 @@ user_files/
 .tmp-gui-workbench/
 .tmp-gui-smoke/
 meta.json
+.smoke-artifacts/
