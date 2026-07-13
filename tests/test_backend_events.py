@@ -14,6 +14,7 @@ from chat_with_your_cards.backends import (  # noqa: E402
     ThinkingDelta,
     ToolCallFinished,
     ToolCallStarted,
+    UsageUpdate,
     event_to_dict,
 )
 
@@ -62,6 +63,32 @@ class EventToDictTest(unittest.TestCase):
             },
             event_to_dict(ToolCallFinished("call-1", True, "12 notes")),
         )
+
+    def test_usage_with_cache_tokens(self) -> None:
+        self.assertEqual(
+            {
+                "type": "usage",
+                "cost_usd": 0.42,
+                "input_tokens": 1200,
+                "output_tokens": 300,
+                "cache_read_tokens": 500_000,
+                "cache_creation_tokens": 12_000,
+            },
+            event_to_dict(
+                UsageUpdate(
+                    cost_usd=0.42,
+                    input_tokens=1200,
+                    output_tokens=300,
+                    cache_read_tokens=500_000,
+                    cache_creation_tokens=12_000,
+                )
+            ),
+        )
+
+    def test_usage_defaults_cache_tokens_to_none(self) -> None:
+        payload = event_to_dict(UsageUpdate(cost_usd=None, input_tokens=10, output_tokens=5))
+        self.assertIsNone(payload["cache_read_tokens"])
+        self.assertIsNone(payload["cache_creation_tokens"])
 
     def test_done(self) -> None:
         self.assertEqual({"type": "done"}, event_to_dict(Done()))

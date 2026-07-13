@@ -20,6 +20,12 @@
   Switching model or effort mid-chat keeps the current conversation - the CLI is
   re-invoked with `--resume` on your next message. Your choice is remembered
   across chats and restarts; the CLI default only applies until you first pick.
+- `fast_mode` (default `false`): headless "fast mode" for faster Opus output.
+  Requires the Claude Code CLI `2.1.205` or later; only takes effect on Opus
+  (harmless, but a no-op, on other models). There is no live mid-session
+  toggle upstream - like a model/effort switch, turning it on or off applies
+  from your next message (the CLI process respawns with `--resume`). Also
+  toggleable from the dock's Model/effort picker.
 - `suggested_questions` (default `true`): show a context-aware suggested
   question as gray ghost text in the empty composer; Tab accepts it, typing
   dismisses it.

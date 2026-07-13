@@ -267,14 +267,16 @@ export function ModelPicker({ store }: { store: ChatStore }) {
   const ref = useDismiss(open, () => setOpen(false));
   const panel = useSmartPanel(open);
   const modelLabel = MODELS.find((m) => m.id === ui.agent.model)?.label ?? ui.agent.model;
-  const label = ui.agent.effort ? `${modelLabel} · ${ui.agent.effort}` : modelLabel;
+  const label =
+    (ui.agent.effort ? `${modelLabel} · ${ui.agent.effort}` : modelLabel) +
+    (ui.agent.fast ? " · fast" : "");
 
   return (
     <div className="cwyc-ctl" ref={ref}>
       <button
         type="button"
         className="cwyc-chip"
-        title="Model and reasoning effort (applies from your next message)"
+        title="Model, reasoning effort, and fast mode (applies from your next message)"
         data-testid="model-picker"
         onClick={() => setOpen((o) => !o)}
       >
@@ -308,6 +310,23 @@ export function ModelPicker({ store }: { store: ChatStore }) {
               <span className="cwyc-menu-label">{effort.label}</span>
             </button>
           ))}
+          <div className="cwyc-panel-title cwyc-panel-title-gap">Fast mode</div>
+          <button
+            type="button"
+            className={"cwyc-menu-item" + (!ui.agent.fast ? " cwyc-active" : "")}
+            title="Opus-only faster output; needs claude CLI 2.1.205+"
+            onClick={() => store.setAgent(ui.agent.model, ui.agent.effort, false)}
+          >
+            <span className="cwyc-menu-label">Off</span>
+          </button>
+          <button
+            type="button"
+            className={"cwyc-menu-item" + (ui.agent.fast ? " cwyc-active" : "")}
+            title="Opus-only faster output; needs claude CLI 2.1.205+"
+            onClick={() => store.setAgent(ui.agent.model, ui.agent.effort, true)}
+          >
+            <span className="cwyc-menu-label">On</span>
+          </button>
         </div>
       ) : null}
     </div>

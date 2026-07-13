@@ -6,6 +6,7 @@
     "claude_cli_path": "",
     "model": "",
     "effort": "",
+    "fast_mode": false,
     "web_access": true,
     "mcp_servers": {},
     "mcp_inherit_user": false,

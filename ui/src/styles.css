@@ -701,12 +701,61 @@ body.nightMode {
 .cwyc-usage-chip {
   align-self: flex-start;
   margin: 0 12px 8px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
   font-family: var(--cwyc-mono);
   font-size: 10.5px;
   color: var(--cwyc-fg-subtle);
   border: 1px solid var(--cwyc-border-subtle);
   border-radius: 999px;
   padding: 2px 9px;
+  max-width: 100%;
+}
+
+.cwyc-usage-text {
+  white-space: nowrap;
+}
+
+.cwyc-usage-context {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Thin proportional context-window bar: amber fill by default, warning
+   color past ~80% (contextWindow.ts's window size, computed live in
+   UsageFooter.tsx). */
+.cwyc-usage-bar {
+  display: inline-block;
+  width: 46px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--cwyc-border-subtle);
+  overflow: hidden;
+  flex: none;
+}
+
+.cwyc-usage-bar-fill {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+  border-radius: 999px;
+  background: var(--cwyc-amber);
+}
+
+.cwyc-usage-bar-fill-warn {
+  background: var(--cwyc-red);
+}
+
+.cwyc-usage-context-label {
+  white-space: nowrap;
+}
+
+.cwyc-usage-context-label-warn {
+  color: var(--cwyc-red);
 }
 
 /* ---------- proposal card: a flashcard on the desk ---------- */

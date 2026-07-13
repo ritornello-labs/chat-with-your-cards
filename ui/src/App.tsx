@@ -7,7 +7,7 @@ import type { ChatStore } from "./store";
 
 function Footer({ store }: { store: ChatStore }) {
   const state = useChatState(store);
-  return <UsageFooter usage={state.usage} />;
+  return <UsageFooter usage={state.usage} model={state.ui.agent.model} />;
 }
 
 /** Transient strip for Python "notice" pushes (e.g. "Switched to Opus…"). */

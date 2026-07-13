@@ -162,6 +162,46 @@ class ModelSwitchTest(unittest.TestCase):
         self.assertEqual(1, len(FakePopen.instances))
         self.assertFalse(FakePopen.instances[0].terminated)
 
+    def test_fast_mode_change_alone_triggers_respawn(self) -> None:
+        # Fast mode has no mid-session toggle upstream either (--settings is
+        # spawn-time only) - it must respawn exactly like a model/effort
+        # switch, even when model/effort themselves are unchanged.
+        self.session.prewarm()
+        first = FakePopen.instances[0]
+        self.assertNotIn("--settings", self._argv(first))
+        self.session._state.session_id = "sess-fast-1"
+
+        self.session.set_model_effort("", "", True)
+        self.session._ensure_process()
+
+        self.assertTrue(first.terminated)
+        self.assertEqual(2, len(FakePopen.instances))
+        argv = self._argv(FakePopen.instances[1])
+        self.assertIn("--settings", argv)
+        settings = argv[argv.index("--settings") + 1]
+        self.assertEqual({"fastMode": True}, json.loads(settings))
+        self.assertEqual("sess-fast-1", argv[argv.index("--resume") + 1])
+
+    def test_fast_mode_unchanged_reuses_process(self) -> None:
+        self.session.prewarm()
+        self.session.set_model_effort("", "", False)
+        self.session._ensure_process()
+        self.assertEqual(1, len(FakePopen.instances), "no respawn when fast_mode is unchanged")
+
+    def test_fast_mode_off_after_on_respawns_without_settings(self) -> None:
+        self.session.set_model_effort("opus", "high", True)
+        self.session.prewarm()
+        first = FakePopen.instances[0]
+        self.assertIn("--settings", self._argv(first))
+        self.session._state.session_id = "sess-fast-2"
+
+        self.session.set_model_effort("opus", "high", False)
+        self.session._ensure_process()
+
+        self.assertTrue(first.terminated)
+        argv = self._argv(FakePopen.instances[1])
+        self.assertNotIn("--settings", argv)
+
 
 class _FakeSessionTestCase(unittest.TestCase):
     """Shared Popen-faking setup for cancel()/interrupt() tests."""

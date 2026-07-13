@@ -129,6 +129,8 @@ export interface UsageSnapshot {
   readonly costUsd: number | null;
   readonly inputTokens: number | null;
   readonly outputTokens: number | null;
+  readonly cacheReadTokens: number | null;
+  readonly cacheCreationTokens: number | null;
 }
 
 // ---- UI/control state pushed by Python (controller.py / __init__.py) ----
@@ -138,6 +140,7 @@ export interface AgentState {
   readonly model: string; // "" | "fable" | "opus" | "sonnet" | "haiku"
   readonly effort: string; // "" | "low" | "medium" | "high" | "max"
   readonly mode: string; // permission mode
+  readonly fast: boolean; // fast mode (Opus-only; requires a respawn to change)
 }
 
 export interface NoteTypeMeta {
@@ -193,7 +196,7 @@ export const PERMISSION_MODES: readonly { id: string; label: string; hint: strin
 const EMPTY_PINS: PinsState = { deck: "", note_type: "", tags: [], fields: {} };
 
 const DEFAULT_UI_STATE: UiState = {
-  agent: { backend: "auto", model: "", effort: "", mode: "default" },
+  agent: { backend: "auto", model: "", effort: "", mode: "default", fast: false },
   openTarget: "terminal",
   meta: { decks: [], noteTypes: [], tags: [] },
   pins: EMPTY_PINS,
@@ -321,11 +324,14 @@ export class ChatStore {
 
   // ---- outbound: control-surface commands (header + composer row) ----
 
-  setAgent(model: string, effort: string): void {
+  setAgent(model: string, effort: string, fast?: boolean): void {
     // Optimistic: Python re-pushes the authoritative "agent" state after.
-    this.ui = { ...this.ui, agent: { ...this.ui.agent, model, effort } };
+    // fast defaults to the current value so model/effort-only callers
+    // (the Model/Effort menu sections) don't clobber it.
+    const nextFast = fast === undefined ? this.ui.agent.fast : fast;
+    this.ui = { ...this.ui, agent: { ...this.ui.agent, model, effort, fast: nextFast } };
     this.emit();
-    postCommand({ type: "set_agent", model, effort });
+    postCommand({ type: "set_agent", model, effort, fast: nextFast });
   }
 
   setPermissionMode(mode: string): void {
@@ -426,7 +432,13 @@ export class ChatStore {
         this.replayHistory(((event as { events?: unknown[] }).events ?? []) as unknown[]);
         break;
       case "agent": {
-        const agent = event as { backend?: string; model?: string; effort?: string; mode?: string };
+        const agent = event as {
+          backend?: string;
+          model?: string;
+          effort?: string;
+          mode?: string;
+          fast?: boolean;
+        };
         this.ui = {
           ...this.ui,
           agent: {
@@ -434,6 +446,7 @@ export class ChatStore {
             model: String(agent.model ?? ""),
             effort: String(agent.effort ?? ""),
             mode: String(agent.mode ?? "default"),
+            fast: Boolean(agent.fast),
           },
         };
         this.emit();
@@ -688,6 +701,8 @@ export class ChatStore {
       costUsd: event.cost_usd,
       inputTokens: event.input_tokens,
       outputTokens: event.output_tokens,
+      cacheReadTokens: event.cache_read_tokens ?? null,
+      cacheCreationTokens: event.cache_creation_tokens ?? null,
     };
     this.emit();
   }

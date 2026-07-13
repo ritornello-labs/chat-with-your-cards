@@ -324,6 +324,7 @@ export function installDevReplayer(): void {
           model: "opus",
           effort: "high",
           mode: "default",
+          fast: false,
         });
         window.chatUI?.dispatch({
           type: "ui_config",
@@ -391,7 +392,14 @@ export function installDevReplayer(): void {
               },
             },
             { type: "proposal_resolved", id: "hp-1", status: "accepted" },
-            { type: "usage", cost_usd: null, input_tokens: 1840, output_tokens: 260 },
+            {
+              type: "usage",
+              cost_usd: null,
+              input_tokens: 1840,
+              output_tokens: 260,
+              cache_read_tokens: 612_000,
+              cache_creation_tokens: 15_000,
+            },
           ],
         });
         break;
@@ -432,8 +440,12 @@ export function installDevReplayer(): void {
           model: msg.model,
           effort: msg.effort,
           mode: "default",
+          fast: Boolean(msg.fast),
         });
-        window.chatUI?.dispatch({ type: "notice", text: `Switched to ${msg.model || "the default model"}.` });
+        window.chatUI?.dispatch({
+          type: "notice",
+          text: `Switched to ${msg.model || "the default model"}${msg.fast ? " (fast)" : ""}.`,
+        });
         break;
       case "set_permission_mode":
         window.chatUI?.dispatch({
@@ -442,6 +454,7 @@ export function installDevReplayer(): void {
           model: "opus",
           effort: "high",
           mode: msg.mode,
+          fast: false,
         });
         break;
       case "set_pins":

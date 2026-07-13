@@ -65,11 +65,21 @@ class ProposalRequest:
 
 @dataclass(frozen=True)
 class UsageUpdate:
-    """Cumulative session cost/usage as reported by the harness."""
+    """Cumulative session cost/usage as reported by the harness.
+
+    ``cache_read_tokens``/``cache_creation_tokens`` mirror the Anthropic API's
+    ``cache_read_input_tokens``/``cache_creation_input_tokens`` usage fields
+    (see claude_cli.py's ``result`` handling). Together with ``input_tokens``
+    they approximate the size of the context sent on the last turn - there is
+    no context-WINDOW size in the stream at all, so the UI hardcodes that per
+    model (DESIGN.md section 9's "context-window table" note).
+    """
 
     cost_usd: float | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    cache_creation_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -129,6 +139,8 @@ def event_to_dict(event: ChatEvent) -> dict[str, Any]:
             "cost_usd": event.cost_usd,
             "input_tokens": event.input_tokens,
             "output_tokens": event.output_tokens,
+            "cache_read_tokens": event.cache_read_tokens,
+            "cache_creation_tokens": event.cache_creation_tokens,
         }
     if isinstance(event, Done):
         return {"type": "done"}

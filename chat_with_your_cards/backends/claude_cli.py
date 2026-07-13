@@ -267,6 +267,12 @@ def parse_stream_line(obj: dict[str, Any], state: ParserState) -> list[ChatEvent
                     cost_usd=float(cost) if cost is not None else None,
                     input_tokens=usage.get("input_tokens"),
                     output_tokens=usage.get("output_tokens"),
+                    # Anthropic API usage field names, not our own invention -
+                    # together with input_tokens these approximate the size of
+                    # the context sent on this turn (base.py's UsageUpdate
+                    # docstring; DESIGN.md section 9).
+                    cache_read_tokens=usage.get("cache_read_input_tokens"),
+                    cache_creation_tokens=usage.get("cache_creation_input_tokens"),
                 )
             )
         if obj.get("subtype") == "success" or not obj.get("is_error"):
@@ -282,6 +288,48 @@ def parse_stream_line(obj: dict[str, Any], state: ParserState) -> list[ChatEvent
 
 VALID_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
+# Context-window sizes in tokens, hardcoded because the stream-json protocol
+# carries no window size at all (only cumulative usage counts - DESIGN.md
+# section 9's "context-window table" note). Keyed by our own model aliases
+# ("", "opus", "sonnet", "fable", "haiku") plus loose substring matches so a
+# full model id (e.g. from a future config) still resolves sensibly.
+# 1,000,000: Opus 4.6/4.7/4.8, Sonnet 4.6/5, Fable 5, Mythos*.
+# 200,000: Sonnet <=4.5, Haiku <=4.5, and anything unrecognized (safe default).
+_CONTEXT_WINDOW_1M = 1_000_000
+_CONTEXT_WINDOW_200K = 200_000
+_CONTEXT_WINDOW_ALIASES: dict[str, int] = {
+    "": _CONTEXT_WINDOW_200K,  # unpinned "CLI default" - unknown, stay safe
+    "opus": _CONTEXT_WINDOW_1M,
+    "sonnet": _CONTEXT_WINDOW_1M,
+    "fable": _CONTEXT_WINDOW_1M,
+    "haiku": _CONTEXT_WINDOW_200K,
+}
+# Full-model-id substrings that mean "an older, 200k-window Sonnet" even
+# though the family name "sonnet" alone maps to the current (1M) generation.
+_OLD_SONNET_MARKERS = ("sonnet-4-5", "sonnet-3", "3-5-sonnet", "3-7-sonnet")
+
+
+def context_window_for(model: str) -> int:
+    """Map a model alias or full model id to its context-window size.
+
+    Pure/testable by design (no I/O): the UI's usage footer calls the
+    TypeScript port of this same table (ui/src/contextWindow.ts) since the
+    stream itself never reports a window size - only per-turn token counts.
+    Update both tables together when a new model generation ships.
+    """
+    key = (model or "").strip().lower()
+    if key in _CONTEXT_WINDOW_ALIASES:
+        return _CONTEXT_WINDOW_ALIASES[key]
+    if "opus" in key or "fable" in key or "mythos" in key:
+        return _CONTEXT_WINDOW_1M
+    if "sonnet" in key:
+        if any(marker in key for marker in _OLD_SONNET_MARKERS):
+            return _CONTEXT_WINDOW_200K
+        return _CONTEXT_WINDOW_1M
+    if "haiku" in key:
+        return _CONTEXT_WINDOW_200K
+    return _CONTEXT_WINDOW_200K
+
 
 def build_cli_args(
     *,
@@ -291,6 +339,7 @@ def build_cli_args(
     resume_session_id: str | None = None,
     model: str = "",
     effort: str = "",
+    fast_mode: bool = False,
     web_access: bool = True,
     mcp_inherit_user: bool = False,
     mcp_disabled: list[str] | None = None,
@@ -356,6 +405,14 @@ def build_cli_args(
         args += ["--model", model.strip()]
     if effort.strip() in VALID_EFFORTS:
         args += ["--effort", effort.strip()]
+    if fast_mode:
+        # Headless fast mode (claude CLI >= 2.1.205) has no flag or env var -
+        # it is enabled ONLY via --settings, and only takes effect at spawn
+        # time (like model/effort, it requires a respawn to change mid-chat;
+        # see ClaudeCliSession.set_model_effort). Minimal settings blob: we
+        # don't want to clobber any other settings the user might configure
+        # via --settings later, so this stays a single-key JSON string.
+        args += ["--settings", json.dumps({"fastMode": True})]
     if resume_session_id:
         args += ["--resume", resume_session_id]
     return args
@@ -414,6 +471,7 @@ class ClaudeCliSession:
         log: BackendLog | None = None,
         model: str = "",
         effort: str = "",
+        fast_mode: bool = False,
         web_access: bool = True,
         extra_env: dict[str, str] | None = None,
         resume_session_id: str | None = None,
@@ -425,6 +483,7 @@ class ClaudeCliSession:
         self._system_prompt = system_prompt
         self._model = model
         self._effort = effort
+        self._fast_mode = fast_mode
         self._web_access = web_access
         self._extra_env = extra_env or {}
         self._mcp_inherit_user = mcp_inherit_user
@@ -452,10 +511,12 @@ class ClaudeCliSession:
         self._generation = 0
         self._streaming = False
         self._on_event: EventCallback | None = None
-        # Model/effort the live process was spawned with; a mismatch means
-        # the user switched mid-chat and the next send must respawn.
+        # Model/effort/fast-mode the live process was spawned with; a
+        # mismatch means the user switched mid-chat and the next send must
+        # respawn.
         self._spawned_model = model
         self._spawned_effort = effort
+        self._spawned_fast_mode = fast_mode
         # Control-request/control-response correlation for interrupt(). Wire
         # framing ported (field names, not implementation) from the MIT-
         # licensed Claude Agent SDK's Query._send_control_request /
@@ -478,29 +539,37 @@ class ClaudeCliSession:
         """Spawn the CLI ahead of the first send (hides startup latency)."""
         self._ensure_process()
 
-    def set_model_effort(self, model: str, effort: str) -> None:
-        """Switch model/effort mid-conversation. The change takes effect on
-        the next send: the process respawns with --resume so the same
-        conversation continues under the new model (matching the CLI apps).
-        Applied lazily so an in-flight response is never interrupted."""
+    def set_model_effort(self, model: str, effort: str, fast_mode: bool = False) -> None:
+        """Switch model/effort/fast-mode mid-conversation. The change takes
+        effect on the next send: the process respawns with --resume so the
+        same conversation continues under the new settings (matching the CLI
+        apps). Applied lazily so an in-flight response is never interrupted.
+
+        fast_mode has no mid-session toggle upstream either (--settings is
+        spawn-time only, claude CLI >= 2.1.205), so it rides the exact same
+        respawn-on-next-message path as model/effort."""
         self._model = model
         self._effort = effort
+        self._fast_mode = bool(fast_mode)
 
     def _ensure_process(self) -> None:
         if self._process is not None and self._process.poll() is None:
-            if (self._spawned_model, self._spawned_effort) == (
+            if (self._spawned_model, self._spawned_effort, self._spawned_fast_mode) == (
                 self._model,
                 self._effort,
+                self._fast_mode,
             ):
                 return
-            # Model/effort changed since this process spawned: tear it down
-            # and respawn below with --resume to keep the conversation.
+            # Model/effort/fast-mode changed since this process spawned: tear
+            # it down and respawn below with --resume to keep the conversation.
             # Bump the generation first so the dying process's reader thread
             # (which will see SIGTERM as a nonzero exit) is fenced off and
             # does not emit a spurious error/Done into the new turn.
             self._log.write(
                 f"model switch {self._spawned_model or '-'}/{self._spawned_effort or '-'}"
-                f" -> {self._model or '-'}/{self._effort or '-'} pid={self._process.pid}"
+                f"/fast={self._spawned_fast_mode}"
+                f" -> {self._model or '-'}/{self._effort or '-'}/fast={self._fast_mode}"
+                f" pid={self._process.pid}"
             )
             self._generation += 1
             self._process.terminate()
@@ -512,6 +581,7 @@ class ClaudeCliSession:
             resume_session_id=self._state.session_id,
             model=self._model,
             effort=self._effort,
+            fast_mode=self._fast_mode,
             web_access=self._web_access,
             mcp_inherit_user=self._mcp_inherit_user,
             mcp_disabled=self._mcp_disabled,
@@ -531,9 +601,11 @@ class ClaudeCliSession:
         )
         self._spawned_model = self._model
         self._spawned_effort = self._effort
+        self._spawned_fast_mode = self._fast_mode
         self._log.write(
             f"spawn pid={self._process.pid} resume={self._state.session_id or '-'} "
-            f"model={self._model or '-'} effort={self._effort or '-'} cli={self._cli_path}"
+            f"model={self._model or '-'} effort={self._effort or '-'} "
+            f"fast={self._fast_mode} cli={self._cli_path}"
         )
         generation = self._generation
         self._reader = threading.Thread(
@@ -734,6 +806,7 @@ class ClaudeCliBackend:
         workdir: Path,
         log_path: Path | None = None,
         model_effort: Callable[[], tuple[str, str]] | None = None,
+        fast_mode: Callable[[], bool] | None = None,
         web_access: bool = True,
         extra_env: dict[str, str] | None = None,
         mcp_servers: dict[str, Any] | None = None,
@@ -748,6 +821,7 @@ class ClaudeCliBackend:
         self._workdir = workdir
         self._log = BackendLog(log_path)
         self._model_effort = model_effort or (lambda: ("", ""))
+        self._fast_mode = fast_mode or (lambda: False)
         self._web_access = web_access
         self._extra_env = extra_env or {}
         self._mcp_servers = mcp_servers or {}
@@ -766,6 +840,7 @@ class ClaudeCliBackend:
             log=self._log,
             model=model,
             effort=effort,
+            fast_mode=bool(self._fast_mode()),
             web_access=self._web_access,
             extra_env=self._extra_env,
             resume_session_id=(context or {}).get("resume_session_id"),

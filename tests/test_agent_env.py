@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from chat_with_your_cards import keys  # noqa: E402
 from chat_with_your_cards.backends.claude_cli import (  # noqa: E402
     build_cli_args,
+    context_window_for,
     write_mcp_config,
 )
 from chat_with_your_cards.mcp_server import tool_specs_for_mcp  # noqa: E402
@@ -108,6 +109,73 @@ class ToolAdvertisingTests(unittest.TestCase):
         for t in specs:
             self.assertEqual(by_name[t["name"]].description, t["description"])
             self.assertIn("inputSchema", t)
+
+
+class FastModeArgsTests(unittest.TestCase):
+    """Headless fast mode (claude CLI >= 2.1.205) has no flag/env - it is
+    enabled ONLY via --settings '{"fastMode": true}', so build_cli_args must
+    emit that exact minimal blob when on, and nothing at all when off."""
+
+    def _args(self, **kwargs) -> list[str]:
+        return build_cli_args(
+            cli_path="claude", system_prompt="S", mcp_config_path="cfg", **kwargs
+        )
+
+    def test_fast_mode_off_by_default(self) -> None:
+        args = self._args()
+        self.assertNotIn("--settings", args)
+
+    def test_fast_mode_on_emits_settings_flag(self) -> None:
+        args = self._args(fast_mode=True)
+        self.assertIn("--settings", args)
+        settings = args[args.index("--settings") + 1]
+        self.assertEqual({"fastMode": True}, json.loads(settings))
+
+    def test_fast_mode_off_explicit(self) -> None:
+        args = self._args(fast_mode=False)
+        self.assertNotIn("--settings", args)
+
+    def test_fast_mode_combines_with_model_and_effort(self) -> None:
+        args = self._args(model="opus", effort="high", fast_mode=True)
+        self.assertEqual("opus", args[args.index("--model") + 1])
+        self.assertEqual("high", args[args.index("--effort") + 1])
+        self.assertIn("--settings", args)
+
+
+class ContextWindowForTests(unittest.TestCase):
+    """context_window_for's table (DESIGN.md section 9): the stream never
+    carries a context-WINDOW size, only per-turn usage counts, so this is
+    hardcoded - mirrored in TypeScript by ui/src/contextWindow.ts."""
+
+    def test_opus_alias_is_1m(self) -> None:
+        self.assertEqual(1_000_000, context_window_for("opus"))
+
+    def test_sonnet_alias_is_1m(self) -> None:
+        self.assertEqual(1_000_000, context_window_for("sonnet"))
+
+    def test_fable_alias_is_1m(self) -> None:
+        self.assertEqual(1_000_000, context_window_for("fable"))
+
+    def test_haiku_alias_is_200k(self) -> None:
+        self.assertEqual(200_000, context_window_for("haiku"))
+
+    def test_empty_default_alias_is_200k(self) -> None:
+        self.assertEqual(200_000, context_window_for(""))
+
+    def test_unknown_model_defaults_to_200k(self) -> None:
+        self.assertEqual(200_000, context_window_for("some-future-model-nobody-heard-of"))
+
+    def test_full_model_id_opus_is_1m(self) -> None:
+        self.assertEqual(1_000_000, context_window_for("claude-opus-4-6-20260315"))
+
+    def test_old_sonnet_full_id_is_200k(self) -> None:
+        self.assertEqual(200_000, context_window_for("claude-sonnet-4-5-20250929"))
+
+    def test_current_sonnet_full_id_is_1m(self) -> None:
+        self.assertEqual(1_000_000, context_window_for("claude-sonnet-4-6-20260101"))
+
+    def test_case_insensitive(self) -> None:
+        self.assertEqual(1_000_000, context_window_for("OPUS"))
 
 
 class McpWideningArgsTests(unittest.TestCase):

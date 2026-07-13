@@ -429,7 +429,31 @@ class ParseStreamLineTest(unittest.TestCase):
         self.assertAlmostEqual(0.0421, usage.cost_usd or 0)
         self.assertEqual(12000, usage.input_tokens)
         self.assertEqual(450, usage.output_tokens)
+        self.assertIsNone(usage.cache_read_tokens)
+        self.assertIsNone(usage.cache_creation_tokens)
         self.assertIsInstance(events[1], Done)
+
+    def test_result_usage_surfaces_cache_token_fields(self) -> None:
+        from chat_with_your_cards.backends import UsageUpdate
+
+        events = parse_stream_line(
+            {
+                "type": "result",
+                "subtype": "success",
+                "total_cost_usd": 0.1,
+                "usage": {
+                    "input_tokens": 1200,
+                    "output_tokens": 300,
+                    "cache_read_input_tokens": 500000,
+                    "cache_creation_input_tokens": 8000,
+                },
+            },
+            self.state,
+        )
+        usage = events[0]
+        assert isinstance(usage, UsageUpdate)
+        self.assertEqual(500000, usage.cache_read_tokens)
+        self.assertEqual(8000, usage.cache_creation_tokens)
 
     def test_result_error_emits_error_then_done(self) -> None:
         events = parse_stream_line(

@@ -26,6 +26,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "claude_cli_path": "",
     "model": "",
     "effort": "",
+    "fast_mode": False,
     "web_access": True,
     "mcp_servers": {},
     "mcp_inherit_user": False,
@@ -464,10 +465,15 @@ def _set_agent(msg: dict[str, Any]) -> None:
         return
     model = str(msg.get("model", ""))
     effort = str(msg.get("effort", ""))
-    state.controller.set_agent_config(model, effort)
+    # Default to the current stored value (not False) when "fast" is absent,
+    # so a hand-crafted/legacy set_agent command that only carries
+    # model/effort can't silently flip fast mode off.
+    fast_mode = bool(msg.get("fast", state.config.get("fast_mode", False)))
+    state.controller.set_agent_config(model, effort, fast_mode)
     config = mw.addonManager.getConfig(__name__) or {}
     config["model"] = state.config.get("model", "")
     config["effort"] = state.config.get("effort", "")
+    config["fast_mode"] = state.config.get("fast_mode", False)
     mw.addonManager.writeConfig(__name__, config)
 
 

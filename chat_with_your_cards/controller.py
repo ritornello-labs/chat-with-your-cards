@@ -124,6 +124,7 @@ class ChatController:
                 str(self._config.get("model", "")),
                 str(self._config.get("effort", "")),
             ),
+            fast_mode=lambda: bool(self._config.get("fast_mode", False)),
             web_access=bool(self._config.get("web_access", True)),
             extra_env=extra_env,
             mcp_servers=self._config.get("mcp_servers") or {},
@@ -285,26 +286,33 @@ class ChatController:
         self._push({"type": "history_load", "events": events})
         self.push_agent_state()
 
-    def set_agent_config(self, model: str, effort: str) -> None:
-        """Change model/effort. Applied to the live session mid-conversation:
-        the CLI process respawns with --resume on the next message, so the
-        same chat continues under the new model (matching the CLI apps). The
-        choice is the caller's to persist (see __init__ _set_agent)."""
+    def set_agent_config(self, model: str, effort: str, fast_mode: bool = False) -> None:
+        """Change model/effort/fast-mode. Applied to the live session
+        mid-conversation: the CLI process respawns with --resume on the next
+        message, so the same chat continues under the new settings (matching
+        the CLI apps). fast_mode rides the identical respawn path - it has no
+        mid-session toggle upstream either (--settings is spawn-time only,
+        claude CLI >= 2.1.205). The choice is the caller's to persist (see
+        __init__ _set_agent)."""
         from .backends.claude_cli import VALID_EFFORTS
 
         model = (model or "").strip()
         effort = (effort or "").strip().lower()
         if effort and effort not in VALID_EFFORTS:
             effort = ""
-        changed = model != str(self._config.get("model", "")) or effort != str(
-            self._config.get("effort", "")
+        fast_mode = bool(fast_mode)
+        changed = (
+            model != str(self._config.get("model", ""))
+            or effort != str(self._config.get("effort", ""))
+            or fast_mode != bool(self._config.get("fast_mode", False))
         )
         self._config["model"] = model
         self._config["effort"] = effort
+        self._config["fast_mode"] = fast_mode
         if changed and self._session is not None:
             apply = getattr(self._session, "set_model_effort", None)
             if apply is not None:
-                apply(model, effort)
+                apply(model, effort, fast_mode)
                 suffix = (
                     " It applies from your next message."
                     if self.streaming
@@ -326,7 +334,11 @@ class ChatController:
         model = str(self._config.get("model", ""))
         effort = str(self._config.get("effort", ""))
         label = names.get(model, model)
-        return f"{label} · {effort} effort" if effort else label
+        if effort:
+            label = f"{label} · {effort} effort"
+        if bool(self._config.get("fast_mode", False)):
+            label = f"{label} · fast"
+        return label
 
     VALID_MODES = (
         "default",
@@ -355,6 +367,7 @@ class ChatController:
                 "model": str(self._config.get("model", "")),
                 "effort": str(self._config.get("effort", "")),
                 "mode": str(self._config.get("permission_mode", "default")),
+                "fast": bool(self._config.get("fast_mode", False)),
             }
         )
 

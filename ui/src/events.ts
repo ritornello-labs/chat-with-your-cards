@@ -103,11 +103,21 @@ export interface ProposalErrorEvent {
   message: string;
 }
 
+/**
+ * cache_read_tokens/cache_creation_tokens mirror the Anthropic API's
+ * cache_read_input_tokens/cache_creation_input_tokens usage fields
+ * (backends/claude_cli.py's result handling; backends/base.py's
+ * UsageUpdate). Together with input_tokens they approximate the size of
+ * the context sent on the last turn - the stream carries no context-WINDOW
+ * size at all, so the footer hardcodes that per model (contextWindow.ts).
+ */
 export interface UsageEvent {
   type: "usage";
   cost_usd: number | null;
   input_tokens: number | null;
   output_tokens: number | null;
+  cache_read_tokens?: number | null;
+  cache_creation_tokens?: number | null;
 }
 
 export interface DoneEvent {
