@@ -411,7 +411,7 @@ def _mark_web_ready() -> None:
                 "suggested_questions": bool(
                     state.config.get("suggested_questions", True)
                 ),
-                "open_in_claude_target": str(
+                "open_in_claude_target": _norm_open_target(
                     state.config.get("open_in_claude_target", "terminal")
                 ),
             }
@@ -471,14 +471,26 @@ def _set_agent(msg: dict[str, Any]) -> None:
     mw.addonManager.writeConfig(__name__, config)
 
 
+def _norm_open_target(target: Any) -> str:
+    """Canonical open-in-Claude target vocabulary is 'terminal' | 'desktop'.
+    'gui' is the legacy word (classic UI / older config) and maps to 'desktop'
+    so a config written before the assistant-ui rebuild still works. Anything
+    else falls back to 'terminal'."""
+    t = str(target).strip().lower()
+    if t in ("desktop", "gui"):
+        return "desktop"
+    return "terminal"
+
+
 def _set_open_target(target: str) -> None:
-    """Persist the default 'Open in Claude Code' target (terminal / gui) the
-    split button acts on, so it survives restarts."""
-    if target not in ("terminal", "gui"):
-        return
-    state.config["open_in_claude_target"] = target
+    """Persist the default 'Open in Claude Code' target (terminal / desktop)
+    the split button acts on, so it survives restarts. Normalized so the new
+    UI's 'desktop' is accepted (the old check rejected it - dogfood
+    2026-07-12: picking Desktop silently did nothing, then opened terminal)."""
+    normalized = _norm_open_target(target)
+    state.config["open_in_claude_target"] = normalized
     config = mw.addonManager.getConfig(__name__) or {}
-    config["open_in_claude_target"] = target
+    config["open_in_claude_target"] = normalized
     mw.addonManager.writeConfig(__name__, config)
 
 
@@ -721,13 +733,18 @@ def _open_in_claude_code(target: str = "terminal") -> None:
     import urllib.parse
 
     agent_home = USER_FILES / "agent-home"
+    # Live session id if a message was exchanged; else the resume id of a chat
+    # loaded from History (session not respawned yet) - either lets the target
+    # continue THIS conversation rather than starting blank.
     sid = state.controller.backend_session_id if state.controller else None
+    if not sid and state.transcripts is not None:
+        sid = state.transcripts.backend_session_id
 
     def notice(text: str) -> None:
         if state.dock is not None:
             state.dock.bridge.push({"type": "notice", "text": text})
 
-    if target == "gui":
+    if _norm_open_target(target) == "desktop":
         prompt = (
             "This continues an Anki chat from the Chat With Your Cards "
             "add-on (the anki MCP tools are configured in this folder)."
@@ -771,10 +788,19 @@ def _open_in_claude_code(target: str = "terminal") -> None:
     app = str(state.config.get("terminal_app", "")).strip()
     if _open_macos_terminal(cmd, app):
         where = app or "Terminal"
-        notice(
-            f"Opened this chat in Claude Code ({where}). It has your anki "
-            "tools via .mcp.json plus Claude Code's full toolset."
-        )
+        if sid:
+            notice(
+                f"Resumed this chat in Claude Code ({where}) - it has your anki "
+                "tools via .mcp.json plus Claude Code's full toolset."
+            )
+        else:
+            # No exchanged message yet -> no session to resume. Be honest
+            # rather than implying the conversation carried over (dogfood
+            # 2026-07-12: 'the chat wasn't even loaded there').
+            notice(
+                f"Opened a fresh Claude Code ({where}) in this chat's folder "
+                "(no message sent yet, so there was nothing to resume)."
+            )
         return
     try:
         from aqt.qt import QApplication

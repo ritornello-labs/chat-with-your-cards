@@ -28,7 +28,8 @@
   the agent resumed) instead of starting empty. Older chats remain in History
   either way.
 - `open_in_claude_target` (default `"terminal"`): the default target the "Open
-  in Claude Code" split button acts on — `"terminal"` or `"gui"` (desktop app).
+  in Claude Code" split button acts on — `"terminal"` or `"desktop"` (the
+  desktop app; `"gui"` is accepted as a legacy alias for `"desktop"`).
   Changing it from the button's dropdown persists here.
 - `terminal_app` (default `""` = Apple Terminal): which macOS terminal the
   terminal handoff opens. Empty uses Terminal.app via AppleScript; any other
