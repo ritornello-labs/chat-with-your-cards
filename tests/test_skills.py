@@ -18,10 +18,36 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from chat_with_your_cards.skills import (  # noqa: E402
     load_conventions,
+    materialize_agent_environment,
     materialize_agent_skills,
     materialize_conventions_agent_skill,
     materialize_conventions_skill,
 )
+
+
+class MaterializeAgentEnvironmentTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.agent_home = Path(self._tmp.name) / "agent-home"
+
+    def test_writes_claude_md_at_agent_home_root(self) -> None:
+        # CLAUDE.md must be at the cwd root (agent-home), not under .claude, so
+        # Claude Code loads it as project memory for the agent AND subagents.
+        path = materialize_agent_environment(self.agent_home)
+        self.assertEqual(path, self.agent_home / "CLAUDE.md")
+        self.assertTrue(path.exists())
+
+    def test_states_the_hard_limits(self) -> None:
+        body = materialize_agent_environment(self.agent_home).read_text(encoding="utf-8")
+        for token in ("Bash", "Write", "Edit", "subagent", "read-only", "propose_note"):
+            self.assertIn(token, body)
+
+    def test_regenerated_each_run(self) -> None:
+        path = materialize_agent_environment(self.agent_home)
+        path.write_text("stale user edit", encoding="utf-8")
+        materialize_agent_environment(self.agent_home)  # add-on truth wins
+        self.assertIn("No shell", path.read_text(encoding="utf-8"))
 
 
 class MaterializeConventionsAgentSkillTest(unittest.TestCase):

@@ -162,8 +162,16 @@ def _setup() -> None:
         dock.bridge.push(payload)
 
     from .learning import LearningStore
-    from .skills import materialize_agent_skills, materialize_conventions_agent_skill
+    from .skills import (
+        materialize_agent_environment,
+        materialize_agent_skills,
+        materialize_conventions_agent_skill,
+    )
 
+    # State the dock's hard tool limits where the agent AND its subagents see
+    # them (agent-home/CLAUDE.md, loaded from cwd), so the agent stops trying
+    # to write files / spawn subagents to do so (dogfood 2026-07-12).
+    materialize_agent_environment(USER_FILES / "agent-home")
     conventions = load_conventions(USER_FILES, str(config.get("conventions_prompt", "")))
     # Mirror conventions into the agent-home skills dir so the harness
     # auto-discovers them (COMPLIANCE.md rule 3) instead of them being

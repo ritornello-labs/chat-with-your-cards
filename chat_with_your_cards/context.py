@@ -121,6 +121,14 @@ def build_system_prompt(
         "Answers render as markdown in a narrow sidebar - prefer short "
         "paragraphs and tight lists.",
         "",
+        # Tight pointer only (COMPLIANCE rule 3 length ceiling); the full
+        # version is agent-home/CLAUDE.md (materialize_agent_environment),
+        # which subagents also load. Without this the agent spawned subagents
+        # to try writing files, then flip-flopped (dogfood 2026-07-12).
+        "No shell/file-writing (Bash/Write/Edit off, incl. subagents; Read is "
+        "read-only). If a task needs running code or a generated file, tell "
+        "the user how - don't try.",
+        "",
         "You have MCP tools (server \"anki\") over the user's collection: "
         "search_notes (full Anki search syntax), get_note, get_card, "
         "deck_tree, tag_tree, collection_stats, list_note_types, "

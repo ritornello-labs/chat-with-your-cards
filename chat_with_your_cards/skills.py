@@ -286,6 +286,48 @@ or collection-operations preferences.
 """
 
 
+AGENT_ENVIRONMENT_MD = """\
+# Environment (read this first)
+
+You are running inside the **Chat With Your Cards** Anki add-on's chat dock,
+driven by `claude -p`. This is NOT a normal shell or coding session. Your
+toolset is deliberately restricted, and the limits apply to any subagents you
+spawn too:
+
+- **No shell, no file writing.** `Bash`, `Write`, and `Edit` are disabled.
+  You cannot create, generate, move, or modify files on disk — not audio, not
+  images, not scripts, not anything. Subagents you spawn hit the same wall, so
+  do not spawn a subagent hoping to get around it.
+- **`Read` is read-only.** Use it to read files the user points you at (PDFs,
+  EPUBs via `read_epub`, etc.). It never writes.
+- **Anki changes go through proposals, never directly.** Use `propose_note` /
+  `propose_note_edit` / the change-set and deck tools (MCP server `anki`). The
+  user reviews and applies them.
+- **If a task genuinely needs running code or generating a media file** (e.g.
+  synthesizing a Morse-code WAV, rendering an image), you cannot do it from
+  here. Say so plainly in one line, then give the user the exact command or
+  steps to run it themselves and where to drop the result — do not attempt it,
+  and do not claim a subagent can.
+
+Being upfront about these limits beats discovering them mid-task.
+"""
+
+
+def materialize_agent_environment(agent_home: Path) -> Path:
+    """Write agent-home/CLAUDE.md stating the dock's hard tool limits.
+
+    Claude Code loads CLAUDE.md from the working directory (= agent_home) for
+    the main agent AND for subagents it spawns, so this is the one place the
+    constraints reach a subagent too. Regenerated every run (add-on truth, not
+    user taste) - unlike the seed-once skill templates. Fixes the dogfood
+    2026-07-12 flip-flop where the agent thought it had shell via a subagent,
+    tried to write a file, failed, and had to walk it back."""
+    agent_home.mkdir(parents=True, exist_ok=True)
+    path = agent_home / "CLAUDE.md"
+    path.write_text(AGENT_ENVIRONMENT_MD, encoding="utf-8")
+    return path
+
+
 def materialize_agent_skills(agent_home: Path) -> Path:
     """Seed the conventional skills directory the harness picks up.
 
