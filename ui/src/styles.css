@@ -243,6 +243,9 @@ body.nightMode {
   line-height: 1.55;
   color: var(--cwyc-fg);
   background: var(--cwyc-bg);
+  /* Positioning context for the full-tools risk modal's faux-viewport overlay
+     (position:fixed collapses the Anki webview, so it uses absolute inset:0). */
+  position: relative;
 }
 
 #cwyc-root .cwyc-app button {
@@ -1422,6 +1425,103 @@ body.nightMode {
   justify-content: flex-end;
   gap: 6px;
   padding: 7px 8px 3px;
+}
+
+/* ---- full-agent-tools risk affordance ------------------------------------ */
+
+/* Persistent, dismissable warning line in the Model/effort menu when Full is
+   the selected or hovered agent-tools choice. Amber/warn accent, not the clay
+   red of a hard error. */
+.cwyc-risk-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 6px 4px 2px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  background: var(--cwyc-warn-soft);
+  border: 1px solid var(--cwyc-amber-ring);
+}
+.cwyc-risk-line-text {
+  flex: 1 1 auto;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--cwyc-warn);
+}
+#cwyc-root .cwyc-risk-link {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--cwyc-amber-ink);
+  text-decoration: underline;
+  cursor: pointer;
+  white-space: nowrap;
+}
+#cwyc-root .cwyc-risk-link:hover {
+  color: var(--cwyc-amber-hover);
+}
+#cwyc-root .cwyc-risk-dismiss {
+  flex: 0 0 auto;
+  border: none;
+  background: none;
+  padding: 0 2px;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--cwyc-warn);
+  cursor: pointer;
+}
+#cwyc-root .cwyc-risk-dismiss:hover {
+  color: var(--cwyc-fg);
+}
+
+/* The risk modal: a faux-viewport overlay over the whole dock (absolute, not
+   fixed - fixed collapses the Anki webview). */
+.cwyc-risk-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(20, 16, 8, 0.5);
+}
+.cwyc-risk-modal {
+  width: 100%;
+  max-width: 340px;
+  max-height: 100%;
+  overflow-y: auto;
+  background: var(--cwyc-surface-raised);
+  border: 1px solid var(--cwyc-amber-ring);
+  border-radius: var(--cwyc-radius);
+  box-shadow: var(--cwyc-card-shadow);
+  padding: 14px 15px 12px;
+}
+.cwyc-risk-modal-title {
+  font: 600 14px var(--cwyc-font);
+  color: var(--cwyc-amber-ink);
+  margin-bottom: 9px;
+}
+.cwyc-risk-modal-body {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--cwyc-fg);
+}
+.cwyc-risk-modal-body p {
+  margin: 0 0 9px;
+}
+.cwyc-risk-modal-body code {
+  font: 11.5px var(--cwyc-mono);
+  background: var(--cwyc-surface);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.cwyc-risk-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
 }
 
 /* the obvious stop control (dogfood: the old 26px dot was unfindable) */

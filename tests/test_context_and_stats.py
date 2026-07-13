@@ -107,13 +107,30 @@ class ContextTest(unittest.TestCase):
         prompt = build_system_prompt(permission_mode="read-only")
         self.assertNotIn("note-conventions", prompt)
 
+    def test_system_prompt_sandbox_states_no_shell(self) -> None:
+        # Default agent-tools mode: the tight sandbox constraint must be
+        # present and must NOT claim shell is available.
+        prompt = build_system_prompt(permission_mode="default", agent_tools="sandbox")
+        self.assertIn("No shell/file-writing", prompt)
+        self.assertNotIn("You have full shell", prompt)
+
+    def test_system_prompt_full_states_shell_and_injection_warning(self) -> None:
+        # Full agent-tools mode: the constraint must flip to acknowledging the
+        # shell/file tools and warn that card content is untrusted - it must
+        # not still say shell is off (that would lie to the agent).
+        prompt = build_system_prompt(permission_mode="default", agent_tools="full")
+        self.assertIn("full shell/file tools", prompt)
+        self.assertIn("untrusted", prompt)
+        self.assertIn("AnkiConnect", prompt)
+        self.assertNotIn("No shell/file-writing", prompt)
+
     def test_system_prompt_length_ceiling_worst_case(self) -> None:
         """COMPLIANCE.md rule 3 regression guard: the assembled --append-system-prompt content must stay bounded (under 4,000 chars) in the worst case. Assert real headroom below that in
-        the worst case across every permission mode, with a heavily-pinned
-        session (every pin type set, a long deck path, the longest stock
-        note-type name, several tags, two field defaults) - larger than any
-        pin configuration the dock's dropdowns/chip editor would realistically
-        produce."""
+        the worst case across every permission mode AND both agent-tools
+        modes, with a heavily-pinned session (every pin type set, a long deck
+        path, the longest stock note-type name, several tags, two field
+        defaults) - larger than any pin configuration the dock's dropdowns/chip
+        editor would realistically produce."""
         maximal_pins = {
             "deck": "Language::Mandarin::Vocabulary::HSK3",
             "note_type": "Basic (and reversed card)",
@@ -127,9 +144,14 @@ class ContextTest(unittest.TestCase):
             "auto-accept",
             "trusted-writes",
         ):
-            with self.subTest(mode=mode):
-                prompt = build_system_prompt(permission_mode=mode, pins=maximal_pins)
-                self.assertLess(len(prompt), 4000)
+            for agent_tools in ("sandbox", "full"):
+                with self.subTest(mode=mode, agent_tools=agent_tools):
+                    prompt = build_system_prompt(
+                        permission_mode=mode,
+                        agent_tools=agent_tools,
+                        pins=maximal_pins,
+                    )
+                    self.assertLess(len(prompt), 4000)
 
     def test_wrap_user_message(self) -> None:
         self.assertEqual("hi", wrap_user_message("hi", None))

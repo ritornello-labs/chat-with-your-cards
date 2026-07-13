@@ -28,6 +28,15 @@ from chat_with_your_cards.backends import claude_cli  # noqa: E402
 from chat_with_your_cards.backends.claude_cli import ClaudeCliSession  # noqa: E402
 
 
+def _disallowed(argv):
+    """--disallowedTools value, or "" when the flag is omitted (full tools
+    with no disabled MCP servers no longer passes an empty-string arg)."""
+    if "--disallowedTools" not in argv:
+        return ""
+    return argv[argv.index("--disallowedTools") + 1]
+
+
+
 class FakeStream:
     def __init__(self) -> None:
         self.written: list[str] = []
@@ -187,6 +196,34 @@ class ModelSwitchTest(unittest.TestCase):
         self.session.set_model_effort("", "", False)
         self.session._ensure_process()
         self.assertEqual(1, len(FakePopen.instances), "no respawn when fast_mode is unchanged")
+
+    def test_agent_tools_change_alone_triggers_respawn(self) -> None:
+        # agent_tools (sandbox|full) is a launch-time flag
+        # (--disallowedTools / --permission-mode), so switching it must
+        # respawn with --resume exactly like a model/effort/fast switch, even
+        # when everything else is unchanged.
+        self.session.prewarm()
+        first = FakePopen.instances[0]
+        self.assertNotIn("--permission-mode", self._argv(first))
+        self.session._state.session_id = "sess-tools-1"
+
+        self.session.set_model_effort("", "", False, "full")
+        self.session._ensure_process()
+
+        self.assertTrue(first.terminated)
+        self.assertEqual(2, len(FakePopen.instances))
+        argv = self._argv(FakePopen.instances[1])
+        self.assertEqual("bypassPermissions", argv[argv.index("--permission-mode") + 1])
+        self.assertNotIn("Bash", _disallowed(argv))
+        self.assertEqual("sess-tools-1", argv[argv.index("--resume") + 1])
+
+    def test_agent_tools_unchanged_reuses_process(self) -> None:
+        self.session.prewarm()
+        self.session.set_model_effort("", "", False, "sandbox")
+        self.session._ensure_process()
+        self.assertEqual(
+            1, len(FakePopen.instances), "no respawn when agent_tools is unchanged"
+        )
 
     def test_fast_mode_off_after_on_respawns_without_settings(self) -> None:
         self.session.set_model_effort("opus", "high", True)

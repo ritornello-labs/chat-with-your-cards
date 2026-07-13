@@ -325,6 +325,7 @@ export function installDevReplayer(): void {
           effort: "high",
           mode: "default",
           fast: false,
+          tools: "sandbox",
         });
         window.chatUI?.dispatch({
           type: "ui_config",
@@ -433,7 +434,8 @@ export function installDevReplayer(): void {
           });
         }, 350);
         break;
-      case "set_agent":
+      case "set_agent": {
+        const tools = msg.tools === "full" ? "full" : "sandbox";
         window.chatUI?.dispatch({
           type: "agent",
           backend: "claude",
@@ -441,12 +443,19 @@ export function installDevReplayer(): void {
           effort: msg.effort,
           mode: "default",
           fast: Boolean(msg.fast),
+          tools,
         });
+        const bits = [
+          String(msg.model || "the default model"),
+          msg.fast ? "fast" : "",
+          tools === "full" ? "full tools" : "",
+        ].filter(Boolean);
         window.chatUI?.dispatch({
           type: "notice",
-          text: `Switched to ${msg.model || "the default model"}${msg.fast ? " (fast)" : ""}.`,
+          text: `Switched to ${bits[0]}${bits.length > 1 ? ` (${bits.slice(1).join(", ")})` : ""}.`,
         });
         break;
+      }
       case "set_permission_mode":
         window.chatUI?.dispatch({
           type: "agent",
@@ -455,6 +464,7 @@ export function installDevReplayer(): void {
           effort: "high",
           mode: msg.mode,
           fast: false,
+          tools: "sandbox",
         });
         break;
       case "set_pins":

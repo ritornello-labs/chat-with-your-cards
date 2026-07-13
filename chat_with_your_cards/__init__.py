@@ -27,6 +27,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "model": "",
     "effort": "",
     "fast_mode": False,
+    "agent_tools": "sandbox",
     "web_access": True,
     "mcp_servers": {},
     "mcp_inherit_user": False,
@@ -171,7 +172,9 @@ def _setup() -> None:
     # State the dock's hard tool limits where the agent AND its subagents see
     # them (agent-home/CLAUDE.md, loaded from cwd), so the agent stops trying
     # to write files / spawn subagents to do so (dogfood 2026-07-12).
-    materialize_agent_environment(USER_FILES / "agent-home")
+    materialize_agent_environment(
+        USER_FILES / "agent-home", str(config.get("agent_tools", "sandbox"))
+    )
     conventions = load_conventions(USER_FILES, str(config.get("conventions_prompt", "")))
     # Mirror conventions into the agent-home skills dir so the harness
     # auto-discovers them (COMPLIANCE.md rule 3) instead of them being
@@ -195,6 +198,7 @@ def _setup() -> None:
     def system_prompt() -> str:
         return build_system_prompt(
             permission_mode=str(config["permission_mode"]),
+            agent_tools=str(config.get("agent_tools", "sandbox")),
             pins=state.proposals.pins if state.proposals else None,
         )
 
@@ -477,11 +481,15 @@ def _set_agent(msg: dict[str, Any]) -> None:
     # so a hand-crafted/legacy set_agent command that only carries
     # model/effort can't silently flip fast mode off.
     fast_mode = bool(msg.get("fast", state.config.get("fast_mode", False)))
-    state.controller.set_agent_config(model, effort, fast_mode)
+    # Same guard for the agent-tools axis: a tools-less command keeps whatever
+    # the user last chose instead of silently resetting to sandbox.
+    agent_tools = str(msg.get("tools", state.config.get("agent_tools", "sandbox")))
+    state.controller.set_agent_config(model, effort, fast_mode, agent_tools)
     config = mw.addonManager.getConfig(__name__) or {}
     config["model"] = state.config.get("model", "")
     config["effort"] = state.config.get("effort", "")
     config["fast_mode"] = state.config.get("fast_mode", False)
+    config["agent_tools"] = state.config.get("agent_tools", "sandbox")
     mw.addonManager.writeConfig(__name__, config)
 
 

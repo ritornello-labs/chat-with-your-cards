@@ -31,6 +31,16 @@ def _run_on_ui(callback: Callable[[], None]) -> None:
     mw.taskman.run_on_main(callback)
 
 
+AGENT_TOOLS_VALUES = ("sandbox", "full")
+
+
+def _norm_agent_tools(value: Any) -> str:
+    """Canonical agent-tools axis (DESIGN.md section 5): 'sandbox' (default,
+    Anki tools + read-only files) or 'full' (shell/file tools, auto-approve).
+    Anything unrecognized falls back to the safe default."""
+    return str(value) if str(value) in AGENT_TOOLS_VALUES else "sandbox"
+
+
 class ChatController:
     """Owns the current chat session and fans events out to the UI.
 
@@ -125,6 +135,7 @@ class ChatController:
                 str(self._config.get("effort", "")),
             ),
             fast_mode=lambda: bool(self._config.get("fast_mode", False)),
+            agent_tools=lambda: _norm_agent_tools(self._config.get("agent_tools")),
             web_access=bool(self._config.get("web_access", True)),
             extra_env=extra_env,
             mcp_servers=self._config.get("mcp_servers") or {},
@@ -286,14 +297,22 @@ class ChatController:
         self._push({"type": "history_load", "events": events})
         self.push_agent_state()
 
-    def set_agent_config(self, model: str, effort: str, fast_mode: bool = False) -> None:
-        """Change model/effort/fast-mode. Applied to the live session
-        mid-conversation: the CLI process respawns with --resume on the next
-        message, so the same chat continues under the new settings (matching
-        the CLI apps). fast_mode rides the identical respawn path - it has no
-        mid-session toggle upstream either (--settings is spawn-time only,
-        claude CLI >= 2.1.205). The choice is the caller's to persist (see
-        __init__ _set_agent)."""
+    def set_agent_config(
+        self,
+        model: str,
+        effort: str,
+        fast_mode: bool = False,
+        agent_tools: str = "sandbox",
+    ) -> None:
+        """Change model/effort/fast-mode/agent-tools. Applied to the live
+        session mid-conversation: the CLI process respawns with --resume on the
+        next message, so the same chat continues under the new settings
+        (matching the CLI apps). fast_mode and agent_tools ride the identical
+        respawn path - they have no mid-session toggle upstream either
+        (--settings / --disallowedTools / --permission-mode are spawn-time
+        only). agent_tools is an orthogonal axis from permission_mode: it gates
+        the CLI's own shell/file tools, not collection writes. The choice is
+        the caller's to persist (see __init__ _set_agent)."""
         from .backends.claude_cli import VALID_EFFORTS
 
         model = (model or "").strip()
@@ -301,18 +320,21 @@ class ChatController:
         if effort and effort not in VALID_EFFORTS:
             effort = ""
         fast_mode = bool(fast_mode)
+        agent_tools = _norm_agent_tools(agent_tools)
         changed = (
             model != str(self._config.get("model", ""))
             or effort != str(self._config.get("effort", ""))
             or fast_mode != bool(self._config.get("fast_mode", False))
+            or agent_tools != _norm_agent_tools(self._config.get("agent_tools"))
         )
         self._config["model"] = model
         self._config["effort"] = effort
         self._config["fast_mode"] = fast_mode
+        self._config["agent_tools"] = agent_tools
         if changed and self._session is not None:
             apply = getattr(self._session, "set_model_effort", None)
             if apply is not None:
-                apply(model, effort, fast_mode)
+                apply(model, effort, fast_mode, agent_tools)
                 suffix = (
                     " It applies from your next message."
                     if self.streaming
@@ -338,6 +360,8 @@ class ChatController:
             label = f"{label} · {effort} effort"
         if bool(self._config.get("fast_mode", False)):
             label = f"{label} · fast"
+        if _norm_agent_tools(self._config.get("agent_tools")) == "full":
+            label = f"{label} · full tools"
         return label
 
     VALID_MODES = (
@@ -368,6 +392,7 @@ class ChatController:
                 "effort": str(self._config.get("effort", "")),
                 "mode": str(self._config.get("permission_mode", "default")),
                 "fast": bool(self._config.get("fast_mode", False)),
+                "tools": _norm_agent_tools(self._config.get("agent_tools")),
             }
         )
 

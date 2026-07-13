@@ -340,6 +340,7 @@ def build_cli_args(
     model: str = "",
     effort: str = "",
     fast_mode: bool = False,
+    agent_tools: str = "sandbox",
     web_access: bool = True,
     mcp_inherit_user: bool = False,
     mcp_disabled: list[str] | None = None,
@@ -349,8 +350,19 @@ def build_cli_args(
     # Skill is allowed so the user's system-wide skills and our card-authoring
     # template work; Read is allowed so local card sources (PDFs) open;
     # WebSearch/WebFetch are on by default (config web_access).
+    #
+    # agent_tools is an orthogonal axis from the collection-write permission
+    # mode (DESIGN.md section 5): "sandbox" (default) hard-blocks the CLI's own
+    # Bash/Edit/Write/NotebookEdit shell/file tools; "full" leaves them on and
+    # runs the CLI with --permission-mode bypassPermissions (auto-approve, no
+    # per-command prompt - headless has no interactive prompt anyway). Full is
+    # the power-user tier: card content is untrusted input, so it turns a
+    # prompt-injected shell command into immediate execution (the risk modal in
+    # the dock spells this out). The MCP scoping / web / model flags are
+    # identical across both axes.
+    full_tools = agent_tools == "full"
     allowed = ["mcp__anki", "Skill", "Read"]
-    disallowed = ["Bash", "Edit", "Write", "NotebookEdit"]
+    disallowed = [] if full_tools else ["Bash", "Edit", "Write", "NotebookEdit"]
     if web_access:
         allowed += ["WebSearch", "WebFetch"]
     else:
@@ -395,12 +407,18 @@ def build_cli_args(
         # untrusted card text is an exfiltration surface (DESIGN.md section
         # 5's "MCP scoping" decision).
         args.append("--strict-mcp-config")
-    args += [
-        "--allowedTools",
-        ",".join(allowed),
-        "--disallowedTools",
-        ",".join(disallowed),
-    ]
+    args += ["--allowedTools", ",".join(allowed)]
+    # Omit --disallowedTools entirely when nothing is disallowed (full tools +
+    # no mcp_disabled): passing an empty-string arg risks the CLI treating ""
+    # as a tool name to block.
+    if disallowed:
+        args += ["--disallowedTools", ",".join(disallowed)]
+    if full_tools:
+        # Auto-approve every tool call (the shell/file tools we just left on
+        # included) - headless `-p` has no interactive prompt, so without this
+        # a Bash/Write call would just be refused. Deny rules and Claude Code's
+        # built-in circuit breaker (rm -rf / , rm -rf ~) still apply.
+        args += ["--permission-mode", "bypassPermissions"]
     if model.strip():
         args += ["--model", model.strip()]
     if effort.strip() in VALID_EFFORTS:
@@ -472,6 +490,7 @@ class ClaudeCliSession:
         model: str = "",
         effort: str = "",
         fast_mode: bool = False,
+        agent_tools: str = "sandbox",
         web_access: bool = True,
         extra_env: dict[str, str] | None = None,
         resume_session_id: str | None = None,
@@ -484,6 +503,7 @@ class ClaudeCliSession:
         self._model = model
         self._effort = effort
         self._fast_mode = fast_mode
+        self._agent_tools = agent_tools
         self._web_access = web_access
         self._extra_env = extra_env or {}
         self._mcp_inherit_user = mcp_inherit_user
@@ -511,12 +531,13 @@ class ClaudeCliSession:
         self._generation = 0
         self._streaming = False
         self._on_event: EventCallback | None = None
-        # Model/effort/fast-mode the live process was spawned with; a
-        # mismatch means the user switched mid-chat and the next send must
+        # Model/effort/fast-mode/agent-tools the live process was spawned with;
+        # a mismatch means the user switched mid-chat and the next send must
         # respawn.
         self._spawned_model = model
         self._spawned_effort = effort
         self._spawned_fast_mode = fast_mode
+        self._spawned_agent_tools = agent_tools
         # Control-request/control-response correlation for interrupt(). Wire
         # framing ported (field names, not implementation) from the MIT-
         # licensed Claude Agent SDK's Query._send_control_request /
@@ -539,36 +560,53 @@ class ClaudeCliSession:
         """Spawn the CLI ahead of the first send (hides startup latency)."""
         self._ensure_process()
 
-    def set_model_effort(self, model: str, effort: str, fast_mode: bool = False) -> None:
-        """Switch model/effort/fast-mode mid-conversation. The change takes
-        effect on the next send: the process respawns with --resume so the
-        same conversation continues under the new settings (matching the CLI
-        apps). Applied lazily so an in-flight response is never interrupted.
+    def set_model_effort(
+        self,
+        model: str,
+        effort: str,
+        fast_mode: bool = False,
+        agent_tools: str = "sandbox",
+    ) -> None:
+        """Switch model/effort/fast-mode/agent-tools mid-conversation. The
+        change takes effect on the next send: the process respawns with
+        --resume so the same conversation continues under the new settings
+        (matching the CLI apps). Applied lazily so an in-flight response is
+        never interrupted.
 
         fast_mode has no mid-session toggle upstream either (--settings is
         spawn-time only, claude CLI >= 2.1.205), so it rides the exact same
-        respawn-on-next-message path as model/effort."""
+        respawn-on-next-message path as model/effort. agent_tools
+        (sandbox|full) is a launch-time flag too (--disallowedTools /
+        --permission-mode), so it respawns identically."""
         self._model = model
         self._effort = effort
         self._fast_mode = bool(fast_mode)
+        self._agent_tools = agent_tools
 
     def _ensure_process(self) -> None:
         if self._process is not None and self._process.poll() is None:
-            if (self._spawned_model, self._spawned_effort, self._spawned_fast_mode) == (
+            if (
+                self._spawned_model,
+                self._spawned_effort,
+                self._spawned_fast_mode,
+                self._spawned_agent_tools,
+            ) == (
                 self._model,
                 self._effort,
                 self._fast_mode,
+                self._agent_tools,
             ):
                 return
-            # Model/effort/fast-mode changed since this process spawned: tear
-            # it down and respawn below with --resume to keep the conversation.
-            # Bump the generation first so the dying process's reader thread
-            # (which will see SIGTERM as a nonzero exit) is fenced off and
-            # does not emit a spurious error/Done into the new turn.
+            # Model/effort/fast-mode/agent-tools changed since this process
+            # spawned: tear it down and respawn below with --resume to keep the
+            # conversation. Bump the generation first so the dying process's
+            # reader thread (which will see SIGTERM as a nonzero exit) is fenced
+            # off and does not emit a spurious error/Done into the new turn.
             self._log.write(
                 f"model switch {self._spawned_model or '-'}/{self._spawned_effort or '-'}"
-                f"/fast={self._spawned_fast_mode}"
+                f"/fast={self._spawned_fast_mode}/tools={self._spawned_agent_tools}"
                 f" -> {self._model or '-'}/{self._effort or '-'}/fast={self._fast_mode}"
+                f"/tools={self._agent_tools}"
                 f" pid={self._process.pid}"
             )
             self._generation += 1
@@ -582,6 +620,7 @@ class ClaudeCliSession:
             model=self._model,
             effort=self._effort,
             fast_mode=self._fast_mode,
+            agent_tools=self._agent_tools,
             web_access=self._web_access,
             mcp_inherit_user=self._mcp_inherit_user,
             mcp_disabled=self._mcp_disabled,
@@ -602,10 +641,11 @@ class ClaudeCliSession:
         self._spawned_model = self._model
         self._spawned_effort = self._effort
         self._spawned_fast_mode = self._fast_mode
+        self._spawned_agent_tools = self._agent_tools
         self._log.write(
             f"spawn pid={self._process.pid} resume={self._state.session_id or '-'} "
             f"model={self._model or '-'} effort={self._effort or '-'} "
-            f"fast={self._fast_mode} cli={self._cli_path}"
+            f"fast={self._fast_mode} tools={self._agent_tools} cli={self._cli_path}"
         )
         generation = self._generation
         self._reader = threading.Thread(
@@ -807,6 +847,7 @@ class ClaudeCliBackend:
         log_path: Path | None = None,
         model_effort: Callable[[], tuple[str, str]] | None = None,
         fast_mode: Callable[[], bool] | None = None,
+        agent_tools: Callable[[], str] | None = None,
         web_access: bool = True,
         extra_env: dict[str, str] | None = None,
         mcp_servers: dict[str, Any] | None = None,
@@ -822,6 +863,7 @@ class ClaudeCliBackend:
         self._log = BackendLog(log_path)
         self._model_effort = model_effort or (lambda: ("", ""))
         self._fast_mode = fast_mode or (lambda: False)
+        self._agent_tools = agent_tools or (lambda: "sandbox")
         self._web_access = web_access
         self._extra_env = extra_env or {}
         self._mcp_servers = mcp_servers or {}
@@ -841,6 +883,7 @@ class ClaudeCliBackend:
             model=model,
             effort=effort,
             fast_mode=bool(self._fast_mode()),
+            agent_tools=str(self._agent_tools()),
             web_access=self._web_access,
             extra_env=self._extra_env,
             resume_session_id=(context or {}).get("resume_session_id"),

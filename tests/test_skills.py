@@ -39,14 +39,40 @@ class MaterializeAgentEnvironmentTest(unittest.TestCase):
         self.assertTrue(path.exists())
 
     def test_states_the_hard_limits(self) -> None:
+        # Default (sandbox) posture states the hard limits.
         body = materialize_agent_environment(self.agent_home).read_text(encoding="utf-8")
         for token in ("Bash", "Write", "Edit", "subagent", "read-only", "propose_note"):
             self.assertIn(token, body)
+        self.assertIn("No shell", body)
 
-    def test_regenerated_each_run(self) -> None:
-        path = materialize_agent_environment(self.agent_home)
+    def test_sandbox_variant_explicit(self) -> None:
+        body = materialize_agent_environment(
+            self.agent_home, "sandbox"
+        ).read_text(encoding="utf-8")
+        self.assertIn("No shell", body)
+        self.assertNotIn("full agent-tools mode", body)
+
+    def test_full_variant_states_shell_and_injection_risk(self) -> None:
+        # Full mode: the CLAUDE.md must say the agent HAS shell/write, warn that
+        # card content is untrusted (injection), and steer to proposals +
+        # AnkiConnect - it must not still claim shell is off.
+        body = materialize_agent_environment(self.agent_home, "full").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("full agent-tools mode", body)
+        self.assertIn("untrusted", body)
+        self.assertIn("AnkiConnect", body)
+        self.assertIn("propose_note", body)
+        self.assertNotIn("No shell", body)
+
+    def test_regenerated_each_run_and_switches_variant(self) -> None:
+        path = materialize_agent_environment(self.agent_home, "sandbox")
         path.write_text("stale user edit", encoding="utf-8")
-        materialize_agent_environment(self.agent_home)  # add-on truth wins
+        materialize_agent_environment(self.agent_home, "full")  # add-on truth wins
+        body = path.read_text(encoding="utf-8")
+        self.assertIn("full agent-tools mode", body)
+        # Switching back rewrites it to the sandbox variant.
+        materialize_agent_environment(self.agent_home, "sandbox")
         self.assertIn("No shell", path.read_text(encoding="utf-8"))
 
 

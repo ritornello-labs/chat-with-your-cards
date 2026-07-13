@@ -139,8 +139,9 @@ export interface AgentState {
   readonly backend: string;
   readonly model: string; // "" | "fable" | "opus" | "sonnet" | "haiku"
   readonly effort: string; // "" | "low" | "medium" | "high" | "max"
-  readonly mode: string; // permission mode
+  readonly mode: string; // permission mode (collection-write axis)
   readonly fast: boolean; // fast mode (Opus-only; requires a respawn to change)
+  readonly tools: "sandbox" | "full"; // agent-tools axis: shell/file access (respawns to change)
 }
 
 export interface NoteTypeMeta {
@@ -196,7 +197,7 @@ export const PERMISSION_MODES: readonly { id: string; label: string; hint: strin
 const EMPTY_PINS: PinsState = { deck: "", note_type: "", tags: [], fields: {} };
 
 const DEFAULT_UI_STATE: UiState = {
-  agent: { backend: "auto", model: "", effort: "", mode: "default", fast: false },
+  agent: { backend: "auto", model: "", effort: "", mode: "default", fast: false, tools: "sandbox" },
   openTarget: "terminal",
   meta: { decks: [], noteTypes: [], tags: [] },
   pins: EMPTY_PINS,
@@ -324,14 +325,25 @@ export class ChatStore {
 
   // ---- outbound: control-surface commands (header + composer row) ----
 
-  setAgent(model: string, effort: string, fast?: boolean): void {
+  setAgent(model: string, effort: string, fast?: boolean, tools?: "sandbox" | "full"): void {
     // Optimistic: Python re-pushes the authoritative "agent" state after.
-    // fast defaults to the current value so model/effort-only callers
-    // (the Model/Effort menu sections) don't clobber it.
+    // fast and tools default to the current value so callers that only mean to
+    // change one axis (the Model/Effort/Fast/Agent-tools menu sections) don't
+    // clobber the others.
     const nextFast = fast === undefined ? this.ui.agent.fast : fast;
-    this.ui = { ...this.ui, agent: { ...this.ui.agent, model, effort, fast: nextFast } };
+    const nextTools = tools === undefined ? this.ui.agent.tools : tools;
+    this.ui = {
+      ...this.ui,
+      agent: { ...this.ui.agent, model, effort, fast: nextFast, tools: nextTools },
+    };
     this.emit();
-    postCommand({ type: "set_agent", model, effort, fast: nextFast });
+    postCommand({ type: "set_agent", model, effort, fast: nextFast, tools: nextTools });
+  }
+
+  setAgentTools(tools: "sandbox" | "full"): void {
+    // Convenience wrapper for the "Agent tools" menu section: change only the
+    // environment-access axis, keeping model/effort/fast as-is.
+    this.setAgent(this.ui.agent.model, this.ui.agent.effort, this.ui.agent.fast, tools);
   }
 
   setPermissionMode(mode: string): void {
@@ -438,6 +450,7 @@ export class ChatStore {
           effort?: string;
           mode?: string;
           fast?: boolean;
+          tools?: string;
         };
         this.ui = {
           ...this.ui,
@@ -447,6 +460,7 @@ export class ChatStore {
             effort: String(agent.effort ?? ""),
             mode: String(agent.mode ?? "default"),
             fast: Boolean(agent.fast),
+            tools: agent.tools === "full" ? "full" : "sandbox",
           },
         };
         this.emit();

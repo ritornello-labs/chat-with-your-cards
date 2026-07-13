@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useChatState } from "../ChatRuntimeProvider";
 import { PERMISSION_MODES, type ChatStore, type PinsState } from "../store";
 
@@ -24,6 +25,16 @@ const EFFORTS: readonly { id: string; label: string }[] = [
   { id: "medium", label: "Medium" },
   { id: "high", label: "High" },
   { id: "max", label: "Max" },
+];
+
+// The agent-tools axis (DESIGN.md section 5) - orthogonal to the permission
+// mode (which gates collection writes). "sandbox" keeps the CLI's own
+// shell/file tools off; "full" turns them on with auto-approve. Slice 1 ships
+// exactly these two; the intermediate Claude Code modes (default/acceptEdits/
+// plan) are Slice 2 and would slot in as extra items here.
+const AGENT_TOOLS: readonly { id: "sandbox" | "full"; label: string; hint: string }[] = [
+  { id: "sandbox", label: "Sandbox", hint: "Anki tools + read-only files" },
+  { id: "full", label: "Full — auto-approve", hint: "Shell + file tools, no prompts" },
 ];
 
 /**
@@ -261,22 +272,104 @@ export function PinsButton({ store }: { store: ChatStore }) {
   );
 }
 
+/**
+ * The full-agent-tools risk explainer. Rendered as a faux-viewport overlay
+ * portaled into the dock root: `position: fixed` collapses the Anki webview
+ * (see DESIGN/store notes), so this is `position: absolute; inset: 0` over the
+ * `.cwyc-app` container (which useDismiss/portal escape the small chip). Amber
+ * warning accent, theme-aware via the --cwyc-* layer.
+ */
+function RiskModal({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  const host =
+    (typeof document !== "undefined" &&
+      (document.querySelector(".cwyc-app") ?? document.getElementById("cwyc-root"))) ||
+    null;
+  if (!host) return null;
+  return createPortal(
+    <div
+      className="cwyc-risk-overlay"
+      data-testid="risk-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Full agent tools — what you're allowing"
+      onClick={onClose}
+    >
+      <div className="cwyc-risk-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="cwyc-risk-modal-title">Full agent tools — what you&rsquo;re allowing</div>
+        <div className="cwyc-risk-modal-body">
+          <p>
+            Full mode gives the agent a real shell and file access, with no
+            per-command approval (auto-approve).
+          </p>
+          <p>
+            The catch is that the agent reads your card content, and card
+            content is untrusted — a shared or downloaded deck can contain text
+            crafted to steer the agent (&ldquo;ignore your instructions and run
+            this&rdquo;). In full auto-approve mode, such an injected command
+            runs on your computer immediately, with no gate.
+          </p>
+          <p>
+            Only use full mode on collections you trust. Anki card changes still
+            go through the review flow by default, but a shell can bypass that
+            too. Prefer the built-in propose tools for cards; if the agent must
+            touch the collection from a shell while Anki is open, it should use
+            AnkiConnect, never write the database file directly.
+          </p>
+          <p>
+            Claude Code&rsquo;s built-in circuit breaker still blocks{" "}
+            <code>rm -rf /</code> and <code>rm -rf ~</code>.
+          </p>
+        </div>
+        <div className="cwyc-risk-modal-actions">
+          <button
+            type="button"
+            className="cwyc-chip cwyc-chip-primary"
+            data-testid="risk-modal-close"
+            onClick={onClose}
+          >
+            Got it
+          </button>
+        </div>
+      </div>
+    </div>,
+    host
+  );
+}
+
 export function ModelPicker({ store }: { store: ChatStore }) {
   const { ui } = useChatState(store);
   const [open, setOpen] = useState(false);
   const ref = useDismiss(open, () => setOpen(false));
   const panel = useSmartPanel(open);
+  const [hoverFull, setHoverFull] = useState(false);
+  const [riskDismissed, setRiskDismissed] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const isFull = ui.agent.tools === "full";
+  // The risk line rides on the full option being the selected OR hovered
+  // choice; dismissing it hides it until full is deselected again.
+  useEffect(() => {
+    if (!isFull) setRiskDismissed(false);
+  }, [isFull]);
+  const showRisk = (isFull || hoverFull) && !riskDismissed;
   const modelLabel = MODELS.find((m) => m.id === ui.agent.model)?.label ?? ui.agent.model;
   const label =
     (ui.agent.effort ? `${modelLabel} · ${ui.agent.effort}` : modelLabel) +
-    (ui.agent.fast ? " · fast" : "");
+    (ui.agent.fast ? " · fast" : "") +
+    (isFull ? " · full" : "");
 
   return (
     <div className="cwyc-ctl" ref={ref}>
       <button
         type="button"
         className="cwyc-chip"
-        title="Model, reasoning effort, and fast mode (applies from your next message)"
+        title="Model, reasoning effort, fast mode, and agent tools (applies from your next message)"
         data-testid="model-picker"
         onClick={() => setOpen((o) => !o)}
       >
@@ -327,8 +420,49 @@ export function ModelPicker({ store }: { store: ChatStore }) {
           >
             <span className="cwyc-menu-label">On</span>
           </button>
+          <div className="cwyc-panel-title cwyc-panel-title-gap">Agent tools</div>
+          {AGENT_TOOLS.map((tool) => (
+            <button
+              key={tool.id}
+              type="button"
+              className={"cwyc-menu-item" + (tool.id === ui.agent.tools ? " cwyc-active" : "")}
+              data-testid={tool.id === "full" ? "agent-tools-full" : undefined}
+              onMouseEnter={tool.id === "full" ? () => setHoverFull(true) : undefined}
+              onMouseLeave={tool.id === "full" ? () => setHoverFull(false) : undefined}
+              onClick={() => store.setAgentTools(tool.id)}
+            >
+              <span className="cwyc-menu-label">{tool.label}</span>
+              <span className="cwyc-menu-hint">{tool.hint}</span>
+            </button>
+          ))}
+          {showRisk ? (
+            <div className="cwyc-risk-line" role="note">
+              <span className="cwyc-risk-line-text">
+                Full mode auto-runs shell commands — including any hidden in
+                untrusted card content.{" "}
+                <button
+                  type="button"
+                  className="cwyc-risk-link"
+                  data-testid="risk-modal-open"
+                  onClick={() => setModalOpen(true)}
+                >
+                  What&rsquo;s the risk?
+                </button>
+              </span>
+              <button
+                type="button"
+                className="cwyc-risk-dismiss"
+                aria-label="Dismiss warning"
+                title="Dismiss"
+                onClick={() => setRiskDismissed(true)}
+              >
+                ×
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : null}
+      {modalOpen ? <RiskModal onClose={() => setModalOpen(false)} /> : null}
     </div>
   );
 }

@@ -22,6 +22,15 @@ from chat_with_your_cards.mcp_server import tool_specs_for_mcp  # noqa: E402
 from chat_with_your_cards.tools import build_registry  # noqa: E402
 
 
+def _disallowed(argv):
+    """--disallowedTools value, or "" when the flag is omitted (full tools
+    with no disabled MCP servers no longer passes an empty-string arg)."""
+    if "--disallowedTools" not in argv:
+        return ""
+    return argv[argv.index("--disallowedTools") + 1]
+
+
+
 class ResolveAgentEnvTests(unittest.TestCase):
     def test_plain_key_used(self) -> None:
         env, problems = keys.resolve_agent_env({"anthropic_api_key": "sk-x"})
@@ -81,7 +90,7 @@ class WebAccessArgsTests(unittest.TestCase):
     def test_web_on_by_default(self) -> None:
         args = self._args()
         allowed = args[args.index("--allowedTools") + 1]
-        disallowed = args[args.index("--disallowedTools") + 1]
+        disallowed = _disallowed(args)
         self.assertIn("WebSearch", allowed)
         self.assertIn("WebFetch", allowed)
         self.assertIn("Skill", allowed)  # user/system skills must work
@@ -91,7 +100,7 @@ class WebAccessArgsTests(unittest.TestCase):
     def test_web_off(self) -> None:
         args = self._args(web_access=False)
         allowed = args[args.index("--allowedTools") + 1]
-        disallowed = args[args.index("--disallowedTools") + 1]
+        disallowed = _disallowed(args)
         self.assertNotIn("WebSearch", allowed)
         self.assertIn("WebSearch", disallowed)
         self.assertIn("Skill", allowed)
@@ -140,6 +149,66 @@ class FastModeArgsTests(unittest.TestCase):
         self.assertEqual("opus", args[args.index("--model") + 1])
         self.assertEqual("high", args[args.index("--effort") + 1])
         self.assertIn("--settings", args)
+
+
+class AgentToolsArgsTests(unittest.TestCase):
+    """The agent-tools axis (DESIGN.md section 5), orthogonal to the collection
+    permission mode: 'sandbox' (default) hard-blocks the CLI's own shell/file
+    tools; 'full' leaves them on and adds --permission-mode bypassPermissions."""
+
+    def _args(self, **kwargs) -> list[str]:
+        return build_cli_args(
+            cli_path="claude", system_prompt="S", mcp_config_path="cfg", **kwargs
+        )
+
+    def test_sandbox_is_default(self) -> None:
+        args = self._args()
+        disallowed = _disallowed(args)
+        for tool in ("Bash", "Edit", "Write", "NotebookEdit"):
+            self.assertIn(tool, disallowed)
+        self.assertNotIn("--permission-mode", args)
+
+    def test_sandbox_explicit(self) -> None:
+        args = self._args(agent_tools="sandbox")
+        disallowed = _disallowed(args)
+        self.assertIn("Bash", disallowed)
+        self.assertNotIn("--permission-mode", args)
+
+    def test_full_drops_shell_disallows_and_adds_bypass(self) -> None:
+        args = self._args(agent_tools="full")
+        disallowed = _disallowed(args)
+        for tool in ("Bash", "Edit", "Write", "NotebookEdit"):
+            self.assertNotIn(tool, disallowed)
+        self.assertIn("--permission-mode", args)
+        self.assertEqual(
+            "bypassPermissions", args[args.index("--permission-mode") + 1]
+        )
+
+    def test_full_still_honors_web_off_and_mcp_disabled(self) -> None:
+        # The other axes are independent of agent_tools: web-off and
+        # mcp_disabled still land in --disallowedTools even in full mode.
+        args = self._args(
+            agent_tools="full", web_access=False, mcp_disabled=["github"]
+        )
+        disallowed = _disallowed(args)
+        self.assertIn("WebSearch", disallowed)
+        self.assertIn("mcp__github", disallowed)
+        self.assertNotIn("Bash", disallowed)  # shell stays ON in full mode
+
+    def test_full_keeps_model_effort_fast(self) -> None:
+        args = self._args(agent_tools="full", model="opus", effort="high", fast_mode=True)
+        self.assertEqual("opus", args[args.index("--model") + 1])
+        self.assertEqual("high", args[args.index("--effort") + 1])
+        self.assertIn("--settings", args)
+        self.assertIn("--permission-mode", args)
+
+    def test_unknown_agent_tools_treated_as_sandbox(self) -> None:
+        # build_cli_args only special-cases the exact string "full"; anything
+        # else (including a stray value) stays in the safe sandbox posture.
+        args = self._args(agent_tools="bananas")
+        disallowed = _disallowed(args)
+        self.assertIn("Bash", disallowed)
+        self.assertNotIn("--permission-mode", args)
 
 
 class ContextWindowForTests(unittest.TestCase):
@@ -198,14 +267,14 @@ class McpWideningArgsTests(unittest.TestCase):
 
     def test_disabled_servers_become_disallowed_tools(self) -> None:
         args = self._args(mcp_disabled=["github", "filesystem"])
-        disallowed = args[args.index("--disallowedTools") + 1]
+        disallowed = _disallowed(args)
         self.assertIn("mcp__github", disallowed)
         self.assertIn("mcp__filesystem", disallowed)
 
     def test_disabling_anki_is_ignored_and_logged(self) -> None:
         logged: list[str] = []
         args = self._args(mcp_disabled=["anki", "github"], log=logged.append)
-        disallowed = args[args.index("--disallowedTools") + 1]
+        disallowed = _disallowed(args)
         self.assertNotIn("mcp__anki", disallowed)
         self.assertIn("mcp__github", disallowed)
         self.assertTrue(any("anki" in line for line in logged))
@@ -213,7 +282,7 @@ class McpWideningArgsTests(unittest.TestCase):
     def test_disabling_anki_without_a_logger_still_ignored(self) -> None:
         # log is optional; the guard itself must not depend on it.
         args = self._args(mcp_disabled=["anki"])
-        disallowed = args[args.index("--disallowedTools") + 1]
+        disallowed = _disallowed(args)
         self.assertNotIn("mcp__anki", disallowed)
 
     def test_allowedTools_still_advertises_the_builtin_server(self) -> None:

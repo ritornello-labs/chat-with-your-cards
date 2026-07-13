@@ -26,6 +26,25 @@
   toggle upstream - like a model/effort switch, turning it on or off applies
   from your next message (the CLI process respawns with `--resume`). Also
   toggleable from the dock's Model/effort picker.
+- `agent_tools` (default `"sandbox"`): the agent's environment-access tier — an
+  axis orthogonal to `permission_mode` (which gates *collection* writes). This
+  gates the agent's own shell and file tools.
+  - `"sandbox"` (default): the CLI runs with `Bash`, `Edit`, `Write`, and
+    `NotebookEdit` disabled (`Read` stays read-only). The agent lives inside
+    your collection; it cannot run commands or write files on your machine.
+  - `"full"`: leaves those tools on and runs the CLI with
+    `--permission-mode bypassPermissions` (auto-approve — every tool call runs
+    with no per-command prompt). This is a power-user tier. **The catch:** the
+    agent reads your card content, and card content is untrusted — a shared or
+    downloaded deck can contain text crafted to steer the agent into running a
+    command, and in full auto-approve mode that command runs on your computer
+    immediately, with no gate. Only use `"full"` on collections you trust.
+    Anki card changes still go through the review flow by default (prefer the
+    built-in propose tools; a shell should use AnkiConnect, never write the
+    `.anki2` file directly), but a shell can bypass that. Claude Code's built-in
+    circuit breaker still blocks `rm -rf /` and `rm -rf ~`. Also selectable live
+    from the dock's Model/effort picker ("Agent tools" section); switching
+    respawns the CLI with `--resume` on your next message, like a model switch.
 - `suggested_questions` (default `true`): show a context-aware suggested
   question as gray ghost text in the empty composer; Tab accepts it, typing
   dismisses it.
