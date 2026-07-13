@@ -73,6 +73,8 @@ class EventToDictTest(unittest.TestCase):
                 "output_tokens": 300,
                 "cache_read_tokens": 500_000,
                 "cache_creation_tokens": 12_000,
+                "context_window": 1_000_000,
+                "fast_mode_state": "on",
             },
             event_to_dict(
                 UsageUpdate(
@@ -81,6 +83,8 @@ class EventToDictTest(unittest.TestCase):
                     output_tokens=300,
                     cache_read_tokens=500_000,
                     cache_creation_tokens=12_000,
+                    context_window=1_000_000,
+                    fast_mode_state="on",
                 )
             ),
         )
@@ -89,6 +93,8 @@ class EventToDictTest(unittest.TestCase):
         payload = event_to_dict(UsageUpdate(cost_usd=None, input_tokens=10, output_tokens=5))
         self.assertIsNone(payload["cache_read_tokens"])
         self.assertIsNone(payload["cache_creation_tokens"])
+        self.assertIsNone(payload["context_window"])
+        self.assertIsNone(payload["fast_mode_state"])
 
     def test_done(self) -> None:
         self.assertEqual({"type": "done"}, event_to_dict(Done()))

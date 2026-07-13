@@ -261,7 +261,9 @@ def parse_stream_line(obj: dict[str, Any], state: ParserState) -> list[ChatEvent
         result_events: list[ChatEvent] = []
         usage = obj.get("usage") or {}
         cost = obj.get("total_cost_usd")
-        if cost is not None or usage:
+        window = _context_window_from_result(obj)
+        fast_state = obj.get("fast_mode_state")
+        if cost is not None or usage or window or fast_state:
             result_events.append(
                 UsageUpdate(
                     cost_usd=float(cost) if cost is not None else None,
@@ -273,6 +275,11 @@ def parse_stream_line(obj: dict[str, Any], state: ParserState) -> list[ChatEvent
                     # docstring; DESIGN.md section 9).
                     cache_read_tokens=usage.get("cache_read_input_tokens"),
                     cache_creation_tokens=usage.get("cache_creation_input_tokens"),
+                    # Real per-turn window + effective fast state, straight from
+                    # the CLI (dogfood 2026-07-13). window supersedes the
+                    # hardcoded table; fast_state verifies fast mode engaged.
+                    context_window=window,
+                    fast_mode_state=str(fast_state) if fast_state else None,
                 )
             )
         if obj.get("subtype") == "success" or not obj.get("is_error"):
@@ -329,6 +336,34 @@ def context_window_for(model: str) -> int:
     if "haiku" in key:
         return _CONTEXT_WINDOW_200K
     return _CONTEXT_WINDOW_200K
+
+
+def _context_window_from_result(obj: dict[str, Any]) -> int | None:
+    """Pull the real context-window size out of a result's ``modelUsage`` map.
+
+    ``modelUsage`` is keyed by resolved model id, each value carrying a
+    ``contextWindow`` (dogfood 2026-07-13). Subagents can add extra keys with
+    their own windows, so we report the window of the entry that consumed the
+    most tokens - the main conversation model, whose window the footer gauges.
+    Returns None when absent (scripted/older backends) so callers fall back to
+    the hardcoded ``context_window_for`` table.
+    """
+    model_usage = obj.get("modelUsage")
+    if not isinstance(model_usage, dict) or not model_usage:
+        return None
+    best_window: int | None = None
+    best_tokens = -1
+    for entry in model_usage.values():
+        if not isinstance(entry, dict):
+            continue
+        window = entry.get("contextWindow")
+        if not isinstance(window, int) or window <= 0:
+            continue
+        tokens = (entry.get("inputTokens") or 0) + (entry.get("outputTokens") or 0)
+        if tokens > best_tokens:
+            best_tokens = tokens
+            best_window = window
+    return best_window
 
 
 def build_cli_args(

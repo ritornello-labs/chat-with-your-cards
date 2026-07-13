@@ -15,9 +15,10 @@ function formatTokens(n: number): string {
 }
 
 /** Small footer indicator for the `usage` ChatEvent (cost + token totals +
- * a context-window bar). The window size is never in the stream itself
- * (contextWindow.ts hardcodes it per model), so this recomputes whenever
- * either the usage snapshot or the current model changes. */
+ * a context-window bar). The window size comes from the CLI's own per-turn
+ * report when available (usage.contextWindow), falling back to the hardcoded
+ * per-model table (contextWindow.ts) for scripted/older backends. Recomputes
+ * whenever the usage snapshot or the current model changes. */
 export function UsageFooter({ usage, model }: { usage: UsageSnapshot | null; model: string }) {
   if (!usage) return null;
   const parts: string[] = [];
@@ -36,7 +37,9 @@ export function UsageFooter({ usage, model }: { usage: UsageSnapshot | null; mod
   // sent as that call's input.
   const contextUsed =
     (usage.inputTokens ?? 0) + (usage.cacheReadTokens ?? 0) + (usage.cacheCreationTokens ?? 0);
-  const window = contextWindowFor(model);
+  // Prefer the CLI's real reported window; fall back to the per-model table.
+  const window =
+    usage.contextWindow && usage.contextWindow > 0 ? usage.contextWindow : contextWindowFor(model);
   const hasContext = contextUsed > 0;
   const pct = hasContext ? Math.min(100, (contextUsed / window) * 100) : 0;
   const warn = pct > 80;

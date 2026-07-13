@@ -455,6 +455,74 @@ class ParseStreamLineTest(unittest.TestCase):
         self.assertEqual(500000, usage.cache_read_tokens)
         self.assertEqual(8000, usage.cache_creation_tokens)
 
+    def test_result_surfaces_real_context_window_and_fast_state(self) -> None:
+        from chat_with_your_cards.backends import UsageUpdate
+
+        events = parse_stream_line(
+            {
+                "type": "result",
+                "subtype": "success",
+                "fast_mode_state": "on",
+                "usage": {"input_tokens": 100, "output_tokens": 20},
+                "modelUsage": {
+                    "claude-opus-4-8": {
+                        "contextWindow": 1000000,
+                        "inputTokens": 100,
+                        "outputTokens": 20,
+                    }
+                },
+            },
+            self.state,
+        )
+        usage = events[0]
+        assert isinstance(usage, UsageUpdate)
+        self.assertEqual(1000000, usage.context_window)
+        self.assertEqual("on", usage.fast_mode_state)
+
+    def test_context_window_picks_dominant_model_over_subagent(self) -> None:
+        # A haiku subagent (200k) alongside the opus main model (1M): report the
+        # window of the token-dominant entry, not just whichever key iterates first.
+        from chat_with_your_cards.backends import UsageUpdate
+
+        events = parse_stream_line(
+            {
+                "type": "result",
+                "subtype": "success",
+                "modelUsage": {
+                    "claude-haiku-4-5": {
+                        "contextWindow": 200000,
+                        "inputTokens": 50,
+                        "outputTokens": 10,
+                    },
+                    "claude-opus-4-8": {
+                        "contextWindow": 1000000,
+                        "inputTokens": 9000,
+                        "outputTokens": 400,
+                    },
+                },
+            },
+            self.state,
+        )
+        usage = events[0]
+        assert isinstance(usage, UsageUpdate)
+        self.assertEqual(1000000, usage.context_window)
+
+    def test_result_without_model_usage_leaves_window_none(self) -> None:
+        from chat_with_your_cards.backends import UsageUpdate
+
+        events = parse_stream_line(
+            {
+                "type": "result",
+                "subtype": "success",
+                "usage": {"input_tokens": 100, "output_tokens": 20},
+            },
+            self.state,
+        )
+        usage = events[0]
+        assert isinstance(usage, UsageUpdate)
+        self.assertIsNone(usage.context_window)
+        self.assertIsNone(usage.fast_mode_state)
+
     def test_result_error_emits_error_then_done(self) -> None:
         events = parse_stream_line(
             {

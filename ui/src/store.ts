@@ -131,6 +131,12 @@ export interface UsageSnapshot {
   readonly outputTokens: number | null;
   readonly cacheReadTokens: number | null;
   readonly cacheCreationTokens: number | null;
+  // Real per-turn window from the CLI (modelUsage.contextWindow); when set the
+  // footer prefers it over the hardcoded contextWindow.ts table. null on
+  // scripted/older backends that don't report it.
+  readonly contextWindow: number | null;
+  // CLI's ground-truth "on"/"off": whether fast mode actually engaged.
+  readonly fastState: string | null;
 }
 
 // ---- UI/control state pushed by Python (controller.py / __init__.py) ----
@@ -717,6 +723,8 @@ export class ChatStore {
       outputTokens: event.output_tokens,
       cacheReadTokens: event.cache_read_tokens ?? null,
       cacheCreationTokens: event.cache_creation_tokens ?? null,
+      contextWindow: event.context_window ?? null,
+      fastState: event.fast_mode_state ?? null,
     };
     this.emit();
   }

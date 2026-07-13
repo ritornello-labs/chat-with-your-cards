@@ -70,9 +70,18 @@ class UsageUpdate:
     ``cache_read_tokens``/``cache_creation_tokens`` mirror the Anthropic API's
     ``cache_read_input_tokens``/``cache_creation_input_tokens`` usage fields
     (see claude_cli.py's ``result`` handling). Together with ``input_tokens``
-    they approximate the size of the context sent on the last turn - there is
-    no context-WINDOW size in the stream at all, so the UI hardcodes that per
-    model (DESIGN.md section 9's "context-window table" note).
+    they approximate the size of the context sent on the last turn.
+
+    ``context_window`` is the real per-turn window size the CLI reports in the
+    result's ``modelUsage`` map (dogfood 2026-07-13: the stream DOES carry it,
+    contra the old "no window in stream" note). When present it supersedes the
+    UI's hardcoded per-model table (context_window_for / contextWindow.ts),
+    which stays as the fallback for scripted/older backends that omit it.
+
+    ``fast_mode_state`` ("on"/"off") is the CLI's ground-truth report of whether
+    the running process actually engaged fast mode - it verifies the requested
+    ``--settings {"fastMode":true}`` took effect, rather than trusting the arg
+    shape alone.
     """
 
     cost_usd: float | None = None
@@ -80,6 +89,8 @@ class UsageUpdate:
     output_tokens: int | None = None
     cache_read_tokens: int | None = None
     cache_creation_tokens: int | None = None
+    context_window: int | None = None
+    fast_mode_state: str | None = None
 
 
 @dataclass(frozen=True)
@@ -141,6 +152,8 @@ def event_to_dict(event: ChatEvent) -> dict[str, Any]:
             "output_tokens": event.output_tokens,
             "cache_read_tokens": event.cache_read_tokens,
             "cache_creation_tokens": event.cache_creation_tokens,
+            "context_window": event.context_window,
+            "fast_mode_state": event.fast_mode_state,
         }
     if isinstance(event, Done):
         return {"type": "done"}

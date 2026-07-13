@@ -108,8 +108,12 @@ export interface ProposalErrorEvent {
  * cache_read_input_tokens/cache_creation_input_tokens usage fields
  * (backends/claude_cli.py's result handling; backends/base.py's
  * UsageUpdate). Together with input_tokens they approximate the size of
- * the context sent on the last turn - the stream carries no context-WINDOW
- * size at all, so the footer hardcodes that per model (contextWindow.ts).
+ * the context sent on the last turn.
+ *
+ * context_window is the real per-turn window the CLI reports (modelUsage);
+ * when present the footer prefers it over the hardcoded contextWindow.ts
+ * table. fast_mode_state ("on"/"off") is the CLI's ground-truth report of
+ * whether the running process actually engaged fast mode.
  */
 export interface UsageEvent {
   type: "usage";
@@ -118,6 +122,8 @@ export interface UsageEvent {
   output_tokens: number | null;
   cache_read_tokens?: number | null;
   cache_creation_tokens?: number | null;
+  context_window?: number | null;
+  fast_mode_state?: string | null;
 }
 
 export interface DoneEvent {
