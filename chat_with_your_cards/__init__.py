@@ -439,6 +439,7 @@ def _wire_bridge() -> None:
         else None,
     )
     bridge.on("set_setting", _set_setting)
+    bridge.on("open_addon_config", lambda _msg: _open_addon_config())
 
 
 def _mark_web_ready() -> None:
@@ -499,6 +500,27 @@ def _push_collection_meta() -> None:
             "tags": tags,
         }
     )
+
+
+def _open_addon_config() -> None:
+    """Settings > 'Edit config…': jump the user to Anki's add-on config
+    editor (the vimrc equivalent - vim_mappings - lives there, plus every
+    other advanced key documented in config.md). Anki has no public 'open
+    THIS add-on's config' API, so open the Add-ons dialog and say where to
+    click; config changes there apply on the next Anki restart."""
+    try:
+        mw.onAddons()
+        if state.dock is not None:
+            state.dock.bridge.push(
+                {
+                    "type": "notice",
+                    "text": 'In Add-ons: select "Chat With Your Cards" > Config. '
+                    "vim_mappings holds the [keys, mapped-to, mode] triples "
+                    "(vim :map semantics); restart Anki to apply.",
+                }
+            )
+    except Exception as exc:
+        _log_line(f"open_addon_config failed: {exc}")
 
 
 def _push_settings() -> None:
@@ -892,13 +914,13 @@ def _open_in_claude_code(target: str = "terminal") -> None:
         if (
             sid
             and _sys.platform == "darwin"
-            and _open_macos_terminal(resume_command("/desktop"), app)
+            and _open_macos_terminal(resume_command("/desktop"), app, auto_close=True)
         ):
             notice(
                 "Resuming this chat and handing it to the Claude Code desktop "
-                "app (a terminal window runs the /desktop migration). If the "
-                "app doesn't open - older CLI or API-key auth - the resumed "
-                "chat is waiting in that terminal instead."
+                "app (a terminal window runs the /desktop migration and closes "
+                "itself when done). If the app doesn't open - older CLI or "
+                "API-key auth - the resumed chat stays open in that terminal."
             )
             return
         prompt = (
@@ -967,21 +989,59 @@ def _open_in_claude_code(target: str = "terminal") -> None:
         notice(f"Run this in a terminal to continue in Claude Code: {cmd}")
 
 
-def _open_macos_terminal(command: str, app: str) -> bool:
+def _open_macos_terminal(command: str, app: str, auto_close: bool = False) -> bool:
     """Run `command` in a macOS terminal, honoring the configured terminal_app.
 
     Empty (or "Terminal") drives Apple Terminal via AppleScript `do script`
     (the known-good default). Any other app name launches a throwaway
     executable `.command` script in that app via `open -a`, which most
     terminals (iTerm, Warp, Ghostty, kitty, …) run on open. Best-effort:
-    returns False so the caller can fall back to the clipboard."""
+    returns False so the caller can fall back to the clipboard.
+
+    auto_close (Apple Terminal only): watch the tab and close its window once
+    the command finishes - used by the /desktop handoff so the scaffolding
+    terminal disappears after the migration (user-requested 2026-07-14).
+    Deliberately tied to the tab going idle: if /desktop is unavailable and
+    the user lands in the resumed interactive session instead, the tab stays
+    busy and the window stays OPEN, which is exactly the fallback we want."""
     import subprocess
     import sys as _sys
+    import time as _time
 
     if _sys.platform != "darwin":
         return False
     if not app or app.lower() in ("terminal", "terminal.app"):
         script = command.replace("\\", "\\\\").replace('"', '\\"')
+        if auto_close:
+            osa = f'''
+tell application "Terminal"
+    activate
+    set t to do script "{script}"
+    delay 1
+    repeat 240 times
+        if not busy of t then exit repeat
+        delay 0.5
+    end repeat
+    if not busy of t then
+        try
+            close (first window whose tabs contains t) saving no
+        end try
+    end if
+end tell'''
+            try:
+                proc = subprocess.Popen(
+                    ["osascript", "-e", osa],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                # The script itself runs for the command's lifetime; only an
+                # immediate exit means osascript rejected it outright.
+                _time.sleep(0.35)
+                if proc.poll() is not None and proc.returncode != 0:
+                    return False
+                return True
+            except Exception:
+                return False
         try:
             subprocess.run(
                 [

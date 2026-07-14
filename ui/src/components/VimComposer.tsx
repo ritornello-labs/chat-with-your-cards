@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { unstable_useComposerInput } from "@assistant-ui/react";
 import { EditorState, Prec } from "@codemirror/state";
-import { EditorView, keymap, placeholder } from "@codemirror/view";
+import { EditorView, drawSelection, keymap, placeholder } from "@codemirror/view";
 import { history, historyKeymap } from "@codemirror/commands";
 import { Vim, getCM, vim } from "@replit/codemirror-vim";
 import { postCommand } from "../bridge";
@@ -112,6 +112,10 @@ export function VimComposer({ store }: { store: ChatStore }) {
         extensions: [
           chatKeys,
           vim(),
+          // Required by codemirror-vim: visual-mode selections are drawn by
+          // the CM selection layer, not the native one - without this, V/v
+          // select invisibly (dogfood 2026-07-13).
+          drawSelection(),
           history(),
           keymap.of(historyKeymap),
           placeholder("Ask about this card…"),

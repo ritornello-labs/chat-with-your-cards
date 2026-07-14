@@ -77,6 +77,8 @@ class ChatDock(QDockWidget):
         # Pending finish timer while a shell transition's CSS slide plays;
         # None otherwise. (Also read by _WebHost and the GUI smoke probe.)
         self._anim: QTimer | None = None
+        # Collapse-only: the mid-slide width snap (see set_expanded).
+        self._mid_snap: QTimer | None = None
         self._width_applied = False
         self.setObjectName(DOCK_OBJECT_NAME)
         self.setAllowedAreas(
@@ -198,11 +200,22 @@ class ChatDock(QDockWidget):
             # layout and never reflows mid-motion.
             self.web.setGeometry(0, 0, target, self._host.height())
             self._pin_width(target)
-        # Collapse keeps the dock wide while the page slides out; the width
-        # snap to the rail happens in _finish_resize.
         if not animating:
             self._finish_resize()
             return
+        if not expanded:
+            # Collapse: snap the dock to the rail MID-slide (~55%), not
+            # after it. The one central reflow then lands while the page is
+            # still visibly moving (a GPU transform the layout hit cannot
+            # stall), so the eye reads a single continuous motion instead of
+            # "slide, then Anki jumps" (dogfood 2026-07-13). The page itself
+            # stays wide under the clip until _finish_resize.
+            mid = QTimer(self)
+            mid.setSingleShot(True)
+            mid.setInterval(int(ANIM_MS * 0.55))
+            mid.timeout.connect(lambda: self._pin_width(RAIL_WIDTH))
+            self._mid_snap = mid
+            mid.start()
         timer = QTimer(self)
         timer.setSingleShot(True)
         timer.setInterval(ANIM_MS + 40)
@@ -214,6 +227,9 @@ class ChatDock(QDockWidget):
         if self._anim is not None:
             self._anim.stop()
             self._anim = None
+        if self._mid_snap is not None:
+            self._mid_snap.stop()
+            self._mid_snap = None
 
     def _pin_width(self, width: int) -> None:
         # Pinning min=max is the one reliable way to force a QDockWidget's

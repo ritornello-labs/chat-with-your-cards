@@ -1106,7 +1106,7 @@ def _run_checks() -> dict[str, Any]:
             "(function() {"
             "  var ids = ['header','new-chat','history-button','open-cc',"
             "             'open-cc-caret','settings','mode-chip','pins-button',"
-            "             'model-picker','collapse','rail'];"
+            "             'model-picker','tools-chip','collapse','rail'];"
             "  var out = {};"
             "  ids.forEach(function(id) {"
             "    out[id.replace(/-/g, '_')] ="

@@ -8,7 +8,7 @@ import { ReasoningBlock } from "./components/ReasoningBlock";
 import { ErrorBanner } from "./components/ErrorBanner";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { TextPart } from "./components/TextPart";
-import { ModeChip, ModelPicker, PinsButton } from "./components/ComposerControls";
+import { ModeChip, ModelPicker, PinsButton, ToolsChip } from "./components/ComposerControls";
 import { VimComposer } from "./components/VimComposer";
 
 function UserMessage() {
@@ -91,6 +91,7 @@ function Composer({ store }: { store: ChatStore }) {
         <div className="cwyc-composer-left">
           <ModeChip store={store} />
           <PinsButton store={store} />
+          <ToolsChip store={store} />
         </div>
         <div className="cwyc-composer-right">
           <ModelPicker store={store} />

@@ -435,6 +435,11 @@ export class ChatStore {
     postCommand({ type: "set_setting", key, value });
   }
 
+  /** Open Anki's add-on config (vim_mappings and other advanced options). */
+  openAddonConfig(): void {
+    postCommand({ type: "open_addon_config" });
+  }
+
   // ---- inbound: Python -> UI ----
 
   /**

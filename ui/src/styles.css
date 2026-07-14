@@ -1641,17 +1641,30 @@ body {
   background: var(--cwyc-surface);
   color: var(--cwyc-fg);
 }
-.cwyc-chip-on {
+#cwyc-root .cwyc-chip-on {
   border-color: var(--cwyc-amber);
   color: var(--cwyc-amber-ink);
   background: var(--cwyc-amber-soft);
 }
-.cwyc-chip-primary {
+/* Full agent tools is a materially riskier state than the rest of the chip
+   row (shell/file access, auto-approve) - a warn-colored chip keeps that
+   visible at a glance without opening the panel. */
+#cwyc-root .cwyc-chip-warn {
+  border-color: var(--cwyc-warn);
+  color: var(--cwyc-warn);
+  background: var(--cwyc-warn-soft);
+}
+#cwyc-root .cwyc-chip-warn:hover {
+  border-color: var(--cwyc-warn);
+  color: var(--cwyc-warn);
+  background: var(--cwyc-warn-soft);
+}
+#cwyc-root .cwyc-chip-primary {
   background: var(--cwyc-amber);
   border-color: var(--cwyc-amber);
   color: var(--cwyc-on-amber);
 }
-.cwyc-chip-primary:hover {
+#cwyc-root .cwyc-chip-primary:hover {
   background: var(--cwyc-amber-hover);
   color: var(--cwyc-on-amber);
 }
@@ -1724,7 +1737,7 @@ body {
 
 /* pins panel rows */
 .cwyc-panel-pins {
-  min-width: 250px;
+  min-width: 270px;
 }
 .cwyc-pin-row {
   display: flex;
@@ -1740,7 +1753,6 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.cwyc-pin-row select,
 .cwyc-pin-row input {
   flex: 1 1 auto;
   min-width: 0;
@@ -1751,11 +1763,152 @@ body {
   border-radius: 6px;
   padding: 3px 6px;
 }
+/* Deck/Note type (ComboBox) and Tags (TagChips) each render their own
+   bordered wrapper; let them take the same flex slot the plain <input>
+   above takes for the field-defaults rows, instead of double-bordering. */
+.cwyc-pin-row .cwyc-combo,
+.cwyc-pin-row .cwyc-tagchips {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 .cwyc-panel-actions {
   display: flex;
   justify-content: flex-end;
   gap: 6px;
   padding: 7px 8px 3px;
+}
+
+/* ---- combobox (in-DOM autocomplete; never a native <select>/<datalist> -
+   those render at broken positions inside Anki's webview) ------------------ */
+
+.cwyc-combo {
+  position: relative;
+  width: 100%;
+}
+.cwyc-combo-input {
+  width: 100%;
+  min-width: 0;
+  font: 400 12px var(--cwyc-font);
+  color: var(--cwyc-fg);
+  background: var(--cwyc-bg);
+  border: 1px solid var(--cwyc-border);
+  border-radius: 6px;
+  padding: 3px 6px;
+}
+.cwyc-combo-input:focus {
+  outline: none;
+  border-color: var(--cwyc-amber);
+  box-shadow: 0 0 0 2px var(--cwyc-amber-soft);
+}
+.cwyc-combo-list {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + 3px);
+  left: 0;
+  right: 0;
+  max-height: 180px;
+  overflow-y: auto;
+  background: var(--cwyc-surface-raised);
+  border: 1px solid var(--cwyc-border);
+  border-radius: 8px;
+  box-shadow: var(--cwyc-card-shadow);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+#cwyc-root .cwyc-combo-item {
+  display: block;
+  width: 100%;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--cwyc-fg);
+  font: 400 12px var(--cwyc-font);
+  text-align: left;
+  padding: 4px 8px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#cwyc-root .cwyc-combo-item:hover,
+#cwyc-root .cwyc-combo-item.cwyc-combo-active {
+  background: var(--cwyc-amber-soft);
+  color: var(--cwyc-amber-ink);
+}
+#cwyc-root .cwyc-combo-clear {
+  color: var(--cwyc-fg-subtle);
+  font-style: italic;
+}
+.cwyc-combo-match {
+  font-weight: 600;
+  color: inherit;
+}
+
+/* ---- tag chips (Anki-editor-like tag entry) ------------------------------ */
+
+.cwyc-tagchips {
+  position: relative;
+  width: 100%;
+  min-height: 24px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font: 400 12px var(--cwyc-font);
+  background: var(--cwyc-bg);
+  border: 1px solid var(--cwyc-border);
+  border-radius: 6px;
+  padding: 3px 6px;
+  cursor: text;
+}
+.cwyc-tagchips:focus-within {
+  border-color: var(--cwyc-amber);
+  box-shadow: 0 0 0 2px var(--cwyc-amber-soft);
+}
+.cwyc-tagchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 100%;
+  background: var(--cwyc-amber-soft);
+  color: var(--cwyc-amber-ink);
+  border-radius: 999px;
+  padding: 1px 4px 1px 8px;
+  font-size: 11px;
+  line-height: 1.6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#cwyc-root .cwyc-tagchip-remove {
+  flex: 0 0 auto;
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 3px;
+  cursor: pointer;
+  opacity: 0.7;
+}
+#cwyc-root .cwyc-tagchip-remove:hover {
+  opacity: 1;
+}
+.cwyc-tagchips-input {
+  flex: 1 1 60px;
+  min-width: 60px;
+  border: none;
+  background: transparent;
+  color: var(--cwyc-fg);
+  font: inherit;
+  padding: 2px 2px;
+}
+.cwyc-tagchips-input:focus {
+  outline: none;
+}
+.cwyc-tagchips-list {
+  top: calc(100% + 3px);
 }
 
 /* ---- full-agent-tools risk affordance ------------------------------------ */

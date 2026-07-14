@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useChatState } from "../ChatRuntimeProvider";
 import { PERMISSION_MODES, type ChatStore, type PinsState } from "../store";
+import { ComboBox } from "./ComboBox";
+import { TagChips } from "./TagChips";
 
 /**
  * The composer control row (DESIGN.md section 9): permission-mode chip and
@@ -183,43 +185,33 @@ export function PinsButton({ store }: { store: ChatStore }) {
           <div className="cwyc-panel-title">Pinned constraints</div>
           <label className="cwyc-pin-row">
             <span>Deck</span>
-            <select value={pins.deck} onChange={(e) => update({ deck: e.target.value })}>
-              <option value="">(not pinned)</option>
-              {ui.meta.decks.map((deck) => (
-                <option key={deck} value={deck}>
-                  {deck}
-                </option>
-              ))}
-            </select>
+            <ComboBox
+              value={pins.deck}
+              onChange={(deck) => update({ deck })}
+              options={ui.meta.decks}
+              allowFreeText
+              placeholder="(not pinned)"
+              testid="pins-deck"
+            />
           </label>
           <label className="cwyc-pin-row">
             <span>Note type</span>
-            <select
+            <ComboBox
               value={pins.note_type}
-              onChange={(e) => update({ note_type: e.target.value, fields: {} })}
-            >
-              <option value="">(not pinned)</option>
-              {ui.meta.noteTypes.map((nt) => (
-                <option key={nt.name} value={nt.name}>
-                  {nt.name}
-                </option>
-              ))}
-            </select>
+              onChange={(note_type) => update({ note_type, fields: {} })}
+              options={ui.meta.noteTypes.map((nt) => nt.name)}
+              allowFreeText={false}
+              placeholder="(not pinned)"
+              testid="pins-notetype"
+            />
           </label>
           <label className="cwyc-pin-row">
             <span>Tags</span>
-            <input
-              type="text"
-              placeholder="comma, separated"
-              value={pins.tags.join(", ")}
-              onChange={(e) =>
-                update({
-                  tags: e.target.value
-                    .split(",")
-                    .map((t) => t.trim())
-                    .filter(Boolean),
-                })
-              }
+            <TagChips
+              tags={pins.tags}
+              onChange={(tags) => update({ tags })}
+              suggestions={ui.meta.tags}
+              testid="pins-tags"
             />
           </label>
           {fieldsForType.length ? (
@@ -348,28 +340,17 @@ export function ModelPicker({ store }: { store: ChatStore }) {
   const [open, setOpen] = useState(false);
   const ref = useDismiss(open, () => setOpen(false));
   const panel = useSmartPanel(open);
-  const [hoverFull, setHoverFull] = useState(false);
-  const [riskDismissed, setRiskDismissed] = useState(false);
-  const [modalOpen, setModalOpen] = useState(false);
-  const isFull = ui.agent.tools === "full";
-  // The risk line rides on the full option being the selected OR hovered
-  // choice; dismissing it hides it until full is deselected again.
-  useEffect(() => {
-    if (!isFull) setRiskDismissed(false);
-  }, [isFull]);
-  const showRisk = (isFull || hoverFull) && !riskDismissed;
   const modelLabel = MODELS.find((m) => m.id === ui.agent.model)?.label ?? ui.agent.model;
   const label =
     (ui.agent.effort ? `${modelLabel} · ${ui.agent.effort}` : modelLabel) +
-    (ui.agent.fast ? " · fast" : "") +
-    (isFull ? " · full" : "");
+    (ui.agent.fast ? " · fast" : "");
 
   return (
     <div className="cwyc-ctl" ref={ref}>
       <button
         type="button"
         className="cwyc-chip"
-        title="Model, reasoning effort, fast mode, and agent tools (applies from your next message)"
+        title="Model, reasoning effort, and fast mode (applies from your next message)"
         data-testid="model-picker"
         onClick={() => setOpen((o) => !o)}
       >
@@ -420,7 +401,50 @@ export function ModelPicker({ store }: { store: ChatStore }) {
           >
             <span className="cwyc-menu-label">On</span>
           </button>
-          <div className="cwyc-panel-title cwyc-panel-title-gap">Agent tools</div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The agent-tools axis, split out of the model/effort menu into its own chip
+ * (DESIGN.md section 5 / dogfood follow-up): sandbox vs full shell/file
+ * access is a materially different risk decision than model/effort, and
+ * burying it made the "full" state easy to miss. The chip itself carries the
+ * warning color when full tools are active, so the risky state is visible
+ * without opening anything.
+ */
+export function ToolsChip({ store }: { store: ChatStore }) {
+  const { ui } = useChatState(store);
+  const [open, setOpen] = useState(false);
+  const ref = useDismiss(open, () => setOpen(false));
+  const panel = useSmartPanel(open);
+  const [hoverFull, setHoverFull] = useState(false);
+  const [riskDismissed, setRiskDismissed] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const isFull = ui.agent.tools === "full";
+  // The risk line rides on the full option being the selected OR hovered
+  // choice; dismissing it hides it until full is deselected again.
+  useEffect(() => {
+    if (!isFull) setRiskDismissed(false);
+  }, [isFull]);
+  const showRisk = (isFull || hoverFull) && !riskDismissed;
+
+  return (
+    <div className="cwyc-ctl" ref={ref}>
+      <button
+        type="button"
+        className={"cwyc-chip" + (isFull ? " cwyc-chip-warn" : "")}
+        title="Agent tools: shell/file access (applies from your next message)"
+        data-testid="tools-chip"
+        onClick={() => setOpen((o) => !o)}
+      >
+        {isFull ? "Full tools" : "Sandbox"}
+      </button>
+      {open ? (
+        <div className={panel.panelClass} style={panel.panelStyle} ref={panel.panelRef}>
+          <div className="cwyc-panel-title">Agent tools</div>
           {AGENT_TOOLS.map((tool) => (
             <button
               key={tool.id}

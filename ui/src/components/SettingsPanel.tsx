@@ -72,6 +72,22 @@ export function SettingsPanel({ store }: { store: ChatStore }) {
             checked={settings.vimMode}
             onChange={(v) => store.setSetting("vim_mode", v)}
           />
+          {settings.vimMode ? (
+            <div className="cwyc-setting-row">
+              <span className="cwyc-setting-label">
+                Key mappings (<code>vim_mappings</code>)
+              </span>
+              <button
+                type="button"
+                className="cwyc-chip"
+                data-testid="open-addon-config"
+                title="Your vimrc equivalent: [keys, mapped-to, mode] triples in the add-on config"
+                onClick={() => store.openAddonConfig()}
+              >
+                Edit config…
+              </button>
+            </div>
+          ) : null}
           <div className="cwyc-setting-row">
             <span className="cwyc-setting-label">Dock side</span>
             <div className="cwyc-seg" role="radiogroup" aria-label="Dock side">
