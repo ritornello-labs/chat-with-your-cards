@@ -334,17 +334,64 @@ body {
   transition: opacity 170ms ease 70ms;
 }
 
-/* While the dock width is animating, the page keeps its EXPANDED width and
-   the shrinking dock merely clips it (the Qt-side _WebHost keeps the page
-   un-resized so QtWebEngine never re-rasters per frame). A rail laid out at
-   that width would sit mid-page, so keep it hidden until the final
-   one-shot page resize lands (animating:false push) - then it fades in at
-   its true 44px geometry. */
+/* During a shell transition the page keeps its EXPANDED width (the Qt-side
+   _WebHost holds it; the dock width changes in ONE step, not per frame - see
+   dock.py set_expanded). A rail laid out at that width would sit mid-page,
+   so keep it hidden until the final one-shot page resize lands
+   (animating:false push) - then it fades in at its true 44px geometry. */
 #cwyc-root .cwyc-anim .cwyc-rail {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
   transition: none;
+}
+
+/* The transition's visible motion: the full layer slides as a GPU-composited
+   transform - never a layout change. Expanding: the dock has already snapped
+   to full width (one reflow), the page glides in from the dock's window
+   edge. Collapsing: the page glides out toward that edge and HOLDS there
+   (forwards) until the width snap lands; the layer must stay visible while
+   departing, overriding the railed fade-out. Distances are (100% - 44px) so
+   the layer's leading column comes to rest exactly in the future rail slot.
+   Direction follows the dock side (cwyc-side-* from dock_state). */
+#cwyc-root .cwyc-anim-expand.cwyc-side-right .cwyc-full {
+  animation: cwyc-slide-in-r 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+#cwyc-root .cwyc-anim-expand.cwyc-side-left .cwyc-full {
+  animation: cwyc-slide-in-l 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+#cwyc-root .cwyc-anim.cwyc-railed .cwyc-full {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: none;
+  transition: none;
+}
+#cwyc-root .cwyc-anim.cwyc-railed.cwyc-side-right .cwyc-full {
+  animation: cwyc-slide-out-r 240ms cubic-bezier(0.5, 0, 0.75, 0.4) forwards;
+}
+#cwyc-root .cwyc-anim.cwyc-railed.cwyc-side-left .cwyc-full {
+  animation: cwyc-slide-out-l 240ms cubic-bezier(0.5, 0, 0.75, 0.4) forwards;
+}
+
+@keyframes cwyc-slide-in-r {
+  from {
+    transform: translateX(calc(100% - 44px));
+  }
+}
+@keyframes cwyc-slide-in-l {
+  from {
+    transform: translateX(calc(-100% + 44px));
+  }
+}
+@keyframes cwyc-slide-out-r {
+  to {
+    transform: translateX(calc(100% - 44px));
+  }
+}
+@keyframes cwyc-slide-out-l {
+  to {
+    transform: translateX(calc(-100% + 44px));
+  }
 }
 
 #cwyc-root .cwyc-rail:hover {
@@ -1264,6 +1311,68 @@ body {
 
 .cwyc-send-stop:hover {
   background: var(--cwyc-fg);
+}
+
+/* ---------- vim composer (CodeMirror, Settings > "Vim keys") ---------- */
+
+/* Styled to be indistinguishable from the plain textarea at rest: same font,
+   size, line-height, and max-height; transparent over the composer card. The
+   one intentional tell is the block cursor in normal mode (amber - the vim
+   state indicator). */
+.cwyc-vim-editor .cm-editor {
+  background: transparent;
+  outline: none;
+}
+.cwyc-vim-editor .cm-editor.cm-focused {
+  outline: none;
+}
+.cwyc-vim-editor .cm-scroller {
+  font-family: var(--cwyc-font);
+  font-size: 13.5px;
+  line-height: 1.45;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.cwyc-vim-editor .cm-content {
+  padding: 0;
+  caret-color: var(--cwyc-fg);
+}
+.cwyc-vim-editor .cm-line {
+  padding: 0;
+}
+.cwyc-vim-editor .cm-placeholder {
+  color: var(--cwyc-fg-subtle);
+}
+.cwyc-vim-editor .cm-cursor {
+  border-left-color: var(--cwyc-fg);
+}
+.cwyc-vim-editor .cm-editor .cm-fat-cursor {
+  background: var(--cwyc-amber) !important;
+  color: var(--cwyc-on-amber) !important;
+  outline: none !important;
+}
+.cwyc-vim-editor .cm-editor:not(.cm-focused) .cm-fat-cursor {
+  background: none !important;
+  outline: solid 1px var(--cwyc-amber) !important;
+}
+.cwyc-vim-editor .cm-selectionBackground,
+.cwyc-vim-editor .cm-editor.cm-focused .cm-selectionBackground {
+  background: var(--cwyc-selection);
+}
+/* The vim `:`/search command line renders as a CM panel below the editor. */
+.cwyc-vim-editor .cm-panels {
+  background: var(--cwyc-surface);
+  color: var(--cwyc-fg);
+  font: 11px var(--cwyc-mono);
+  border: none;
+  border-radius: 6px;
+}
+.cwyc-vim-editor .cm-panels input {
+  color: inherit;
+  font: inherit;
+  background: transparent;
+  border: none;
+  outline: none;
 }
 
 /* ---------- reduced motion: everything still, instantly ---------- */

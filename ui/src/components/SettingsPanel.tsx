@@ -66,6 +66,12 @@ export function SettingsPanel({ store }: { store: ChatStore }) {
             checked={settings.restoreLastChat}
             onChange={(v) => store.setSetting("restore_last_chat", v)}
           />
+          <Toggle
+            label="Vim keys in composer"
+            testid="setting-vim-mode"
+            checked={settings.vimMode}
+            onChange={(v) => store.setSetting("vim_mode", v)}
+          />
           <div className="cwyc-setting-row">
             <span className="cwyc-setting-label">Dock side</span>
             <div className="cwyc-seg" role="radiogroup" aria-label="Dock side">

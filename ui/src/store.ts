@@ -203,6 +203,8 @@ export interface SettingsState {
   readonly dockSide: "left" | "right";
   readonly toggleShortcut: string;
   readonly newChatShortcut: string;
+  readonly vimMode: boolean;
+  readonly vimMappings: readonly [string, string, string][];
 }
 
 export interface UiState {
@@ -584,7 +586,14 @@ export class ChatStore {
           dock_side?: string;
           toggle_shortcut?: string;
           new_chat_shortcut?: string;
+          vim_mode?: boolean;
+          vim_mappings?: unknown;
         };
+        const rawMappings = Array.isArray(s.vim_mappings) ? s.vim_mappings : [];
+        const vimMappings = rawMappings.filter(
+          (m): m is [string, string, string] =>
+            Array.isArray(m) && m.length === 3 && m.every((part) => typeof part === "string")
+        );
         this.ui = {
           ...this.ui,
           settings: {
@@ -592,6 +601,8 @@ export class ChatStore {
             dockSide: s.dock_side === "left" ? "left" : "right",
             toggleShortcut: String(s.toggle_shortcut ?? ""),
             newChatShortcut: String(s.new_chat_shortcut ?? ""),
+            vimMode: Boolean(s.vim_mode),
+            vimMappings,
           },
         };
         this.emit();

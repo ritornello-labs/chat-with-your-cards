@@ -1,12 +1,24 @@
 # Chat With Your Cards — configuration
 
-- `toggle_shortcut` (default `Ctrl+J`, shown as Cmd+J on macOS): context-aware chord.
-  If the chat dock is hidden, shows it and focuses the message box. If focus is in
-  the chat, returns focus to the reviewer/deck browser. Otherwise focuses the chat.
+- `toggle_shortcut` (default `Ctrl+J`, shown as Cmd+J on macOS): context-aware chord
+  that cycles the dock. If the dock is collapsed to its side rail, expands it and
+  focuses the message box. If focus is in the chat, collapses the dock back to the
+  rail and returns focus to the reviewer/deck browser. Otherwise focuses the chat.
 - `new_chat_shortcut` (default `Ctrl+Shift+J`): starts a fresh chat with fresh
   context; focus stays in the message box.
-- `dock_width` (default `420`): dock width in pixels. The width you drag the dock
-  to is remembered automatically when the profile closes.
+- `dock_width` (default `420`): expanded dock width in pixels. The width you drag
+  the dock to is remembered automatically when the profile closes.
+- `dock_collapsed` (default `true`): whether the dock is collapsed to its slim
+  side rail. Managed automatically (remembers how you left it).
+- `dock_side` (default `right`): which window edge the dock lives on (`left` or
+  `right`). Also switchable from the dock's Settings panel (gear icon).
+- `vim_mode` (default `false`): vim keybindings in the message box (modal
+  editing; Esc/`fd` for normal mode, Enter still sends, Shift+Enter for a
+  newline). Also toggleable from the Settings panel.
+- `vim_mappings`: extra vim key mappings as `[keys, mapped-to, mode]` triples
+  with vim `:map` semantics; `mode` is `normal`, `insert`, or `visual`. The
+  defaults map `fd` to Esc in insert mode, `j`/`k` to `gj`/`gk` (move by
+  visual line), `Y` to `y$`, and `[<Space>`/`]<Space>` to add blank lines.
 - `backend` (default `auto`): `auto` uses the Claude Code CLI when installed and
   falls back to a built-in demo backend; `claude` requires the CLI; `scripted`
   forces the demo backend.

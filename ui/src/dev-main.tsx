@@ -28,7 +28,10 @@ const store = new ChatStore();
 const handle = installChatUI({
   dispatch: store.dispatch,
   focusComposer: () => {
-    document.querySelector<HTMLTextAreaElement>(".cwyc-composer-input")?.focus();
+    // Plain textarea, or the CodeMirror content node when vim mode is on.
+    document
+      .querySelector<HTMLElement>(".cwyc-composer-input, .cwyc-vim-editor .cm-content")
+      ?.focus();
   },
 });
 startReadyHandshake(handle.isAcked);

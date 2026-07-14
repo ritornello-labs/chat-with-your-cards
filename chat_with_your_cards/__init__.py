@@ -26,6 +26,22 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # across sessions (saved at teardown alongside dock_width).
     "dock_collapsed": True,
     "dock_side": "right",
+    # Composer vim keybindings (Settings > "Vim keys in composer", or here).
+    # vim_mappings are [keys, mapped-to, mode] triples with vim `:map`
+    # semantics (mode: normal | insert | visual); the defaults are adapted
+    # from the user's vimrc: fd leaves insert mode, j/k move by visual line,
+    # Y yanks to end of line, [<Space>/]<Space> add blank lines.
+    "vim_mode": False,
+    "vim_mappings": [
+        ["fd", "<Esc>", "insert"],
+        ["j", "gj", "normal"],
+        ["k", "gk", "normal"],
+        ["j", "gj", "visual"],
+        ["k", "gk", "visual"],
+        ["Y", "y$", "normal"],
+        ["[<Space>", "O<Esc>j", "normal"],
+        ["]<Space>", "o<Esc>k", "normal"],
+    ],
     "backend": "auto",
     "claude_cli_path": "",
     "model": "",
@@ -40,6 +56,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "restore_last_chat": False,
     "open_in_claude_target": "terminal",
     "terminal_app": "",
+    "source_fields": {},
     "anthropic_api_key": "",
     "anthropic_api_key_op": "",
     "openai_api_key": "",
@@ -488,6 +505,13 @@ def _push_settings() -> None:
     """Feed the Settings panel (gear icon) its authoritative snapshot."""
     if state.dock is None:
         return
+    # Only well-formed [keys, mapped-to, mode] string triples reach the UI;
+    # a malformed hand-edited config entry is dropped, never crashes vim.
+    mappings = [
+        [str(m[0]), str(m[1]), str(m[2])]
+        for m in (state.config.get("vim_mappings") or [])
+        if isinstance(m, (list, tuple)) and len(m) == 3
+    ]
     state.dock.bridge.push(
         {
             "type": "settings",
@@ -495,6 +519,8 @@ def _push_settings() -> None:
             "dock_side": str(state.config.get("dock_side", "right")),
             "toggle_shortcut": str(state.config.get("toggle_shortcut", "")),
             "new_chat_shortcut": str(state.config.get("new_chat_shortcut", "")),
+            "vim_mode": bool(state.config.get("vim_mode", False)),
+            "vim_mappings": mappings,
         }
     )
 
@@ -507,6 +533,8 @@ def _set_setting(msg: dict[str, Any]) -> None:
     value = msg.get("value")
     if key == "restore_last_chat":
         state.config["restore_last_chat"] = bool(value)
+    elif key == "vim_mode":
+        state.config["vim_mode"] = bool(value)
     elif key == "dock_side":
         side = "left" if value == "left" else "right"
         state.config["dock_side"] = side
@@ -798,15 +826,17 @@ def _open_in_claude_code(target: str = "terminal") -> None:
     """Hand this chat to a full-power Claude Code.
 
     Terminal: same session id via --resume, same cwd (agent-home carries
-    .mcp.json for our anki tools plus the skills dir).
-    GUI (desktop app): the claude://code/new deep link cannot resume a
-    session by id (not supported upstream yet), so we open a NEW desktop
-    session in agent-home with a prompt pointing at our transcript file -
-    the agent reads it and picks the conversation up from there.
-
-    See DESIGN.md section 14 "Tracked upstream dependencies": when Claude
-    Desktop gains a resume-by-uuid deep link, replace the transcript
-    handoff below with a direct resume link.
+    .mcp.json for our anki tools plus the skills dir), same agent settings
+    (model/effort/fast/agent-tools flags).
+    Desktop app: there is STILL no resume-by-id deep link (re-verified
+    2026-07-13, DESIGN.md section 14) - but interactive claude executes a
+    slash command passed as the initial prompt (verified empirically with
+    /cost under a PTY), and `/desktop` migrates the CURRENT session to the
+    desktop app. So the desktop path resumes the session in a terminal and
+    immediately runs /desktop: a true resume, with the terminal window as
+    scaffolding. Fallback (no session yet, non-macOS, or terminal
+    automation failed): the old claude://code/new deep link opening a NEW
+    desktop session pointed at this chat's transcript file.
     """
     import shlex
     import subprocess
@@ -825,7 +855,52 @@ def _open_in_claude_code(target: str = "terminal") -> None:
         if state.dock is not None:
             state.dock.bridge.push({"type": "notice", "text": text})
 
+    # Carry the dock's agent settings into the handed-off session so the
+    # conversation continues under the same model/effort/fast-mode - and the
+    # same environment power: full agent tools maps to bypassPermissions,
+    # exactly what the dock itself spawns with (user-requested 2026-07-13).
+    # The collection-write permission mode needs no flag: it is enforced live
+    # by our MCP server, which the handed-off session talks to via .mcp.json.
+    from .backends.claude_cli import VALID_EFFORTS
+
+    extra_args: list[str] = []
+    model = str(state.config.get("model", "")).strip()
+    effort = str(state.config.get("effort", "")).strip()
+    if model:
+        extra_args += ["--model", model]
+    if effort in VALID_EFFORTS:
+        extra_args += ["--effort", effort]
+    if state.config.get("fast_mode"):
+        import json as _json
+
+        extra_args += ["--settings", _json.dumps({"fastMode": True})]
+    if str(state.config.get("agent_tools", "sandbox")) == "full":
+        extra_args += ["--permission-mode", "bypassPermissions"]
+
+    def resume_command(initial_prompt: str | None = None) -> str:
+        cmd = f"cd {shlex.quote(str(agent_home))} && claude"
+        if sid:
+            cmd += f" --resume {shlex.quote(str(sid))}"
+        for arg in extra_args:
+            cmd += f" {shlex.quote(arg)}"
+        if initial_prompt is not None:
+            cmd += f" {shlex.quote(initial_prompt)}"
+        return cmd
+
     if _norm_open_target(target) == "desktop":
+        app = str(state.config.get("terminal_app", "")).strip()
+        if (
+            sid
+            and _sys.platform == "darwin"
+            and _open_macos_terminal(resume_command("/desktop"), app)
+        ):
+            notice(
+                "Resuming this chat and handing it to the Claude Code desktop "
+                "app (a terminal window runs the /desktop migration). If the "
+                "app doesn't open - older CLI or API-key auth - the resumed "
+                "chat is waiting in that terminal instead."
+            )
+            return
         prompt = (
             "This continues an Anki chat from the Chat With Your Cards "
             "add-on (the anki MCP tools are configured in this folder)."
@@ -854,43 +929,14 @@ def _open_in_claude_code(target: str = "terminal") -> None:
 
                 webbrowser.open(url)
             notice(
-                "Opened in the Claude Code desktop app (new session - the "
-                "app can't resume by id yet, so it reads this chat's "
-                "transcript instead). For a true resume: open in Terminal, "
-                "then type /desktop there."
+                "Opened in the Claude Code desktop app (new session reading "
+                "this chat's transcript - no session to truly resume here)."
             )
         except Exception:
             notice(f"Could not open the desktop app; deep link: {url}")
         return
 
-    # Carry the dock's agent settings into the terminal session so the
-    # conversation continues under the same model/effort/fast-mode - and the
-    # same environment power: full agent tools maps to bypassPermissions,
-    # exactly what the dock itself spawns with (user-requested 2026-07-13).
-    # The collection-write permission mode needs no flag: it is enforced live
-    # by our MCP server, which the terminal session talks to via .mcp.json.
-    from .backends.claude_cli import VALID_EFFORTS
-
-    extra_args: list[str] = []
-    model = str(state.config.get("model", "")).strip()
-    effort = str(state.config.get("effort", "")).strip()
-    if model:
-        extra_args += ["--model", model]
-    if effort in VALID_EFFORTS:
-        extra_args += ["--effort", effort]
-    if state.config.get("fast_mode"):
-        import json as _json
-
-        extra_args += ["--settings", _json.dumps({"fastMode": True})]
-    if str(state.config.get("agent_tools", "sandbox")) == "full":
-        extra_args += ["--permission-mode", "bypassPermissions"]
-
-    cmd = f"cd {shlex.quote(str(agent_home))} && claude"
-    if sid:
-        cmd += f" --resume {shlex.quote(str(sid))}"
-    for arg in extra_args:
-        cmd += f" {shlex.quote(arg)}"
-
+    cmd = resume_command()
     app = str(state.config.get("terminal_app", "")).strip()
     if _open_macos_terminal(cmd, app):
         where = app or "Terminal"

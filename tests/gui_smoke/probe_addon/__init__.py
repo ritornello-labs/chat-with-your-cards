@@ -1220,6 +1220,84 @@ def _run_checks() -> dict[str, Any]:
 
     check("collapse/expand round-trip + settings panel", _collapse_expand_cycle)
 
+    def _vim_mode_round_trip() -> dict[str, Any]:
+        """The Settings vim toggle swaps the composer textarea for the
+        CodeMirror vim editor and back - exercised inside real Anki's
+        QtWebEngine (the CM bundle, fat-cursor CSS, and the settings
+        round-trip through set_setting -> writeConfig -> settings push)."""
+
+        def _kinds() -> Any:
+            return _eval_js(
+                dock.web,
+                "(function() { return {"
+                "  cm: document.querySelectorAll("
+                "    '[data-testid=composer-input-vim] .cm-editor').length,"
+                "  ta: document.querySelectorAll("
+                "    '[data-testid=composer-input]').length"
+                "}; })();",
+                DOM_TIMEOUT_MS,
+                "composer kind counts",
+            )
+
+        def _set_vim(on: bool) -> None:
+            _eval_js(
+                dock.web,
+                "(function() { document.querySelector('[data-testid=settings]').click();"
+                " return true; })();",
+                DOM_TIMEOUT_MS,
+                "settings cog click (vim)",
+            )
+            _wait_until(
+                lambda: bool(
+                    _eval_js(
+                        dock.web,
+                        "!!document.querySelector('[data-testid=setting-vim-mode]')",
+                        DOM_TIMEOUT_MS,
+                        "vim toggle present",
+                    )
+                ),
+                DOM_TIMEOUT_MS,
+                "settings panel with vim toggle",
+            )
+            desired = "true" if on else "false"
+            _eval_js(
+                dock.web,
+                "(function() {"
+                "  var box = document.querySelector('[data-testid=setting-vim-mode]');"
+                "  if (box.checked !== " + desired + ") box.click();"
+                "  return true; })();",
+                DOM_TIMEOUT_MS,
+                "vim toggle click",
+            )
+            _eval_js(
+                dock.web,
+                "(function() { document.querySelector('[data-testid=settings]').click();"
+                " return true; })();",
+                DOM_TIMEOUT_MS,
+                "settings cog close (vim)",
+            )
+
+        start = _kinds()
+        if start["ta"] != 1 or start["cm"] != 0:
+            raise AssertionError(f"expected the plain textarea composer to start: {start}")
+        _set_vim(True)
+        _wait_until(
+            lambda: _kinds()["cm"] == 1, DOM_TIMEOUT_MS, "CodeMirror vim composer to mount"
+        )
+        vim_on = _kinds()
+        if vim_on["ta"] != 0:
+            raise AssertionError(f"textarea still present with vim mode on: {vim_on}")
+        _set_vim(False)
+        _wait_until(
+            lambda: _kinds()["ta"] == 1, DOM_TIMEOUT_MS, "textarea composer to return"
+        )
+        end = _kinds()
+        if end["cm"] != 0:
+            raise AssertionError(f"vim editor still present after toggling off: {end}")
+        return {"vim_on": vim_on, "end": end}
+
+    check("vim composer toggles on/off via Settings", _vim_mode_round_trip)
+
     def _focus_toggle_cycles() -> None:
         # Ctrl+J cycles the shell (2026-07-13): with focus in the chat, the
         # chord collapses to the rail and hands focus back; from the rail it

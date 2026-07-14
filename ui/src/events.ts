@@ -152,6 +152,10 @@ export interface SettingsEvent {
   dock_side: "left" | "right";
   toggle_shortcut: string;
   new_chat_shortcut: string;
+  /** Composer vim keybindings (off by default). */
+  vim_mode?: boolean;
+  /** [keys, mapped-to, mode] triples applied via vim `:map` semantics. */
+  vim_mappings?: [string, string, string][];
 }
 
 export interface DoneEvent {

@@ -9,6 +9,7 @@ import { ErrorBanner } from "./components/ErrorBanner";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { TextPart } from "./components/TextPart";
 import { ModeChip, ModelPicker, PinsButton } from "./components/ComposerControls";
+import { VimComposer } from "./components/VimComposer";
 
 function UserMessage() {
   return (
@@ -59,7 +60,7 @@ function AssistantMessage({ store }: { store: ChatStore }) {
 }
 
 function Composer({ store }: { store: ChatStore }) {
-  const { isRunning } = useChatState(store);
+  const { isRunning, ui } = useChatState(store);
 
   // Make the tooltips true: Esc stops generation while streaming; Shift+Tab
   // cycles permission modes (both classic-UI behaviors, DESIGN.md section 9).
@@ -75,13 +76,17 @@ function Composer({ store }: { store: ChatStore }) {
 
   return (
     <ComposerPrimitive.Root className="cwyc-composer">
-      <ComposerPrimitive.Input
-        className="cwyc-composer-input"
-        placeholder="Ask about this card…"
-        rows={1}
-        data-testid="composer-input"
-        onKeyDown={onKeyDown}
-      />
+      {ui.settings?.vimMode ? (
+        <VimComposer store={store} />
+      ) : (
+        <ComposerPrimitive.Input
+          className="cwyc-composer-input"
+          placeholder="Ask about this card…"
+          rows={1}
+          data-testid="composer-input"
+          onKeyDown={onKeyDown}
+        />
+      )}
       <div className="cwyc-composer-bar">
         <div className="cwyc-composer-left">
           <ModeChip store={store} />

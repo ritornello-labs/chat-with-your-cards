@@ -60,7 +60,7 @@ function Shell({ store }: { store: ChatStore }) {
   const railed = dock !== null && !dock.expanded;
   const animating = dock !== null && dock.animating;
   // Pin the full layer to the expanded width while collapsed or animating so
-  // the width animation slides/clips it instead of rewrapping every line.
+  // the one-step dock resize clips it instead of rewrapping every line.
   const pinWidth = dock !== null && (dock.animating || !dock.expanded) ? dock.width : undefined;
   return (
     <div
@@ -68,6 +68,8 @@ function Shell({ store }: { store: ChatStore }) {
         "cwyc-app" +
         (railed ? " cwyc-railed" : "") +
         (animating ? " cwyc-anim" : "") +
+        (animating && !railed ? " cwyc-anim-expand" : "") +
+        (dock !== null && dock.side === "left" ? " cwyc-side-left" : " cwyc-side-right") +
         (dock === null ? " cwyc-boot" : "")
       }
     >

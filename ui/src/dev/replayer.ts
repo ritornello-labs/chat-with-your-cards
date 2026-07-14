@@ -357,6 +357,15 @@ export function installDevReplayer(): void {
           dock_side: "right",
           toggle_shortcut: "Ctrl+J",
           new_chat_shortcut: "Ctrl+Shift+J",
+          vim_mode: Boolean(devSettings.vim_mode),
+          vim_mappings: [
+            ["fd", "<Esc>", "insert"],
+            ["j", "gj", "normal"],
+            ["k", "gk", "normal"],
+            ["j", "gj", "visual"],
+            ["k", "gk", "visual"],
+            ["Y", "y$", "normal"],
+          ],
         });
         break;
       case "list_history":
@@ -501,18 +510,19 @@ export function installDevReplayer(): void {
         window.chatUI?.dispatch({ type: "notice", text: `Would open in Claude Code (${msg.target}).` });
         break;
       case "set_dock_expanded": {
-        // Mirror dock.py's animation contract: dock_state {animating:true} at
-        // the start of the width animation, {animating:false} at the end. The
-        // #dev-frame width transition (dev-harness.css) plays the role of
-        // Qt's QVariantAnimation so the crossfade can be judged visually.
+        // Mirror dock.py's transition contract: dock_state {animating:true}
+        // at the start, one-step frame width change (expand: immediately so
+        // the space exists; collapse: at the end, after the page's CSS slide
+        // has played), {animating:false} at the end.
         const expanded = Boolean(msg.expanded);
         const frame = document.getElementById("dev-frame");
         const state = { type: "dock_state", expanded, width: 420, side: "right" };
         window.chatUI?.dispatch({ ...state, animating: true });
-        if (frame) frame.style.width = expanded ? "420px" : "44px";
+        if (expanded && frame) frame.style.width = "420px";
         window.setTimeout(() => {
+          if (!expanded && frame) frame.style.width = "44px";
           window.chatUI?.dispatch({ ...state, animating: false });
-        }, 240);
+        }, 280);
         break;
       }
       case "set_setting": {
@@ -524,6 +534,15 @@ export function installDevReplayer(): void {
           dock_side: devSettings.dock_side === "left" ? "left" : "right",
           toggle_shortcut: "Ctrl+J",
           new_chat_shortcut: "Ctrl+Shift+J",
+          vim_mode: Boolean(devSettings.vim_mode),
+          vim_mappings: [
+            ["fd", "<Esc>", "insert"],
+            ["j", "gj", "normal"],
+            ["k", "gk", "normal"],
+            ["j", "gj", "visual"],
+            ["k", "gk", "visual"],
+            ["Y", "y$", "normal"],
+          ],
         });
         break;
       }

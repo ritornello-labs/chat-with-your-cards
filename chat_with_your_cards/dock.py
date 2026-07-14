@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from aqt import mw
-from aqt.qt import QDockWidget, QEasingCurve, Qt, QVariantAnimation, QWidget
+from aqt.qt import QDockWidget, Qt, QTimer, QWidget
 from aqt.webview import AnkiWebView
 
 from .bridge import Bridge
@@ -38,20 +38,19 @@ MIN_DOCK_WIDTH = 360
 # Qt's QWIDGETSIZE_MAX (not re-exported by aqt.qt): "no maximum".
 _WIDGET_SIZE_MAX = 16777215
 
-# Snappy but readable; the webview crossfade (130-170ms) nests inside it.
-ANIM_MS = 220
+# Must match the CSS slide duration (styles.css cwyc-slide-* keyframes); the
+# finish timer adds a small grace on top.
+ANIM_MS = 240
 
 
 class _WebHost(QWidget):
-    """Clips the webview during width animations instead of resizing it.
+    """Clips the webview during shell transitions instead of resizing it.
 
-    Resizing a QtWebEngine view forces a page relayout + re-raster, and doing
-    that on every animation frame is what made the first cut of the
-    collapse/expand animation stutter. The webview is a manually-positioned
-    child of this host (no layout): while the dock width animates, the
-    webview keeps its size and the host merely clips it (cheap widget
-    geometry) - the webview is resized exactly once per transition, in
-    ChatDock._finish_resize. Outside animations the host keeps the webview
+    Resizing a QtWebEngine view forces a page relayout + re-raster. The
+    webview is a manually-positioned child of this host (no layout): during
+    a transition it keeps its size and the host merely clips it - the
+    webview is resized exactly once per transition, in
+    ChatDock._finish_resize. Outside transitions the host keeps the webview
     synced to itself, which is normal drag-resize behavior."""
 
     def __init__(self, dock: ChatDock) -> None:
@@ -75,7 +74,9 @@ class ChatDock(QDockWidget):
         super().__init__(DOCK_TITLE, mw)
         self.expanded_width = max(int(dock_width), MIN_DOCK_WIDTH)
         self.expanded = not collapsed
-        self._anim: QVariantAnimation | None = None
+        # Pending finish timer while a shell transition's CSS slide plays;
+        # None otherwise. (Also read by _WebHost and the GUI smoke probe.)
+        self._anim: QTimer | None = None
         self._width_applied = False
         self.setObjectName(DOCK_OBJECT_NAME)
         self.setAllowedAreas(
@@ -172,41 +173,56 @@ class ChatDock(QDockWidget):
         )
 
     def set_expanded(self, expanded: bool, animate: bool = True) -> None:
+        """Expand/collapse with ONE main-window relayout per transition.
+
+        Animating the dock width per frame can never be smooth: every frame
+        forces Anki's central webview (the deck browser/reviewer, itself a
+        QtWebEngine page) to relayout, which costs tens of ms - the 'Anki
+        jumping a few times' jank (dogfood 2026-07-13). So the width now
+        changes in a single step (expand: up front, so the space exists;
+        collapse: at the end, after the page has slid away) and the visible
+        MOTION is the chat page's own GPU-composited CSS transform slide
+        (styles.css cwyc-slide-* keyframes), which never touches the Qt
+        layout. The finish timer fires after the CSS slide to commit final
+        geometry and push animating:false."""
         if expanded == self.expanded and self._anim is None:
             return
+        self._cancel_anim()
+        self.expanded = expanded
+        animating = animate and self.isVisible()
+        self.push_state(animating=animating)
+        if expanded:
+            target = self.expand_target()
+            # Lay the page out at its final width BEFORE the dock widens
+            # (the host clips it), so the slide-in starts from a settled
+            # layout and never reflows mid-motion.
+            self.web.setGeometry(0, 0, target, self._host.height())
+            self._pin_width(target)
+        # Collapse keeps the dock wide while the page slides out; the width
+        # snap to the rail happens in _finish_resize.
+        if not animating:
+            self._finish_resize()
+            return
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.setInterval(ANIM_MS + 40)
+        timer.timeout.connect(self._finish_resize)
+        self._anim = timer
+        timer.start()
+
+    def _cancel_anim(self) -> None:
         if self._anim is not None:
             self._anim.stop()
             self._anim = None
-        self.expanded = expanded
-        target = self.expand_target() if expanded else RAIL_WIDTH
-        self.push_state(animating=animate and self.isVisible())
-        if not animate or not self.isVisible():
-            self._pin_width(target)
-            self._finish_resize()
-            return
-        if expanded:
-            # Pre-size the page to its final width while the dock is still
-            # narrow: the host clips it, the animation reveals it, and the
-            # page never reflows mid-slide (see _WebHost).
-            self.web.setGeometry(0, 0, target, self._host.height())
-        anim = QVariantAnimation(self)
-        anim.setStartValue(self.width())
-        anim.setEndValue(target)
-        anim.setDuration(ANIM_MS)
-        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        anim.valueChanged.connect(lambda value: self._pin_width(int(value)))
-        anim.finished.connect(self._finish_resize)
-        self._anim = anim
-        anim.start()
 
     def _pin_width(self, width: int) -> None:
-        # Pinning min=max is the one reliable way to drive a QDockWidget's
-        # width frame-by-frame (resizeDocks only takes suggestions).
+        # Pinning min=max is the one reliable way to force a QDockWidget's
+        # width in a single step (resizeDocks only takes suggestions).
         self.setMinimumWidth(width)
         self.setMaximumWidth(width)
 
     def _finish_resize(self) -> None:
-        self._anim = None
+        self._cancel_anim()
         if self.expanded:
             # Unpin so the user can drag-resize again; keep the floor (also
             # clamped to the window - see _avail_width). The collapsed rail
@@ -214,6 +230,8 @@ class ChatDock(QDockWidget):
             self.setMinimumWidth(min(MIN_DOCK_WIDTH, self._avail_width()))
             self.setMaximumWidth(_WIDGET_SIZE_MAX)
             mw.resizeDocks([self], [self.expand_target()], Qt.Orientation.Horizontal)
+        else:
+            self._pin_width(RAIL_WIDTH)
         # The one real page resize of the transition (see _WebHost).
         self.web.setGeometry(0, 0, self._host.width(), self._host.height())
         self.push_state(animating=False)
