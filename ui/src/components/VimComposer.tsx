@@ -130,11 +130,12 @@ export function VimComposer({ store }: { store: ChatStore }) {
       parent: host,
     });
     viewRef.current = view;
-    if (import.meta.env.DEV) {
-      // Dev-preview test hook (never in the production bundle): lets the
-      // browser harness inspect vim mode state programmatically.
-      (window as unknown as { cwycVimView?: EditorView }).cwycVimView = view;
-    }
+    // Debug/test handle on the live editor view. Exposed unconditionally (not
+    // just in dev): it lets the real-Anki GUI smoke verify vim behavior
+    // (e.g. that config key-mappings actually applied) and lets a curious user
+    // inspect state from Anki's webview console. It's just a reference to the
+    // user's own composer view - no data leaves the page.
+    (window as unknown as { cwycVimView?: EditorView }).cwycVimView = view;
     return () => {
       view.destroy();
       viewRef.current = null;

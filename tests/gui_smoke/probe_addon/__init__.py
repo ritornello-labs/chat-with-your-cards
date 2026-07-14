@@ -1367,6 +1367,66 @@ def _run_checks() -> dict[str, Any]:
 
     check("vim_mode persists across a simulated restart", _vim_mode_persists)
 
+    def _vim_mappings_take_effect() -> dict[str, Any]:
+        """Dogfood 2026-07-14: `0`/`$` remaps set in the add-on config did not
+        seem to work in real Anki after a restart, though they worked in the
+        browser preview. Drive the exact real delivery path (config ->
+        _push_settings -> settings event -> Vim.map) inside the real webview and
+        confirm a mapped `0` moves by VISUAL line (start of the current screen
+        row), not logical (start of the whole line)."""
+        addon.state.config["vim_mappings"] = [
+            ["0", "g0", "normal"], ["0", "g0", "visual"],
+            ["$", "g$", "normal"], ["$", "g$", "visual"],
+        ]
+        try:
+            addon._set_setting({"key": "vim_mode", "value": True})  # pushes vim_mode + mappings
+            _wait_until(
+                lambda: bool(
+                    _eval_js(dock.web, "!!window.cwycVimView", DOM_TIMEOUT_MS, "vim view present")
+                ),
+                DOM_TIMEOUT_MS,
+                "vim editor view to mount",
+            )
+            QTest.qWait(150)  # let the mapping useEffect run Vim.map
+            probe = _eval_js(
+                dock.web,
+                r"""(function(){
+                  var v = window.cwycVimView;
+                  if(!v) return {err:'no view'};
+                  function press(k,code,kc,shift){ v.contentDOM.dispatchEvent(
+                    new KeyboardEvent('keydown',{key:k,code:code,keyCode:kc,which:kc,shiftKey:!!shift,bubbles:true,cancelable:true})); }
+                  var text='alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec';
+                  v.dispatch({changes:{from:0,to:v.state.doc.length,insert:text}, selection:{anchor:0}});
+                  v.focus();
+                  var r0=Math.round(v.coordsAtPos(0).top), mid=null;
+                  for(var i=0;i<=v.state.doc.length;i++){ if(Math.round(v.coordsAtPos(i).top)>r0){ mid=i+3; break; } }
+                  if(mid===null) return {err:'line did not wrap', width: v.contentDOM.clientWidth};
+                  press('Escape','Escape',27,false);
+                  v.dispatch({selection:{anchor:mid}}); v.focus();
+                  var midTop=Math.round(v.coordsAtPos(mid).top);
+                  press('0','Digit0',48,false);
+                  var h=v.state.selection.main.head, top=Math.round(v.coordsAtPos(h).top);
+                  return {mid:mid, midTop:midTop, row0Top:r0, head:h, headTop:top,
+                          visual:(top===midTop && h<mid), logical:(top===r0 && h===0)};
+                })();""",
+                DOM_TIMEOUT_MS,
+                "mapped 0 motion probe",
+            )
+        finally:
+            addon._set_setting({"key": "vim_mode", "value": False})
+            addon.state.config["vim_mappings"] = []
+            QTest.qWait(80)
+        if not isinstance(probe, dict) or probe.get("err"):
+            raise AssertionError(f"could not measure mapped 0: {probe}")
+        if not probe.get("visual"):
+            raise AssertionError(
+                "config `0`->`g0` mapping did NOT apply in real Anki: bare 0 from a "
+                f"mid-row position went logical, not visual. {probe}"
+            )
+        return probe
+
+    check("config vim key-mappings apply in real Anki (0->g0 visual)", _vim_mappings_take_effect)
+
     def _thin_window_grows_and_restores() -> dict[str, Any]:
         """A window too thin to give the dock a usable column grows to fit on
         expand and shrinks back on collapse - unless the user resized it, whose
