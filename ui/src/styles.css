@@ -1762,6 +1762,12 @@ body {
   background: var(--cwyc-accent-soft);
   color: var(--cwyc-accent-ink);
 }
+#cwyc-root .cwyc-menu-item-disabled,
+#cwyc-root .cwyc-menu-item-disabled:hover {
+  opacity: 0.42;
+  cursor: not-allowed;
+  background: transparent;
+}
 .cwyc-menu-label {
   flex: 1 1 auto;
   overflow: hidden;

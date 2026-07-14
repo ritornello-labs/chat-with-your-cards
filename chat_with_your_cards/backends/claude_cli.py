@@ -420,6 +420,15 @@ def build_cli_args(
         "full": "bypassPermissions",
     }
     tier = agent_tools if agent_tools in ("sandbox", *_PERMISSION_MODE_BY_TIER) else "sandbox"
+    if tier == "auto" and "haiku" in model.strip().lower():
+        # Auto's safety classifier is premium-only; on Haiku the CLI silently
+        # drops --permission-mode auto to a no-classifier mode, so an "auto"
+        # config here would grant unguarded tools under a safety label. Fall back
+        # to the safe sandbox (the UI coerces the same way; this guards a
+        # hand-edited config).
+        if log is not None:
+            log("agent_tools=auto ignored on Haiku (classifier is premium-only); using sandbox")
+        tier = "sandbox"
     sandboxed = tier == "sandbox"
     allowed = ["mcp__anki", "Skill", "Read"]
     disallowed = ["Bash", "Edit", "Write", "NotebookEdit"] if sandboxed else []

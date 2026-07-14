@@ -392,8 +392,24 @@ export class ChatStore {
     // change one axis (the Model/Effort/Fast/Agent-tools menu sections) don't
     // clobber the others.
     const nextFast = fast === undefined ? this.ui.agent.fast : fast;
-    const nextTools = tools === undefined ? this.ui.agent.tools : tools;
+    let nextTools = tools === undefined ? this.ui.agent.tools : tools;
     const modelChanged = model !== this.ui.agent.model;
+    // Auto's classifier only runs on premium models; the CLI silently drops
+    // `--permission-mode auto` to a no-classifier mode on Haiku. Auto was chosen
+    // FOR that safety net, so honour the intent by falling back to the safe end
+    // (sandbox) rather than leaving a phantom "Auto" that quietly grants
+    // unguarded tools. Surface it so the tier change isn't a mystery.
+    if (nextTools === "auto" && model === "haiku") {
+      nextTools = "sandbox";
+      this.noticeSeq += 1;
+      this.ui = {
+        ...this.ui,
+        notice: {
+          text: "Auto tools need Opus or Sonnet — agent tools set to Sandbox on Haiku.",
+          seq: this.noticeSeq,
+        },
+      };
+    }
     this.ui = {
       ...this.ui,
       agent: { ...this.ui.agent, model, effort, fast: nextFast, tools: nextTools },

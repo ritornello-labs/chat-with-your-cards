@@ -452,17 +452,35 @@ export function ToolsChip({ store }: { store: ChatStore }) {
           <div className="cwyc-panel-title">Agent tools</div>
           {AGENT_TOOLS.map((tool) => {
             const risky = tool.id !== "sandbox";
+            // Auto's safety classifier only runs on premium models; the CLI
+            // silently downgrades `--permission-mode auto` to a no-classifier
+            // mode on Haiku (verified 2026-07-14), so offering it there would
+            // promise a safety net that isn't active. Disable it instead.
+            const disabled = tool.id === "auto" && ui.agent.model === "haiku";
             return (
               <button
                 key={tool.id}
                 type="button"
-                className={"cwyc-menu-item" + (tool.id === ui.agent.tools ? " cwyc-active" : "")}
+                disabled={disabled}
+                className={
+                  "cwyc-menu-item" +
+                  (tool.id === ui.agent.tools ? " cwyc-active" : "") +
+                  (disabled ? " cwyc-menu-item-disabled" : "")
+                }
                 data-testid={`agent-tools-${tool.id}`}
-                onMouseEnter={risky ? () => setHoverRisky(true) : undefined}
-                onMouseLeave={risky ? () => setHoverRisky(false) : undefined}
-                onClick={() => store.setAgentTools(tool.id)}
+                title={
+                  disabled
+                    ? "Auto needs Opus or Sonnet — the safety classifier isn't available on Haiku"
+                    : undefined
+                }
+                onMouseEnter={risky && !disabled ? () => setHoverRisky(true) : undefined}
+                onMouseLeave={risky && !disabled ? () => setHoverRisky(false) : undefined}
+                onClick={disabled ? undefined : () => store.setAgentTools(tool.id)}
               >
-                <span className="cwyc-menu-label">{tool.label}</span>
+                <span className="cwyc-menu-label">
+                  {tool.label}
+                  {disabled ? " · needs Opus/Sonnet" : ""}
+                </span>
                 <span className="cwyc-menu-hint">{tool.hint}</span>
               </button>
             );

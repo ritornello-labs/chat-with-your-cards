@@ -58,9 +58,12 @@
   - `"acceptEdits"`: leaves those tools on and runs with
     `--permission-mode acceptEdits` — file edits and commands auto-approve.
   - `"auto"`: tools on with `--permission-mode auto` — a safety classifier vets
-    each call and blocks risky ones (a block is reported to the model, not
-    silently dropped). Needs a premium model (Opus/Sonnet ≥ 4.6); on other
-    models the CLI has nothing to classify with.
+    each call and blocks risky ones (a block is returned to the agent as a failed
+    tool result, which it then explains in chat; nothing silently drops, and the
+    headless session never pauses for a human — there is no interactive gate).
+    Needs a premium model: the CLI silently downgrades `auto` to a no-classifier
+    mode on Haiku, so the dock disables `auto` when Haiku is selected and falls
+    back to `sandbox` if you switch to Haiku while it is on.
   - `"full"`: tools on with `--permission-mode bypassPermissions` — every check
     bypassed (auto-approve, no per-command prompt).
   - **The catch (all non-sandbox tiers):** the agent reads your card content,
