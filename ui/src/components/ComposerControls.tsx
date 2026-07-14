@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useChatState } from "../ChatRuntimeProvider";
-import { PERMISSION_MODES, type ChatStore, type PinsState } from "../store";
+import { PERMISSION_MODES, type AgentTools, type ChatStore, type PinsState } from "../store";
+import { useDismiss } from "../hooks/useDismiss";
 import { ComboBox } from "./ComboBox";
 import { TagChips } from "./TagChips";
 
@@ -30,13 +31,34 @@ const EFFORTS: readonly { id: string; label: string }[] = [
 ];
 
 // The agent-tools axis (DESIGN.md section 5) - orthogonal to the permission
-// mode (which gates collection writes). "sandbox" keeps the CLI's own
-// shell/file tools off; "full" turns them on with auto-approve. Slice 1 ships
-// exactly these two; the intermediate Claude Code modes (default/acceptEdits/
-// plan) are Slice 2 and would slot in as extra items here.
-const AGENT_TOOLS: readonly { id: "sandbox" | "full"; label: string; hint: string }[] = [
-  { id: "sandbox", label: "Sandbox", hint: "Anki tools + read-only files" },
-  { id: "full", label: "Full — auto-approve", hint: "Shell + file tools, no prompts" },
+// mode (which gates collection writes). It governs the CLI's OWN shell/file
+// tools and how their calls are approved in our headless session. Verified
+// 2026-07-14 (CLI 2.1.208): headless `-p` runs benign tools under every
+// non-sandbox mode without stalling, so acceptEdits/auto/full are all real,
+// usable tiers (not silently broken). `plan`/`manual` are omitted: plan makes
+// the model refuse to act (it would stop card proposals; the "read-only"
+// collection mode covers that need), and manual is indistinguishable from
+// auto-approve headlessly. `chip` is the short label on the closed chip.
+const AGENT_TOOLS: readonly {
+  id: AgentTools;
+  label: string;
+  chip: string;
+  hint: string;
+}[] = [
+  { id: "sandbox", chip: "Sandbox", label: "Sandbox", hint: "Anki tools + read-only files. No shell." },
+  {
+    id: "acceptEdits",
+    chip: "Accept edits",
+    label: "Accept edits",
+    hint: "Shell + file edits, auto-approved.",
+  },
+  {
+    id: "auto",
+    chip: "Auto",
+    label: "Auto — classifier",
+    hint: "Shell + files; a safety classifier vets each call. Needs Opus/Sonnet.",
+  },
+  { id: "full", chip: "Full tools", label: "Full — auto-approve", hint: "Shell + file writes, no checks." },
 ];
 
 /**
@@ -79,26 +101,6 @@ function useSmartPanel(open: boolean) {
     panelClass: "cwyc-panel cwyc-panel-composer" + (down ? " cwyc-panel-composer-down" : ""),
     panelStyle: maxHeight !== undefined ? { maxHeight } : undefined,
   };
-}
-
-function useDismiss(open: boolean, close: () => void) {
-  const ref = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) close();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open, close]);
-  return ref;
 }
 
 export function ModeChip({ store }: { store: ChatStore }) {
@@ -420,49 +422,55 @@ export function ToolsChip({ store }: { store: ChatStore }) {
   const [open, setOpen] = useState(false);
   const ref = useDismiss(open, () => setOpen(false));
   const panel = useSmartPanel(open);
-  const [hoverFull, setHoverFull] = useState(false);
+  const [hoverRisky, setHoverRisky] = useState(false);
   const [riskDismissed, setRiskDismissed] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
-  const isFull = ui.agent.tools === "full";
-  // The risk line rides on the full option being the selected OR hovered
-  // choice; dismissing it hides it until full is deselected again.
+  const current = AGENT_TOOLS.find((t) => t.id === ui.agent.tools) ?? AGENT_TOOLS[0];
+  // Every non-sandbox tier hands the agent a real shell on your machine, so the
+  // warning accent and risk line ride on "not sandbox", not just "full".
+  const isRisky = ui.agent.tools !== "sandbox";
+  // The risk line rides on a risky tier being the selected OR hovered choice;
+  // dismissing it hides it until you drop back to sandbox.
   useEffect(() => {
-    if (!isFull) setRiskDismissed(false);
-  }, [isFull]);
-  const showRisk = (isFull || hoverFull) && !riskDismissed;
+    if (!isRisky) setRiskDismissed(false);
+  }, [isRisky]);
+  const showRisk = (isRisky || hoverRisky) && !riskDismissed;
 
   return (
     <div className="cwyc-ctl" ref={ref}>
       <button
         type="button"
-        className={"cwyc-chip" + (isFull ? " cwyc-chip-warn" : "")}
+        className={"cwyc-chip" + (isRisky ? " cwyc-chip-warn" : "")}
         title="Agent tools: shell/file access (applies from your next message)"
         data-testid="tools-chip"
         onClick={() => setOpen((o) => !o)}
       >
-        {isFull ? "Full tools" : "Sandbox"}
+        {current.chip}
       </button>
       {open ? (
         <div className={panel.panelClass} style={panel.panelStyle} ref={panel.panelRef}>
           <div className="cwyc-panel-title">Agent tools</div>
-          {AGENT_TOOLS.map((tool) => (
-            <button
-              key={tool.id}
-              type="button"
-              className={"cwyc-menu-item" + (tool.id === ui.agent.tools ? " cwyc-active" : "")}
-              data-testid={tool.id === "full" ? "agent-tools-full" : undefined}
-              onMouseEnter={tool.id === "full" ? () => setHoverFull(true) : undefined}
-              onMouseLeave={tool.id === "full" ? () => setHoverFull(false) : undefined}
-              onClick={() => store.setAgentTools(tool.id)}
-            >
-              <span className="cwyc-menu-label">{tool.label}</span>
-              <span className="cwyc-menu-hint">{tool.hint}</span>
-            </button>
-          ))}
+          {AGENT_TOOLS.map((tool) => {
+            const risky = tool.id !== "sandbox";
+            return (
+              <button
+                key={tool.id}
+                type="button"
+                className={"cwyc-menu-item" + (tool.id === ui.agent.tools ? " cwyc-active" : "")}
+                data-testid={`agent-tools-${tool.id}`}
+                onMouseEnter={risky ? () => setHoverRisky(true) : undefined}
+                onMouseLeave={risky ? () => setHoverRisky(false) : undefined}
+                onClick={() => store.setAgentTools(tool.id)}
+              >
+                <span className="cwyc-menu-label">{tool.label}</span>
+                <span className="cwyc-menu-hint">{tool.hint}</span>
+              </button>
+            );
+          })}
           {showRisk ? (
             <div className="cwyc-risk-line" role="note">
               <span className="cwyc-risk-line-text">
-                Full mode auto-runs shell commands — including any hidden in
+                These tiers auto-run shell commands — including any hidden in
                 untrusted card content.{" "}
                 <button
                   type="button"

@@ -43,6 +43,7 @@
 
 import type { ThreadMessageLike } from "@assistant-ui/react";
 import { postCommand } from "./bridge";
+import { dismissAllPopovers } from "./hooks/useDismiss";
 import type {
   BridgeCommand,
   ChatEvent,
@@ -141,13 +142,22 @@ export interface UsageSnapshot {
 
 // ---- UI/control state pushed by Python (controller.py / __init__.py) ----
 
+/**
+ * Agent-tools axis: how much of the CLI's own shell/file toolset the agent
+ * gets and how its calls are approved in our headless session (respawns to
+ * change). Orthogonal to the collection-write `mode`. See backends/claude_cli
+ * build_argv and ComposerControls' AGENT_TOOLS for the per-tier meaning.
+ */
+export type AgentTools = "sandbox" | "acceptEdits" | "auto" | "full";
+export const AGENT_TOOLS_IDS: readonly AgentTools[] = ["sandbox", "acceptEdits", "auto", "full"];
+
 export interface AgentState {
   readonly backend: string;
   readonly model: string; // "" | "fable" | "opus" | "sonnet" | "haiku"
   readonly effort: string; // "" | "low" | "medium" | "high" | "max"
   readonly mode: string; // permission mode (collection-write axis)
   readonly fast: boolean; // fast mode (Opus-only; requires a respawn to change)
-  readonly tools: "sandbox" | "full"; // agent-tools axis: shell/file access (respawns to change)
+  readonly tools: AgentTools; // agent-tools axis: shell/file access (respawns to change)
 }
 
 export interface NoteTypeMeta {
@@ -197,6 +207,21 @@ export interface DockUiState {
   readonly side: "left" | "right";
 }
 
+/** The selectable colour palettes (styles.css cwyc-theme-* blocks). */
+export type ThemeName = "teal" | "indigo" | "evergreen";
+export const THEME_NAMES: readonly ThemeName[] = ["teal", "indigo", "evergreen"];
+
+/**
+ * Apply the palette by swapping the `cwyc-theme-<name>` class on <html>. Kept
+ * in one place so both the live settings push and the boot path use identical
+ * logic. dock.py plants the same class in the first paint so there is no flash.
+ */
+export function applyThemeClass(theme: ThemeName): void {
+  if (typeof document === "undefined") return;
+  const root = document.documentElement;
+  for (const t of THEME_NAMES) root.classList.toggle(`cwyc-theme-${t}`, t === theme);
+}
+
 /** User-facing settings snapshot (events.ts SettingsEvent); null = not pushed yet. */
 export interface SettingsState {
   readonly restoreLastChat: boolean;
@@ -205,6 +230,7 @@ export interface SettingsState {
   readonly newChatShortcut: string;
   readonly vimMode: boolean;
   readonly vimMappings: readonly [string, string, string][];
+  readonly theme: ThemeName;
 }
 
 export interface UiState {
@@ -360,22 +386,31 @@ export class ChatStore {
 
   // ---- outbound: control-surface commands (header + composer row) ----
 
-  setAgent(model: string, effort: string, fast?: boolean, tools?: "sandbox" | "full"): void {
+  setAgent(model: string, effort: string, fast?: boolean, tools?: AgentTools): void {
     // Optimistic: Python re-pushes the authoritative "agent" state after.
     // fast and tools default to the current value so callers that only mean to
     // change one axis (the Model/Effort/Fast/Agent-tools menu sections) don't
     // clobber the others.
     const nextFast = fast === undefined ? this.ui.agent.fast : fast;
     const nextTools = tools === undefined ? this.ui.agent.tools : tools;
+    const modelChanged = model !== this.ui.agent.model;
     this.ui = {
       ...this.ui,
       agent: { ...this.ui.agent, model, effort, fast: nextFast, tools: nextTools },
     };
+    // The CLI's reported context window (usage.contextWindow) is per-model and
+    // only refreshes on the next real turn. On a model switch it is stale - a
+    // haiku turn's 200k would keep showing under an "Opus" label until the next
+    // message. Drop it so UsageFooter falls back to the per-model table
+    // (contextWindow.ts) for the newly selected model right away.
+    if (modelChanged && this.usage) {
+      this.usage = { ...this.usage, contextWindow: null };
+    }
     this.emit();
     postCommand({ type: "set_agent", model, effort, fast: nextFast, tools: nextTools });
   }
 
-  setAgentTools(tools: "sandbox" | "full"): void {
+  setAgentTools(tools: AgentTools): void {
     // Convenience wrapper for the "Agent tools" menu section: change only the
     // environment-access axis, keeping model/effort/fast as-is.
     this.setAgent(this.ui.agent.model, this.ui.agent.effort, this.ui.agent.fast, tools);
@@ -514,7 +549,9 @@ export class ChatStore {
             effort: String(agent.effort ?? ""),
             mode: String(agent.mode ?? "default"),
             fast: Boolean(agent.fast),
-            tools: agent.tools === "full" ? "full" : "sandbox",
+            tools: AGENT_TOOLS_IDS.includes(agent.tools as AgentTools)
+              ? (agent.tools as AgentTools)
+              : "sandbox",
           },
         };
         this.emit();
@@ -573,16 +610,22 @@ export class ChatStore {
           width?: number;
           side?: string;
         };
+        const wasExpanded = this.ui.dock?.expanded ?? true;
+        const nowExpanded = Boolean(dock.expanded);
         this.ui = {
           ...this.ui,
           dock: {
-            expanded: Boolean(dock.expanded),
+            expanded: nowExpanded,
             animating: Boolean(dock.animating),
             width: typeof dock.width === "number" && dock.width > 0 ? dock.width : 420,
             side: dock.side === "left" ? "left" : "right",
           },
         };
         this.emit();
+        // Collapsing must take every open popover with it - otherwise a menu
+        // (e.g. Settings) survives the collapse and reappears on re-expand
+        // (dogfood 2026-07-14). Fire on the expanded->collapsed edge only.
+        if (wasExpanded && !nowExpanded) dismissAllPopovers();
         break;
       }
       case "settings": {
@@ -593,12 +636,14 @@ export class ChatStore {
           new_chat_shortcut?: string;
           vim_mode?: boolean;
           vim_mappings?: unknown;
+          theme?: string;
         };
         const rawMappings = Array.isArray(s.vim_mappings) ? s.vim_mappings : [];
         const vimMappings = rawMappings.filter(
           (m): m is [string, string, string] =>
             Array.isArray(m) && m.length === 3 && m.every((part) => typeof part === "string")
         );
+        const theme = THEME_NAMES.includes(s.theme as ThemeName) ? (s.theme as ThemeName) : "teal";
         this.ui = {
           ...this.ui,
           settings: {
@@ -608,8 +653,10 @@ export class ChatStore {
             newChatShortcut: String(s.new_chat_shortcut ?? ""),
             vimMode: Boolean(s.vim_mode),
             vimMappings,
+            theme,
           },
         };
+        applyThemeClass(theme);
         this.emit();
         break;
       }

@@ -34,6 +34,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # [["fd", "<Esc>", "insert"], ["j", "gj", "normal"]].
     "vim_mode": False,
     "vim_mappings": [],
+    "theme": "teal",
     "backend": "auto",
     "claude_cli_path": "",
     "model": "",
@@ -66,6 +67,23 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "learning_nudge_days": 7,
     "pins": {},
 }
+
+def _norm_agent_tools(value: Any) -> str:
+    """Clamp an agent-tools value to a known tier (delegates to the controller's
+    single source of truth; imported lazily to keep package import light)."""
+    from .controller import _norm_agent_tools as _norm
+
+    return _norm(value)
+
+
+# Selectable colour palettes (ui styles.css cwyc-theme-* blocks). "teal" is the
+# default; anything else falls back to it.
+VALID_THEMES = ("teal", "indigo", "evergreen")
+
+
+def _norm_theme(value: Any) -> str:
+    v = str(value).strip()
+    return v if v in VALID_THEMES else "teal"
 
 # Visible kickoff message for the skill-review chat (the nudge chip and the
 # History note make it clear this starts a NEW chat; the previous one stays
@@ -539,6 +557,7 @@ def _push_settings() -> None:
             "new_chat_shortcut": str(state.config.get("new_chat_shortcut", "")),
             "vim_mode": bool(state.config.get("vim_mode", False)),
             "vim_mappings": mappings,
+            "theme": _norm_theme(state.config.get("theme")),
         }
     )
 
@@ -553,6 +572,8 @@ def _set_setting(msg: dict[str, Any]) -> None:
         state.config["restore_last_chat"] = bool(value)
     elif key == "vim_mode":
         state.config["vim_mode"] = bool(value)
+    elif key == "theme":
+        state.config["theme"] = _norm_theme(value)
     elif key == "dock_side":
         side = "left" if value == "left" else "right"
         state.config["dock_side"] = side
@@ -588,7 +609,7 @@ def _set_agent(msg: dict[str, Any]) -> None:
     fast_mode = bool(msg.get("fast", state.config.get("fast_mode", False)))
     # Same guard for the agent-tools axis: a tools-less command keeps whatever
     # the user last chose instead of silently resetting to sandbox.
-    agent_tools = str(msg.get("tools", state.config.get("agent_tools", "sandbox")))
+    agent_tools = _norm_agent_tools(msg.get("tools", state.config.get("agent_tools", "sandbox")))
     state.controller.set_agent_config(model, effort, fast_mode, agent_tools)
     config = mw.addonManager.getConfig(__name__) or {}
     config["model"] = state.config.get("model", "")
@@ -892,8 +913,16 @@ def _open_in_claude_code(target: str = "terminal") -> None:
         import json as _json
 
         extra_args += ["--settings", _json.dumps({"fastMode": True})]
-    if str(state.config.get("agent_tools", "sandbox")) == "full":
-        extra_args += ["--permission-mode", "bypassPermissions"]
+    # Carry the dock's agent-tools tier into the resumed session so the terminal
+    # / desktop handoff starts in the same posture (sandbox adds nothing - a real
+    # terminal has an interactive approver, so the human gates tools there).
+    _resume_perm_mode = {
+        "acceptEdits": "acceptEdits",
+        "auto": "auto",
+        "full": "bypassPermissions",
+    }.get(_norm_agent_tools(state.config.get("agent_tools", "sandbox")))
+    if _resume_perm_mode:
+        extra_args += ["--permission-mode", _resume_perm_mode]
 
     def resume_argv(initial_prompt: str | None = None) -> list[str]:
         argv = ["claude"]

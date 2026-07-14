@@ -31,14 +31,17 @@ def _run_on_ui(callback: Callable[[], None]) -> None:
     mw.taskman.run_on_main(callback)
 
 
-AGENT_TOOLS_VALUES = ("sandbox", "full")
+AGENT_TOOLS_VALUES = ("sandbox", "acceptEdits", "auto", "full")
 
 
 def _norm_agent_tools(value: Any) -> str:
-    """Canonical agent-tools axis (DESIGN.md section 5): 'sandbox' (default,
-    Anki tools + read-only files) or 'full' (shell/file tools, auto-approve).
-    Anything unrecognized falls back to the safe default."""
-    return str(value) if str(value) in AGENT_TOOLS_VALUES else "sandbox"
+    """Canonical agent-tools axis (DESIGN.md section 5): how much of the CLI's
+    own shell/file toolset the agent gets, and how calls are approved in our
+    headless session. 'sandbox' (default) removes those tools; 'acceptEdits' /
+    'auto' / 'full' leave them on and map to --permission-mode acceptEdits /
+    auto / bypassPermissions. Anything unrecognized falls back to sandbox."""
+    v = str(value).strip()
+    return v if v in AGENT_TOOLS_VALUES else "sandbox"
 
 
 class ChatController:
@@ -347,8 +350,14 @@ class ChatController:
             label = f"{label} · {effort} effort"
         if bool(self._config.get("fast_mode", False)):
             label = f"{label} · fast"
-        if _norm_agent_tools(self._config.get("agent_tools")) == "full":
-            label = f"{label} · full tools"
+        tools = _norm_agent_tools(self._config.get("agent_tools"))
+        if tools != "sandbox":
+            tool_label = {
+                "acceptEdits": "accept-edits tools",
+                "auto": "auto tools",
+                "full": "full tools",
+            }.get(tools, f"{tools} tools")
+            label = f"{label} · {tool_label}"
         return label
 
     VALID_MODES = (

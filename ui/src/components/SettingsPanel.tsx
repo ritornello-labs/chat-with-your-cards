@@ -1,6 +1,12 @@
 import { useState } from "react";
 import { useChatState } from "../ChatRuntimeProvider";
-import type { ChatStore, DoctorRow } from "../store";
+import { THEME_NAMES, type ChatStore, type DoctorRow, type ThemeName } from "../store";
+
+const THEME_META: Record<ThemeName, { label: string; swatch: string }> = {
+  teal: { label: "Teal", swatch: "#0e7c7b" },
+  indigo: { label: "Indigo", swatch: "#4a4fb0" },
+  evergreen: { label: "Evergreen", swatch: "#2f6b4f" },
+};
 
 /**
  * The Settings panel behind the header cog: the add-on's user-facing
@@ -88,6 +94,30 @@ export function SettingsPanel({ store }: { store: ChatStore }) {
               </button>
             </div>
           ) : null}
+          <div className="cwyc-setting-row">
+            <span className="cwyc-setting-label">Theme</span>
+            <div className="cwyc-seg cwyc-seg-theme" role="radiogroup" aria-label="Colour theme">
+              {THEME_NAMES.map((name) => (
+                <button
+                  key={name}
+                  type="button"
+                  role="radio"
+                  aria-checked={settings.theme === name}
+                  className={"cwyc-seg-btn" + (settings.theme === name ? " cwyc-active" : "")}
+                  data-testid={`setting-theme-${name}`}
+                  title={THEME_META[name].label}
+                  onClick={() => store.setSetting("theme", name)}
+                >
+                  <span
+                    className="cwyc-theme-swatch"
+                    style={{ background: THEME_META[name].swatch }}
+                    aria-hidden="true"
+                  />
+                  {THEME_META[name].label}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="cwyc-setting-row">
             <span className="cwyc-setting-label">Dock side</span>
             <div className="cwyc-seg" role="radiogroup" aria-label="Dock side">

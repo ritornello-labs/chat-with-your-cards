@@ -20,6 +20,11 @@
   `normal`, `insert`, or `visual`. Example — leave insert mode with `fd` and
   move by visual line:
   `[["fd", "<Esc>", "insert"], ["j", "gj", "normal"], ["k", "gk", "normal"]]`.
+- `theme` (default `teal`): the dock's colour palette, also selectable from the
+  Settings panel. One of `teal` (cool porcelain + deep teal), `indigo` (neutral
+  paper + muted indigo), or `evergreen` (oat paper + deep pine). Each has a
+  light and a night-mode variant; inside Anki the app follows Anki's night-mode
+  state, standalone it follows the OS.
 - `backend` (default `auto`): `auto` uses the Claude Code CLI when installed and
   falls back to a built-in demo backend; `claude` requires the CLI; `scripted`
   forces the demo backend.
@@ -41,23 +46,35 @@
   toggleable from the dock's Model/effort picker.
 - `agent_tools` (default `"sandbox"`): the agent's environment-access tier — an
   axis orthogonal to `permission_mode` (which gates *collection* writes). This
-  gates the agent's own shell and file tools.
+  gates the agent's own shell and file tools and how their calls are approved in
+  the add-on's headless CLI session. Selectable live from the dock's "Agent
+  tools" chip; switching respawns the CLI with `--resume` on your next message,
+  like a model switch. In every non-sandbox tier Claude Code's built-in circuit
+  breaker still blocks `rm -rf /` and `rm -rf ~`.
   - `"sandbox"` (default): the CLI runs with `Bash`, `Edit`, `Write`, and
     `NotebookEdit` disabled (`Read` stays read-only). The agent lives inside
     your collection; it cannot run commands or write files on your machine.
-  - `"full"`: leaves those tools on and runs the CLI with
-    `--permission-mode bypassPermissions` (auto-approve — every tool call runs
-    with no per-command prompt). This is a power-user tier. **The catch:** the
-    agent reads your card content, and card content is untrusted — a shared or
-    downloaded deck can contain text crafted to steer the agent into running a
-    command, and in full auto-approve mode that command runs on your computer
-    immediately, with no gate. Only use `"full"` on collections you trust.
-    Anki card changes still go through the review flow by default (prefer the
-    built-in propose tools; a shell should use AnkiConnect, never write the
-    `.anki2` file directly), but a shell can bypass that. Claude Code's built-in
-    circuit breaker still blocks `rm -rf /` and `rm -rf ~`. Also selectable live
-    from the dock's Model/effort picker ("Agent tools" section); switching
-    respawns the CLI with `--resume` on your next message, like a model switch.
+    This is stricter than any of Claude Code's own permission modes.
+  - `"acceptEdits"`: leaves those tools on and runs with
+    `--permission-mode acceptEdits` — file edits and commands auto-approve.
+  - `"auto"`: tools on with `--permission-mode auto` — a safety classifier vets
+    each call and blocks risky ones (a block is reported to the model, not
+    silently dropped). Needs a premium model (Opus/Sonnet ≥ 4.6); on other
+    models the CLI has nothing to classify with.
+  - `"full"`: tools on with `--permission-mode bypassPermissions` — every check
+    bypassed (auto-approve, no per-command prompt).
+  - **The catch (all non-sandbox tiers):** the agent reads your card content,
+    and card content is untrusted — a shared or downloaded deck can contain text
+    crafted to steer the agent into running a command, and on these tiers that
+    command can run on your computer immediately. Only leave sandbox on
+    collections you trust. Anki card changes still go through the review flow by
+    default (prefer the built-in propose tools; a shell should use AnkiConnect,
+    never write the `.anki2` file directly), but a shell can bypass that.
+  - Not offered: `plan` (it makes the agent refuse to write, which would stop
+    card proposals — use the `read-only` *permission mode* for that) and
+    `manual`/`dontAsk` (headless, they collapse to either auto-run or auto-deny
+    and add no distinct guarantee over the tiers above). Verified against Claude
+    Code CLI 2.1.208.
 - `suggested_questions` (default `true`): show a context-aware suggested
   question as gray ghost text in the empty composer; Tab accepts it, typing
   dismisses it.

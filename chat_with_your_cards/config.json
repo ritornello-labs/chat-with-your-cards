@@ -6,6 +6,7 @@
   "dock_side": "right",
   "vim_mode": false,
   "vim_mappings": [],
+  "theme": "teal",
   "backend": "auto",
   "claude_cli_path": "",
   "model": "",

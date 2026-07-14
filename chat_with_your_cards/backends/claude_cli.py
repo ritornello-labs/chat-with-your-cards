@@ -387,17 +387,42 @@ def build_cli_args(
     # WebSearch/WebFetch are on by default (config web_access).
     #
     # agent_tools is an orthogonal axis from the collection-write permission
-    # mode (DESIGN.md section 5): "sandbox" (default) hard-blocks the CLI's own
-    # Bash/Edit/Write/NotebookEdit shell/file tools; "full" leaves them on and
-    # runs the CLI with --permission-mode bypassPermissions (auto-approve, no
-    # per-command prompt - headless has no interactive prompt anyway). Full is
-    # the power-user tier: card content is untrusted input, so it turns a
-    # prompt-injected shell command into immediate execution (the risk modal in
-    # the dock spells this out). The MCP scoping / web / model flags are
-    # identical across both axes.
-    full_tools = agent_tools == "full"
+    # mode (DESIGN.md section 5): it governs how much of the CLI's OWN
+    # shell/file toolset the agent gets, and how those tool calls are approved
+    # in our headless `-p` session. It does NOT gate card proposals - our MCP
+    # server + the "Propose" permission mode do that.
+    #
+    #   sandbox     - Bash/Edit/Write/NotebookEdit hard-removed via
+    #                 --disallowedTools; the agent cannot touch your machine.
+    #                 Default, and stricter than any CLI permission mode.
+    #   acceptEdits - shell/file tools on; edits and commands auto-approved
+    #                 (--permission-mode acceptEdits).
+    #   auto        - shell/file tools on; a safety classifier approves or
+    #                 blocks each call (--permission-mode auto). Needs a premium
+    #                 model (Opus/Sonnet >= 4.6); a blocked call is reported to
+    #                 the model, not silently dropped.
+    #   full        - shell/file tools on; every check bypassed
+    #                 (--permission-mode bypassPermissions) except Claude Code's
+    #                 rm -rf / , rm -rf ~ circuit breaker.
+    #
+    # Verified 2026-07-14 against CLI 2.1.208: headless `-p` does NOT stall or
+    # blanket-deny a call that would normally prompt - manual/acceptEdits/auto
+    # all run benign tools. `plan` genuinely restricts to read-only, so it would
+    # also stop the model from proposing cards; that is why it is not offered as
+    # a tier here (the read-only need is served by the "read-only" collection
+    # permission mode instead). Any untrusted-content risk (a prompt-injected
+    # shell command running immediately) lives on the non-sandbox tiers; the
+    # dock's risk modal spells it out. MCP scoping / web / model flags are
+    # identical across every tier.
+    _PERMISSION_MODE_BY_TIER = {
+        "acceptEdits": "acceptEdits",
+        "auto": "auto",
+        "full": "bypassPermissions",
+    }
+    tier = agent_tools if agent_tools in ("sandbox", *_PERMISSION_MODE_BY_TIER) else "sandbox"
+    sandboxed = tier == "sandbox"
     allowed = ["mcp__anki", "Skill", "Read"]
-    disallowed = [] if full_tools else ["Bash", "Edit", "Write", "NotebookEdit"]
+    disallowed = ["Bash", "Edit", "Write", "NotebookEdit"] if sandboxed else []
     if web_access:
         allowed += ["WebSearch", "WebFetch"]
     else:
@@ -448,12 +473,12 @@ def build_cli_args(
     # as a tool name to block.
     if disallowed:
         args += ["--disallowedTools", ",".join(disallowed)]
-    if full_tools:
-        # Auto-approve every tool call (the shell/file tools we just left on
-        # included) - headless `-p` has no interactive prompt, so without this
-        # a Bash/Write call would just be refused. Deny rules and Claude Code's
-        # built-in circuit breaker (rm -rf / , rm -rf ~) still apply.
-        args += ["--permission-mode", "bypassPermissions"]
+    perm_mode = _PERMISSION_MODE_BY_TIER.get(tier)
+    if perm_mode:
+        # Non-sandbox tiers keep the shell/file tools on and pick how calls are
+        # approved. Deny rules and Claude Code's built-in circuit breaker
+        # (rm -rf / , rm -rf ~) still apply under every one of these.
+        args += ["--permission-mode", perm_mode]
     if model.strip():
         args += ["--model", model.strip()]
     if effort.strip() in VALID_EFFORTS:
@@ -611,8 +636,8 @@ class ClaudeCliSession:
         fast_mode has no mid-session toggle upstream either (--settings is
         spawn-time only, claude CLI >= 2.1.205), so it rides the exact same
         respawn-on-next-message path as model/effort. agent_tools
-        (sandbox|full) is a launch-time flag too (--disallowedTools /
-        --permission-mode), so it respawns identically."""
+        (sandbox|acceptEdits|auto|full) is a launch-time flag too
+        (--disallowedTools / --permission-mode), so it respawns identically."""
         self._model = model
         self._effort = effort
         self._fast_mode = bool(fast_mode)

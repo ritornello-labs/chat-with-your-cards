@@ -1197,6 +1197,9 @@ def _run_checks() -> dict[str, Any]:
                 "    panel: true,"
                 "    restore: !!panel.querySelector('[data-testid=setting-restore-last-chat]'),"
                 "    dock_side: !!panel.querySelector('[data-testid=setting-dock-right]'),"
+                "    theme: !!panel.querySelector('[data-testid=setting-theme-teal]')"
+                "        && !!panel.querySelector('[data-testid=setting-theme-indigo]')"
+                "        && !!panel.querySelector('[data-testid=setting-theme-evergreen]'),"
                 "    doctor: !!panel.querySelector('[data-testid=run-doctor]')"
                 "  };"
                 "})();",
@@ -1207,8 +1210,35 @@ def _run_checks() -> dict[str, Any]:
         _wait_until(lambda: bool(_panel_state()), DOM_TIMEOUT_MS, "settings panel to open")
         settings = _panel_state()
         if not (settings and settings.get("restore")
-                and settings.get("dock_side") and settings.get("doctor")):
+                and settings.get("dock_side") and settings.get("theme")
+                and settings.get("doctor")):
             raise AssertionError(f"settings panel incomplete: {settings}")
+        # The theme picker must actually swap the palette: clicking Evergreen
+        # puts cwyc-theme-evergreen on <html>; Teal restores the default.
+        _eval_js(
+            dock.web,
+            "(function(){document.querySelector"
+            "('[data-testid=setting-theme-evergreen]').click();return true;})();",
+            DOM_TIMEOUT_MS,
+            "pick evergreen theme",
+        )
+        _wait_until(
+            lambda: bool(_eval_js(
+                dock.web,
+                "document.documentElement.classList.contains('cwyc-theme-evergreen')",
+                DOM_TIMEOUT_MS,
+                "evergreen theme applied",
+            )),
+            DOM_TIMEOUT_MS,
+            "evergreen theme class on <html>",
+        )
+        _eval_js(
+            dock.web,
+            "(function(){document.querySelector"
+            "('[data-testid=setting-theme-teal]').click();return true;})();",
+            DOM_TIMEOUT_MS,
+            "restore teal theme",
+        )
         _eval_js(
             dock.web,
             "(function() { document.querySelector('[data-testid=settings]').click();"
@@ -1324,6 +1354,47 @@ def _run_checks() -> dict[str, Any]:
         )
 
     check("toggle cycles: collapse from chat focus, expand back", _focus_toggle_cycles)
+
+    def _collapse_closes_open_menu() -> dict[str, Any]:
+        """Regression (dogfood 2026-07-14): a menu left open must not survive a
+        dock collapse - it used to reappear on re-expand, letting you toggle the
+        dock with Settings still showing. Collapsing now broadcasts a dismiss
+        (store.ts dock_state -> dismissAllPopovers), so the panel vanishes."""
+        dock.set_expanded(True)
+        _wait_until(lambda: dock.expanded and dock._anim is None, 3_000, "dock expanded")
+        _eval_js(
+            dock.web,
+            "(function(){document.querySelector('[data-testid=settings]').click();"
+            "return true;})();",
+            DOM_TIMEOUT_MS,
+            "open settings before collapse",
+        )
+        _wait_until(
+            lambda: bool(_eval_js(
+                dock.web,
+                "document.querySelectorAll('[data-testid=settings-panel]').length",
+                DOM_TIMEOUT_MS,
+                "settings panel present",
+            )),
+            DOM_TIMEOUT_MS,
+            "settings panel to open",
+        )
+        dock.set_expanded(False)
+        _wait_until(
+            lambda: _eval_js(
+                dock.web,
+                "document.querySelectorAll('[data-testid=settings-panel]').length",
+                DOM_TIMEOUT_MS,
+                "settings panel gone",
+            ) == 0,
+            3_000,
+            "open menu to close when the dock collapses",
+        )
+        dock.set_expanded(True)
+        _wait_until(lambda: dock.expanded and dock._anim is None, 3_000, "dock re-expanded")
+        return {"menu_dismissed_on_collapse": True}
+
+    check("collapsing the dock closes any open menu", _collapse_closes_open_menu)
 
     def _proposal_round_trip() -> dict[str, Any]:
         """Scripted propose -> proposal card (data-testid=proposal-card) ->

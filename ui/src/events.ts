@@ -156,6 +156,8 @@ export interface SettingsEvent {
   vim_mode?: boolean;
   /** [keys, mapped-to, mode] triples applied via vim `:map` semantics. */
   vim_mappings?: [string, string, string][];
+  /** Selected colour palette: "teal" (default) | "indigo" | "evergreen". */
+  theme?: string;
 }
 
 export interface DoneEvent {

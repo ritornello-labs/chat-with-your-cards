@@ -77,38 +77,18 @@
     U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
-/* ---------- tokens: light (warm paper) ---------- */
+/* ---------- tokens ----------
+   Three selectable palettes, all deliberately OFF Anthropic's ivory-paper +
+   clay/amber identity (COMPLIANCE.md rule 4: similar calm-paper *feel*, no
+   colour mimicry). The palette is chosen in Settings and applied as a
+   `cwyc-theme-<name>` class on <html> (store.ts applyTheme; dock.py plants it
+   in the first paint). `teal` is the default and rides the bare selectors so
+   boot / no-JS still renders correctly. Light + dark for each; inside Anki the
+   night-mode class is authoritative, standalone follows the OS. Accent var is
+   `--cwyc-accent*` (historically `--cwyc-amber`, renamed 2026-07-14). */
 
+/* theme-independent structural tokens */
 :root {
-  --cwyc-bg: #faf9f6;
-  --cwyc-surface: #f1eee7;
-  --cwyc-surface-raised: #fdfcfa;
-  --cwyc-fg: #2b2620;
-  --cwyc-fg-subtle: #6c655a;
-  --cwyc-fg-faint: #8d8578;
-  --cwyc-border: #dcd6c8;
-  --cwyc-border-subtle: #e9e5da;
-
-  /* The one accent: saffron amber. -ink is the AA-safe text/icon variant on
-     paper; the raw fill carries dark text (--cwyc-on-amber), never white. */
-  --cwyc-amber: #d99a2b;
-  --cwyc-amber-hover: #c98c1f;
-  --cwyc-amber-ink: #8a5f10;
-  --cwyc-amber-soft: rgba(217, 154, 43, 0.14);
-  --cwyc-amber-soft2: rgba(217, 154, 43, 0.24);
-  --cwyc-amber-ring: rgba(217, 154, 43, 0.35);
-  --cwyc-on-amber: #241a08;
-
-  /* Semantic pair, desaturated to sit in the warm palette. */
-  --cwyc-green: #41724f;
-  --cwyc-green-soft: rgba(74, 124, 89, 0.13);
-  --cwyc-red: #b0483c;
-  --cwyc-red-soft: rgba(176, 72, 60, 0.11);
-  --cwyc-warn: #8a6a1c;
-  --cwyc-warn-soft: rgba(180, 140, 40, 0.13);
-
-  --cwyc-selection: rgba(217, 154, 43, 0.3);
-  --cwyc-card-shadow: 0 2px 8px rgba(64, 54, 32, 0.1);
   --cwyc-radius: 10px;
   --cwyc-font: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI",
     Roboto, sans-serif;
@@ -116,70 +96,258 @@
     monospace;
 }
 
-/* ---------- tokens: dark (warm charcoal) ---------- */
-
-/* Standalone only: follow the OS. Inside Anki the night-mode class below is
-   the sole authority (see file header). Keep both blocks in sync. */
-@media (prefers-color-scheme: dark) {
-  :root.cwyc-standalone {
-    --cwyc-bg: #1e1e1c;
-    --cwyc-surface: #272723;
-    --cwyc-surface-raised: #2c2b27;
-    --cwyc-fg: #eae6dd;
-    --cwyc-fg-subtle: #a69f91;
-    --cwyc-fg-faint: #7d766a;
-    --cwyc-border: #3b3931;
-    --cwyc-border-subtle: #33312b;
-
-    --cwyc-amber: #e6b45c;
-    --cwyc-amber-hover: #eec06f;
-    --cwyc-amber-ink: #e6b45c;
-    --cwyc-amber-soft: rgba(230, 180, 92, 0.16);
-    --cwyc-amber-soft2: rgba(230, 180, 92, 0.28);
-    --cwyc-amber-ring: rgba(230, 180, 92, 0.4);
-    --cwyc-on-amber: #241a08;
-
-    --cwyc-green: #85b592;
-    --cwyc-green-soft: rgba(133, 181, 146, 0.14);
-    --cwyc-red: #d99287;
-    --cwyc-red-soft: rgba(217, 146, 135, 0.13);
-    --cwyc-warn: #cfa95e;
-    --cwyc-warn-soft: rgba(207, 169, 94, 0.14);
-
-    --cwyc-selection: rgba(230, 180, 92, 0.32);
-    --cwyc-card-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
-  }
+/* ===== theme: teal — Ink & Teal (default): cool porcelain + deep teal ===== */
+:root,
+:root.cwyc-theme-teal {
+  --cwyc-bg: #f5f7f7;
+  --cwyc-surface: #e9edee;
+  --cwyc-surface-raised: #fdfefe;
+  --cwyc-fg: #1f2a2b;
+  --cwyc-fg-subtle: #566165;
+  --cwyc-fg-faint: #7f8a8d;
+  --cwyc-border: #d2d9da;
+  --cwyc-border-subtle: #e2e7e8;
+  --cwyc-accent: #0e7c7b;
+  --cwyc-accent-hover: #0b6a69;
+  --cwyc-accent-ink: #0a5a59;
+  --cwyc-accent-soft: rgba(14,124,123,0.12);
+  --cwyc-accent-soft2: rgba(14,124,123,0.20);
+  --cwyc-accent-ring: rgba(14,124,123,0.32);
+  --cwyc-on-accent: #f2fbfa;
+  --cwyc-green: #2f7d57;
+  --cwyc-green-soft: rgba(47,125,87,0.13);
+  --cwyc-red: #b04437;
+  --cwyc-red-soft: rgba(176,68,55,0.11);
+  --cwyc-warn: #8a6a1c;
+  --cwyc-warn-soft: rgba(180,140,40,0.13);
+  --cwyc-selection: rgba(14,124,123,0.22);
+  --cwyc-card-shadow: 0 2px 8px rgba(20,42,42,0.10);
 }
 
 :root.night-mode,
 body.night-mode,
-body.nightMode {
-  --cwyc-bg: #1e1e1c;
-  --cwyc-surface: #272723;
-  --cwyc-surface-raised: #2c2b27;
-  --cwyc-fg: #eae6dd;
-  --cwyc-fg-subtle: #a69f91;
-  --cwyc-fg-faint: #7d766a;
-  --cwyc-border: #3b3931;
-  --cwyc-border-subtle: #33312b;
+body.nightMode,
+:root.cwyc-theme-teal.night-mode,
+:root.cwyc-theme-teal body.night-mode,
+:root.cwyc-theme-teal body.nightMode {
+  --cwyc-bg: #161a1a;
+  --cwyc-surface: #1e2322;
+  --cwyc-surface-raised: #232928;
+  --cwyc-fg: #e7ecea;
+  --cwyc-fg-subtle: #9aa6a3;
+  --cwyc-fg-faint: #6e7976;
+  --cwyc-border: #313a39;
+  --cwyc-border-subtle: #2a3231;
+  --cwyc-accent: #3fb5ab;
+  --cwyc-accent-hover: #55c3ba;
+  --cwyc-accent-ink: #3fb5ab;
+  --cwyc-accent-soft: rgba(63,181,171,0.16);
+  --cwyc-accent-soft2: rgba(63,181,171,0.26);
+  --cwyc-accent-ring: rgba(63,181,171,0.38);
+  --cwyc-on-accent: #06201f;
+  --cwyc-green: #7fc39c;
+  --cwyc-green-soft: rgba(127,195,156,0.14);
+  --cwyc-red: #e0938a;
+  --cwyc-red-soft: rgba(224,147,138,0.13);
+  --cwyc-warn: #d3b06a;
+  --cwyc-warn-soft: rgba(211,176,106,0.14);
+  --cwyc-selection: rgba(63,181,171,0.30);
+  --cwyc-card-shadow: 0 2px 10px rgba(0,0,0,0.45);
+}
 
-  --cwyc-amber: #e6b45c;
-  --cwyc-amber-hover: #eec06f;
-  --cwyc-amber-ink: #e6b45c;
-  --cwyc-amber-soft: rgba(230, 180, 92, 0.16);
-  --cwyc-amber-soft2: rgba(230, 180, 92, 0.28);
-  --cwyc-amber-ring: rgba(230, 180, 92, 0.4);
-  --cwyc-on-amber: #241a08;
+@media (prefers-color-scheme: dark) {
+  :root.cwyc-standalone,
+  :root.cwyc-standalone.cwyc-theme-teal {
+    --cwyc-bg: #161a1a;
+    --cwyc-surface: #1e2322;
+    --cwyc-surface-raised: #232928;
+    --cwyc-fg: #e7ecea;
+    --cwyc-fg-subtle: #9aa6a3;
+    --cwyc-fg-faint: #6e7976;
+    --cwyc-border: #313a39;
+    --cwyc-border-subtle: #2a3231;
+    --cwyc-accent: #3fb5ab;
+    --cwyc-accent-hover: #55c3ba;
+    --cwyc-accent-ink: #3fb5ab;
+    --cwyc-accent-soft: rgba(63,181,171,0.16);
+    --cwyc-accent-soft2: rgba(63,181,171,0.26);
+    --cwyc-accent-ring: rgba(63,181,171,0.38);
+    --cwyc-on-accent: #06201f;
+    --cwyc-green: #7fc39c;
+    --cwyc-green-soft: rgba(127,195,156,0.14);
+    --cwyc-red: #e0938a;
+    --cwyc-red-soft: rgba(224,147,138,0.13);
+    --cwyc-warn: #d3b06a;
+    --cwyc-warn-soft: rgba(211,176,106,0.14);
+    --cwyc-selection: rgba(63,181,171,0.30);
+    --cwyc-card-shadow: 0 2px 10px rgba(0,0,0,0.45);
+  }
+}
 
-  --cwyc-green: #85b592;
-  --cwyc-green-soft: rgba(133, 181, 146, 0.14);
-  --cwyc-red: #d99287;
-  --cwyc-red-soft: rgba(217, 146, 135, 0.13);
+/* ===== theme: indigo — Slate & Indigo: neutral paper + muted indigo ===== */
+:root.cwyc-theme-indigo {
+  --cwyc-bg: #f7f6f4;
+  --cwyc-surface: #ecebe6;
+  --cwyc-surface-raised: #fffffe;
+  --cwyc-fg: #26242e;
+  --cwyc-fg-subtle: #605d68;
+  --cwyc-fg-faint: #8a8790;
+  --cwyc-border: #dbd9d2;
+  --cwyc-border-subtle: #e8e6e0;
+  --cwyc-accent: #4a4fb0;
+  --cwyc-accent-hover: #40459f;
+  --cwyc-accent-ink: #3a3f96;
+  --cwyc-accent-soft: rgba(74,79,176,0.12);
+  --cwyc-accent-soft2: rgba(74,79,176,0.20);
+  --cwyc-accent-ring: rgba(74,79,176,0.32);
+  --cwyc-on-accent: #f4f4fd;
+  --cwyc-green: #3d7a52;
+  --cwyc-green-soft: rgba(61,122,82,0.13);
+  --cwyc-red: #b0463c;
+  --cwyc-red-soft: rgba(176,70,60,0.11);
+  --cwyc-warn: #8a6a1c;
+  --cwyc-warn-soft: rgba(180,140,40,0.13);
+  --cwyc-selection: rgba(74,79,176,0.22);
+  --cwyc-card-shadow: 0 2px 8px rgba(40,38,60,0.10);
+}
+
+:root.cwyc-theme-indigo.night-mode,
+:root.cwyc-theme-indigo body.night-mode,
+:root.cwyc-theme-indigo body.nightMode {
+  --cwyc-bg: #19181f;
+  --cwyc-surface: #201f28;
+  --cwyc-surface-raised: #26242f;
+  --cwyc-fg: #e9e7f0;
+  --cwyc-fg-subtle: #a29fb0;
+  --cwyc-fg-faint: #74717f;
+  --cwyc-border: #35323f;
+  --cwyc-border-subtle: #2c2a35;
+  --cwyc-accent: #8b8ff0;
+  --cwyc-accent-hover: #9da0f4;
+  --cwyc-accent-ink: #8b8ff0;
+  --cwyc-accent-soft: rgba(139,143,240,0.16);
+  --cwyc-accent-soft2: rgba(139,143,240,0.26);
+  --cwyc-accent-ring: rgba(139,143,240,0.40);
+  --cwyc-on-accent: #15142c;
+  --cwyc-green: #83bd97;
+  --cwyc-green-soft: rgba(131,189,151,0.14);
+  --cwyc-red: #dd928a;
+  --cwyc-red-soft: rgba(221,146,138,0.13);
   --cwyc-warn: #cfa95e;
-  --cwyc-warn-soft: rgba(207, 169, 94, 0.14);
+  --cwyc-warn-soft: rgba(207,169,94,0.14);
+  --cwyc-selection: rgba(139,143,240,0.30);
+  --cwyc-card-shadow: 0 2px 10px rgba(0,0,0,0.45);
+}
 
-  --cwyc-selection: rgba(230, 180, 92, 0.32);
-  --cwyc-card-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+@media (prefers-color-scheme: dark) {
+  :root.cwyc-standalone.cwyc-theme-indigo {
+    --cwyc-bg: #19181f;
+    --cwyc-surface: #201f28;
+    --cwyc-surface-raised: #26242f;
+    --cwyc-fg: #e9e7f0;
+    --cwyc-fg-subtle: #a29fb0;
+    --cwyc-fg-faint: #74717f;
+    --cwyc-border: #35323f;
+    --cwyc-border-subtle: #2c2a35;
+    --cwyc-accent: #8b8ff0;
+    --cwyc-accent-hover: #9da0f4;
+    --cwyc-accent-ink: #8b8ff0;
+    --cwyc-accent-soft: rgba(139,143,240,0.16);
+    --cwyc-accent-soft2: rgba(139,143,240,0.26);
+    --cwyc-accent-ring: rgba(139,143,240,0.40);
+    --cwyc-on-accent: #15142c;
+    --cwyc-green: #83bd97;
+    --cwyc-green-soft: rgba(131,189,151,0.14);
+    --cwyc-red: #dd928a;
+    --cwyc-red-soft: rgba(221,146,138,0.13);
+    --cwyc-warn: #cfa95e;
+    --cwyc-warn-soft: rgba(207,169,94,0.14);
+    --cwyc-selection: rgba(139,143,240,0.30);
+    --cwyc-card-shadow: 0 2px 10px rgba(0,0,0,0.45);
+  }
+}
+
+/* ===== theme: evergreen — Sage & Oat: oat paper + deep pine ===== */
+:root.cwyc-theme-evergreen {
+  --cwyc-bg: #f7f6f0;
+  --cwyc-surface: #ecebe1;
+  --cwyc-surface-raised: #fffefb;
+  --cwyc-fg: #24261f;
+  --cwyc-fg-subtle: #5e6154;
+  --cwyc-fg-faint: #888b7c;
+  --cwyc-border: #dbd9c9;
+  --cwyc-border-subtle: #e8e6da;
+  --cwyc-accent: #2f6b4f;
+  --cwyc-accent-hover: #275c43;
+  --cwyc-accent-ink: #245139;
+  --cwyc-accent-soft: rgba(47,107,79,0.12);
+  --cwyc-accent-soft2: rgba(47,107,79,0.20);
+  --cwyc-accent-ring: rgba(47,107,79,0.30);
+  --cwyc-on-accent: #f0f7f1;
+  --cwyc-green: #3a7d55;
+  --cwyc-green-soft: rgba(58,125,85,0.13);
+  --cwyc-red: #b0483c;
+  --cwyc-red-soft: rgba(176,72,60,0.11);
+  --cwyc-warn: #8a6a1c;
+  --cwyc-warn-soft: rgba(180,140,40,0.13);
+  --cwyc-selection: rgba(47,107,79,0.22);
+  --cwyc-card-shadow: 0 2px 8px rgba(40,44,28,0.10);
+}
+
+:root.cwyc-theme-evergreen.night-mode,
+:root.cwyc-theme-evergreen body.night-mode,
+:root.cwyc-theme-evergreen body.nightMode {
+  --cwyc-bg: #181a15;
+  --cwyc-surface: #1f2119;
+  --cwyc-surface-raised: #24261d;
+  --cwyc-fg: #e9ebdf;
+  --cwyc-fg-subtle: #a1a592;
+  --cwyc-fg-faint: #747866;
+  --cwyc-border: #353829;
+  --cwyc-border-subtle: #2c2f22;
+  --cwyc-accent: #6fbf8f;
+  --cwyc-accent-hover: #83cc9f;
+  --cwyc-accent-ink: #6fbf8f;
+  --cwyc-accent-soft: rgba(111,191,143,0.16);
+  --cwyc-accent-soft2: rgba(111,191,143,0.26);
+  --cwyc-accent-ring: rgba(111,191,143,0.38);
+  --cwyc-on-accent: #08210f;
+  --cwyc-green: #8fce9e;
+  --cwyc-green-soft: rgba(143,206,158,0.14);
+  --cwyc-red: #dd928a;
+  --cwyc-red-soft: rgba(221,146,138,0.13);
+  --cwyc-warn: #cfa95e;
+  --cwyc-warn-soft: rgba(207,169,94,0.14);
+  --cwyc-selection: rgba(111,191,143,0.30);
+  --cwyc-card-shadow: 0 2px 10px rgba(0,0,0,0.45);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root.cwyc-standalone.cwyc-theme-evergreen {
+    --cwyc-bg: #181a15;
+    --cwyc-surface: #1f2119;
+    --cwyc-surface-raised: #24261d;
+    --cwyc-fg: #e9ebdf;
+    --cwyc-fg-subtle: #a1a592;
+    --cwyc-fg-faint: #747866;
+    --cwyc-border: #353829;
+    --cwyc-border-subtle: #2c2f22;
+    --cwyc-accent: #6fbf8f;
+    --cwyc-accent-hover: #83cc9f;
+    --cwyc-accent-ink: #6fbf8f;
+    --cwyc-accent-soft: rgba(111,191,143,0.16);
+    --cwyc-accent-soft2: rgba(111,191,143,0.26);
+    --cwyc-accent-ring: rgba(111,191,143,0.38);
+    --cwyc-on-accent: #08210f;
+    --cwyc-green: #8fce9e;
+    --cwyc-green-soft: rgba(143,206,158,0.14);
+    --cwyc-red: #dd928a;
+    --cwyc-red-soft: rgba(221,146,138,0.13);
+    --cwyc-warn: #cfa95e;
+    --cwyc-warn-soft: rgba(207,169,94,0.14);
+    --cwyc-selection: rgba(111,191,143,0.30);
+    --cwyc-card-shadow: 0 2px 10px rgba(0,0,0,0.45);
+  }
 }
 
 /* ---------- host page fill ---------- */
@@ -255,7 +423,7 @@ body {
 }
 #cwyc-root button:focus-visible {
   /* Anki's `outline: none !important` would erase focus rings entirely. */
-  outline: 2px solid var(--cwyc-amber-ring) !important;
+  outline: 2px solid var(--cwyc-accent-ring) !important;
   outline-offset: -2px;
 }
 
@@ -395,7 +563,7 @@ body {
 }
 
 #cwyc-root .cwyc-rail:hover {
-  background: var(--cwyc-amber-soft);
+  background: var(--cwyc-accent-soft);
 }
 
 /* The ember is the rail's identity: calm amber at rest, breathing while a
@@ -405,8 +573,8 @@ body {
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: var(--cwyc-amber);
-  box-shadow: 0 0 5px 0 var(--cwyc-amber-ring);
+  background: var(--cwyc-accent);
+  box-shadow: 0 0 5px 0 var(--cwyc-accent-ring);
 }
 
 .cwyc-rail-ember-live {
@@ -447,7 +615,7 @@ body {
 /* Amber focus ring on every interactive element; the composer textarea is
    exempt (its frame carries the ring via :focus-within instead). */
 .cwyc-app :focus-visible {
-  outline: 2px solid var(--cwyc-amber);
+  outline: 2px solid var(--cwyc-accent);
   outline-offset: 2px;
 }
 
@@ -600,19 +768,19 @@ body {
 }
 
 .cwyc-markdown a {
-  color: var(--cwyc-amber-ink);
+  color: var(--cwyc-accent-ink);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 
 .cwyc-markdown a:hover {
-  color: var(--cwyc-amber-hover);
+  color: var(--cwyc-accent-hover);
 }
 
 .cwyc-markdown code {
   font-family: var(--cwyc-mono);
   font-size: 0.9em;
-  background: var(--cwyc-amber-soft);
+  background: var(--cwyc-accent-soft);
   color: var(--cwyc-fg);
   padding: 0.1em 0.35em;
   border-radius: 4px;
@@ -675,7 +843,7 @@ body {
   height: 14px;
   margin-left: 2px;
   vertical-align: text-bottom;
-  background: var(--cwyc-amber);
+  background: var(--cwyc-accent);
   border-radius: 1px;
   animation: cwyc-blink 1s steps(2, start) infinite;
 }
@@ -693,7 +861,7 @@ body {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--cwyc-amber);
+  background: var(--cwyc-accent);
   animation: cwyc-ember-breathe 2.5s ease-in-out infinite;
 }
 
@@ -705,7 +873,7 @@ body {
   }
   50% {
     opacity: 1;
-    box-shadow: 0 0 6px 0 var(--cwyc-amber-ring);
+    box-shadow: 0 0 6px 0 var(--cwyc-accent-ring);
   }
 }
 
@@ -933,7 +1101,7 @@ body {
   height: 100%;
   min-width: 2px;
   border-radius: 999px;
-  background: var(--cwyc-amber);
+  background: var(--cwyc-accent);
 }
 
 .cwyc-usage-bar-fill-warn {
@@ -981,8 +1149,8 @@ body {
   font-weight: 600;
   letter-spacing: 0.5px;
   text-transform: uppercase;
-  color: var(--cwyc-amber-ink);
-  border: 1px solid var(--cwyc-amber);
+  color: var(--cwyc-accent-ink);
+  border: 1px solid var(--cwyc-accent);
   border-radius: 4px;
   padding: 1px 6px;
 }
@@ -1069,9 +1237,9 @@ body {
 }
 
 #cwyc-root .cwyc-preview-tab.cwyc-active {
-  border-color: var(--cwyc-amber);
-  color: var(--cwyc-amber-ink);
-  background: var(--cwyc-amber-soft);
+  border-color: var(--cwyc-accent);
+  color: var(--cwyc-accent-ink);
+  background: var(--cwyc-accent-soft);
 }
 
 .cwyc-flip {
@@ -1178,8 +1346,8 @@ body {
 }
 
 .cwyc-field-input:focus {
-  border-color: var(--cwyc-amber);
-  box-shadow: 0 0 0 2px var(--cwyc-amber-soft);
+  border-color: var(--cwyc-accent);
+  box-shadow: 0 0 0 2px var(--cwyc-accent-soft);
 }
 
 .cwyc-proposal-count {
@@ -1228,15 +1396,15 @@ body {
 
 /* THE strongest accent use in the whole UI: the approve fill. */
 #cwyc-root .cwyc-proposal-actions .cwyc-btn-accept {
-  background: var(--cwyc-amber);
-  border-color: var(--cwyc-amber);
-  color: var(--cwyc-on-amber);
+  background: var(--cwyc-accent);
+  border-color: var(--cwyc-accent);
+  color: var(--cwyc-on-accent);
   font-weight: 600;
 }
 
 #cwyc-root .cwyc-proposal-actions .cwyc-btn-accept:hover {
-  background: var(--cwyc-amber-hover);
-  border-color: var(--cwyc-amber-hover);
+  background: var(--cwyc-accent-hover);
+  border-color: var(--cwyc-accent-hover);
 }
 
 /* ---------- composer ---------- */
@@ -1254,8 +1422,8 @@ body {
 }
 
 .cwyc-composer:focus-within {
-  border-color: var(--cwyc-amber);
-  box-shadow: 0 0 0 2px var(--cwyc-amber-soft);
+  border-color: var(--cwyc-accent);
+  box-shadow: 0 0 0 2px var(--cwyc-accent-soft);
 }
 
 .cwyc-composer-input {
@@ -1286,8 +1454,8 @@ body {
   height: 28px;
   border: none;
   border-radius: 50%;
-  background: var(--cwyc-amber);
-  color: var(--cwyc-on-amber);
+  background: var(--cwyc-accent);
+  color: var(--cwyc-on-accent);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -1295,7 +1463,7 @@ body {
 }
 
 #cwyc-root .cwyc-send:hover {
-  background: var(--cwyc-amber-hover);
+  background: var(--cwyc-accent-hover);
 }
 
 #cwyc-root .cwyc-send:disabled {
@@ -1350,8 +1518,8 @@ body {
   border-left-color: var(--cwyc-fg);
 }
 .cwyc-vim-editor .cm-editor .cm-fat-cursor {
-  background: var(--cwyc-amber) !important;
-  color: var(--cwyc-on-amber) !important;
+  background: var(--cwyc-accent) !important;
+  color: var(--cwyc-on-accent) !important;
   outline: none !important;
   /* The block cursor is sized to the glyph under it, and the composer uses a
      proportional face - so on "i"/"l" it shrank to a sliver (dogfood
@@ -1361,7 +1529,7 @@ body {
 }
 .cwyc-vim-editor .cm-editor:not(.cm-focused) .cm-fat-cursor {
   background: none !important;
-  outline: solid 1px var(--cwyc-amber) !important;
+  outline: solid 1px var(--cwyc-accent) !important;
 }
 .cwyc-vim-editor .cm-selectionBackground,
 .cwyc-vim-editor .cm-editor.cm-focused .cm-selectionBackground {
@@ -1424,17 +1592,17 @@ body {
 #cwyc-root .cwyc-hbtn:hover {
   /* --cwyc-surface was invisible against the page bg; use the same warm
      tint language as the rest of the header so the hit state actually reads. */
-  background: var(--cwyc-amber-soft);
+  background: var(--cwyc-accent-soft);
   color: var(--cwyc-fg);
 }
 #cwyc-root .cwyc-hbtn:focus-visible ,
 #cwyc-root .cwyc-chip:focus-visible {
-  outline: 2px solid var(--cwyc-amber-ring);
+  outline: 2px solid var(--cwyc-accent-ring);
   outline-offset: 1px;
 }
 #cwyc-root .cwyc-split-main:focus-visible ,
 #cwyc-root .cwyc-split-caret:focus-visible {
-  outline: 2px solid var(--cwyc-amber-ring);
+  outline: 2px solid var(--cwyc-accent-ring);
   outline-offset: -2px; /* the capsule clips overflow; keep the ring inside */
 }
 
@@ -1447,14 +1615,14 @@ body {
   align-items: stretch;
   border: none;
   border-radius: 999px;
-  background: var(--cwyc-amber-soft);
+  background: var(--cwyc-accent-soft);
   /* NO overflow:hidden. Clipping rounded overflow while a child background
      transitions is what QtWebEngine garbles on hover (real Anki, 2026-07-12).
      Instead each segment rounds its own outer corners, so there is nothing to
      re-clip per frame. */
 }
 .cwyc-split:hover {
-  background: var(--cwyc-amber-soft2);
+  background: var(--cwyc-accent-soft2);
 }
 #cwyc-root .cwyc-split-main {
   border: none;
@@ -1474,7 +1642,7 @@ body {
   color: var(--cwyc-fg-subtle);
 }
 #cwyc-root .cwyc-split-main:hover {
-  background: var(--cwyc-amber-soft);
+  background: var(--cwyc-accent-soft);
 }
 #cwyc-root .cwyc-split-main:hover svg {
   color: var(--cwyc-fg);
@@ -1485,7 +1653,7 @@ body {
 #cwyc-root .cwyc-split-caret {
   border: none;
   border-radius: 0 999px 999px 0; /* round own right; main rounds its left */
-  background: var(--cwyc-amber-soft); /* stacks on the pill fill: same hue, deeper */
+  background: var(--cwyc-accent-soft); /* stacks on the pill fill: same hue, deeper */
   color: var(--cwyc-fg-subtle);
   padding: 0 7px 0 6px;
   cursor: pointer;
@@ -1493,7 +1661,7 @@ body {
   align-items: center;
 }
 #cwyc-root .cwyc-split-caret:hover {
-  background: var(--cwyc-amber-soft2);
+  background: var(--cwyc-accent-soft2);
   color: var(--cwyc-fg);
 }
 
@@ -1591,8 +1759,8 @@ body {
   background: var(--cwyc-surface);
 }
 #cwyc-root .cwyc-menu-item.cwyc-active {
-  background: var(--cwyc-amber-soft);
-  color: var(--cwyc-amber-ink);
+  background: var(--cwyc-accent-soft);
+  color: var(--cwyc-accent-ink);
 }
 .cwyc-menu-label {
   flex: 1 1 auto;
@@ -1650,9 +1818,9 @@ body {
   color: var(--cwyc-fg);
 }
 #cwyc-root .cwyc-chip-on {
-  border-color: var(--cwyc-amber);
-  color: var(--cwyc-amber-ink);
-  background: var(--cwyc-amber-soft);
+  border-color: var(--cwyc-accent);
+  color: var(--cwyc-accent-ink);
+  background: var(--cwyc-accent-soft);
 }
 /* Full agent tools is a materially riskier state than the rest of the chip
    row (shell/file access, auto-approve) - a warn-colored chip keeps that
@@ -1668,13 +1836,13 @@ body {
   background: var(--cwyc-warn-soft);
 }
 #cwyc-root .cwyc-chip-primary {
-  background: var(--cwyc-amber);
-  border-color: var(--cwyc-amber);
-  color: var(--cwyc-on-amber);
+  background: var(--cwyc-accent);
+  border-color: var(--cwyc-accent);
+  color: var(--cwyc-on-accent);
 }
 #cwyc-root .cwyc-chip-primary:hover {
-  background: var(--cwyc-amber-hover);
-  color: var(--cwyc-on-amber);
+  background: var(--cwyc-accent-hover);
+  color: var(--cwyc-on-accent);
 }
 
 /* ---- settings panel ------------------------------------------------------ */
@@ -1709,7 +1877,7 @@ body {
   width: 14px;
   height: 14px;
   margin: 0;
-  accent-color: var(--cwyc-amber);
+  accent-color: var(--cwyc-accent);
 }
 .cwyc-seg {
   flex: 0 0 auto;
@@ -1733,8 +1901,22 @@ body {
   color: var(--cwyc-fg);
 }
 #cwyc-root .cwyc-seg-btn.cwyc-active {
-  background: var(--cwyc-amber-soft);
-  color: var(--cwyc-amber-ink);
+  background: var(--cwyc-accent-soft);
+  color: var(--cwyc-accent-ink);
+}
+/* Theme picker: each segment carries a live colour swatch of that palette's
+   accent, so the choice reads at a glance without applying it. */
+#cwyc-root .cwyc-seg-theme .cwyc-seg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+}
+#cwyc-root .cwyc-theme-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
 }
 .cwyc-setting-footnote {
   padding: 8px 8px 3px;
@@ -1805,8 +1987,8 @@ body {
 }
 .cwyc-combo-input:focus {
   outline: none;
-  border-color: var(--cwyc-amber);
-  box-shadow: 0 0 0 2px var(--cwyc-amber-soft);
+  border-color: var(--cwyc-accent);
+  box-shadow: 0 0 0 2px var(--cwyc-accent-soft);
 }
 .cwyc-combo-list {
   position: absolute;
@@ -1847,8 +2029,8 @@ body {
 }
 #cwyc-root .cwyc-combo-item:hover,
 #cwyc-root .cwyc-combo-item.cwyc-combo-active {
-  background: var(--cwyc-amber-soft);
-  color: var(--cwyc-amber-ink);
+  background: var(--cwyc-accent-soft);
+  color: var(--cwyc-accent-ink);
 }
 #cwyc-root .cwyc-combo-clear {
   color: var(--cwyc-fg-subtle);
@@ -1877,8 +2059,8 @@ body {
   cursor: text;
 }
 .cwyc-tagchips:focus-within {
-  border-color: var(--cwyc-amber);
-  box-shadow: 0 0 0 2px var(--cwyc-amber-soft);
+  border-color: var(--cwyc-accent);
+  box-shadow: 0 0 0 2px var(--cwyc-accent-soft);
 }
 /* Anki-editor-like tag chips (dogfood 2026-07-14: the first cut's 11px
    pills were unreadably small): rounded-rect surface chips at full text
@@ -1943,7 +2125,7 @@ body {
   padding: 6px 8px;
   border-radius: 7px;
   background: var(--cwyc-warn-soft);
-  border: 1px solid var(--cwyc-amber-ring);
+  border: 1px solid var(--cwyc-accent-ring);
 }
 .cwyc-risk-line-text {
   flex: 1 1 auto;
@@ -1957,13 +2139,13 @@ body {
   padding: 0;
   font: inherit;
   font-weight: 600;
-  color: var(--cwyc-amber-ink);
+  color: var(--cwyc-accent-ink);
   text-decoration: underline;
   cursor: pointer;
   white-space: nowrap;
 }
 #cwyc-root .cwyc-risk-link:hover {
-  color: var(--cwyc-amber-hover);
+  color: var(--cwyc-accent-hover);
 }
 #cwyc-root .cwyc-risk-dismiss {
   flex: 0 0 auto;
@@ -1997,14 +2179,14 @@ body {
   max-height: 100%;
   overflow-y: auto;
   background: var(--cwyc-surface-raised);
-  border: 1px solid var(--cwyc-amber-ring);
+  border: 1px solid var(--cwyc-accent-ring);
   border-radius: var(--cwyc-radius);
   box-shadow: var(--cwyc-card-shadow);
   padding: 14px 15px 12px;
 }
 .cwyc-risk-modal-title {
   font: 600 14px var(--cwyc-font);
-  color: var(--cwyc-amber-ink);
+  color: var(--cwyc-accent-ink);
   margin-bottom: 9px;
 }
 .cwyc-risk-modal-body {
@@ -2033,11 +2215,11 @@ body {
   border-radius: 999px;
   gap: 5px;
   padding: 0 11px 0 9px;
-  background: var(--cwyc-amber);
-  color: var(--cwyc-on-amber);
+  background: var(--cwyc-accent);
+  color: var(--cwyc-on-accent);
 }
 .cwyc-send-stop:hover {
-  background: var(--cwyc-amber-hover);
+  background: var(--cwyc-accent-hover);
 }
 .cwyc-stop-label {
   font: 500 11.5px var(--cwyc-font);

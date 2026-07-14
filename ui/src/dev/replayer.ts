@@ -366,6 +366,7 @@ export function installDevReplayer(): void {
             ["k", "gk", "visual"],
             ["Y", "y$", "normal"],
           ],
+          theme: String(devSettings.theme ?? "teal"),
         });
         break;
       case "list_history":
@@ -464,7 +465,8 @@ export function installDevReplayer(): void {
         }, 350);
         break;
       case "set_agent": {
-        const tools = msg.tools === "full" ? "full" : "sandbox";
+        const tiers = ["sandbox", "acceptEdits", "auto", "full"];
+        const tools = tiers.includes(String(msg.tools)) ? String(msg.tools) : "sandbox";
         window.chatUI?.dispatch({
           type: "agent",
           backend: "claude",
@@ -474,10 +476,15 @@ export function installDevReplayer(): void {
           fast: Boolean(msg.fast),
           tools,
         });
+        const toolLabel: Record<string, string> = {
+          acceptEdits: "accept-edits tools",
+          auto: "auto tools",
+          full: "full tools",
+        };
         const bits = [
           String(msg.model || "the default model"),
           msg.fast ? "fast" : "",
-          tools === "full" ? "full tools" : "",
+          toolLabel[tools] ?? "",
         ].filter(Boolean);
         window.chatUI?.dispatch({
           type: "notice",
@@ -543,6 +550,7 @@ export function installDevReplayer(): void {
             ["k", "gk", "visual"],
             ["Y", "y$", "normal"],
           ],
+          theme: String(devSettings.theme ?? "teal"),
         });
         break;
       }

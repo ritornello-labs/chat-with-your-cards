@@ -147,9 +147,17 @@ class ChatDock(QDockWidget):
         initial = _json.dumps(
             {"expanded": self.expanded, "width": self.expand_target(), "side": self.side}
         )
+        # Plant the colour-theme class in the first paint so a non-default
+        # palette (indigo/evergreen) does not flash teal before the settings
+        # push arrives (store.ts applyThemeClass reconciles afterwards).
+        cfg = mw.addonManager.getConfig(__name__) or {}
+        theme = str(cfg.get("theme", "teal")).strip()
+        if theme not in ("teal", "indigo", "evergreen"):
+            theme = "teal"
         self.web.stdHtml(
             body=(
-                f"<script>window.CWYC_INITIAL_DOCK = {initial};</script>"
+                f"<script>window.CWYC_INITIAL_DOCK = {initial};"
+                f'document.documentElement.classList.add("cwyc-theme-{theme}");</script>'
                 '<div id="cwyc-root"></div>'
             ),
             css=[f"{base}/next/bundle.css"],

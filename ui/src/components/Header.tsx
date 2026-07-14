@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useChatState } from "../ChatRuntimeProvider";
+import { useDismiss } from "../hooks/useDismiss";
 import { SettingsPanel } from "./SettingsPanel";
 import type { ChatStore, HistoryEntry } from "../store";
 
@@ -9,27 +10,6 @@ import type { ChatStore, HistoryEntry } from "../store";
  * the Settings cog (which also hosts the Setup check). With the native Qt
  * title bar gone (dock.py), this row IS the dock's chrome.
  */
-
-/** Close an open panel on outside-click or Esc, the classic menu contract. */
-function useDismiss(open: boolean, close: () => void) {
-  const ref = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) close();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open, close]);
-  return ref;
-}
 
 function when(entry: HistoryEntry): string {
   if (!entry.updated_at) return "";
