@@ -27,21 +27,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "dock_collapsed": True,
     "dock_side": "right",
     # Composer vim keybindings (Settings > "Vim keys in composer", or here).
-    # vim_mappings are [keys, mapped-to, mode] triples with vim `:map`
-    # semantics (mode: normal | insert | visual); the defaults are adapted
-    # from the user's vimrc: fd leaves insert mode, j/k move by visual line,
-    # Y yanks to end of line, [<Space>/]<Space> add blank lines.
+    # vim_mappings are personal [keys, mapped-to, mode] triples with vim
+    # `:map` semantics (mode: normal | insert | visual) - the user's vimrc
+    # equivalent. Ships EMPTY by default (stock vim behavior; decided
+    # 2026-07-14): personal mappings belong in the user's own config, e.g.
+    # [["fd", "<Esc>", "insert"], ["j", "gj", "normal"]].
     "vim_mode": False,
-    "vim_mappings": [
-        ["fd", "<Esc>", "insert"],
-        ["j", "gj", "normal"],
-        ["k", "gk", "normal"],
-        ["j", "gj", "visual"],
-        ["k", "gk", "visual"],
-        ["Y", "y$", "normal"],
-        ["[<Space>", "O<Esc>j", "normal"],
-        ["]<Space>", "o<Esc>k", "normal"],
-    ],
+    "vim_mappings": [],
     "backend": "auto",
     "claude_cli_path": "",
     "model": "",
@@ -227,12 +219,6 @@ def _setup() -> None:
             pins=state.proposals.pins if state.proposals else None,
         )
 
-    def overview_text() -> str | None:
-        # Fed to the controller, which prefixes it to the first user message
-        # of the session (COMPLIANCE.md rule 3) instead of the system prompt.
-        cache = state.stats_cache
-        return cache.overview(int(config["context_token_budget"])) if cache else None
-
     state.controller = ChatController(
         push=recording_push,
         config=config,
@@ -241,7 +227,6 @@ def _setup() -> None:
         workdir=USER_FILES / "agent-home",
         proposals=state.proposals,
         transcripts=state.transcripts,
-        overview_builder=overview_text,
     )
     _wire_bridge()
     shortcuts_mod.register_shortcuts(state)
@@ -503,24 +488,35 @@ def _push_collection_meta() -> None:
 
 
 def _open_addon_config() -> None:
-    """Settings > 'Edit config…': jump the user to Anki's add-on config
-    editor (the vimrc equivalent - vim_mappings - lives there, plus every
-    other advanced key documented in config.md). Anki has no public 'open
-    THIS add-on's config' API, so open the Add-ons dialog and say where to
-    click; config changes there apply on the next Anki restart."""
-    try:
-        mw.onAddons()
+    """Settings > 'Edit config…': open Anki's config editor directly on THIS
+    add-on's config (the vimrc equivalent - vim_mappings - lives there, plus
+    every advanced key documented in config.md). Anki 25.09 has no
+    mw.onAddons (first cut failed silently on that - dogfood 2026-07-14);
+    the real path is AddonsDialog(mw.addonManager) + ConfigEditor(dlg, addon,
+    conf), both self-showing. Any failure now surfaces as a notice, never
+    silence."""
+
+    def notice(text: str) -> None:
         if state.dock is not None:
-            state.dock.bridge.push(
-                {
-                    "type": "notice",
-                    "text": 'In Add-ons: select "Chat With Your Cards" > Config. '
-                    "vim_mappings holds the [keys, mapped-to, mode] triples "
-                    "(vim :map semantics); restart Anki to apply.",
-                }
-            )
+            state.dock.bridge.push({"type": "notice", "text": text})
+
+    try:
+        from aqt.addons import AddonsDialog, ConfigEditor
+
+        addon = mw.addonManager.addonFromModule(__name__)
+        conf = mw.addonManager.getConfig(__name__) or {}
+        dlg = AddonsDialog(mw.addonManager)
+        ConfigEditor(dlg, addon, conf)
+        notice(
+            "Config editor opened. vim_mappings holds [keys, mapped-to, mode] "
+            "triples (vim :map semantics); restart Anki to apply changes."
+        )
     except Exception as exc:
         _log_line(f"open_addon_config failed: {exc}")
+        notice(
+            "Couldn't open the config editor - use Tools > Add-ons > "
+            '"Chat With Your Cards" > Config instead.'
+        )
 
 
 def _push_settings() -> None:
@@ -910,17 +906,10 @@ def _open_in_claude_code(target: str = "terminal") -> None:
         return cmd
 
     if _norm_open_target(target) == "desktop":
-        app = str(state.config.get("terminal_app", "")).strip()
-        if (
-            sid
-            and _sys.platform == "darwin"
-            and _open_macos_terminal(resume_command("/desktop"), app, auto_close=True)
-        ):
+        if sid and _desktop_handoff_invisible(sid, extra_args, agent_home):
             notice(
                 "Resuming this chat and handing it to the Claude Code desktop "
-                "app (a terminal window runs the /desktop migration and closes "
-                "itself when done). If the app doesn't open - older CLI or "
-                "API-key auth - the resumed chat stays open in that terminal."
+                "app… (runs invisibly; you'll get a notice if it can't)."
             )
             return
         prompt = (
@@ -989,59 +978,116 @@ def _open_in_claude_code(target: str = "terminal") -> None:
         notice(f"Run this in a terminal to continue in Claude Code: {cmd}")
 
 
-def _open_macos_terminal(command: str, app: str, auto_close: bool = False) -> bool:
+def _desktop_handoff_invisible(
+    sid: str, extra_args: list[str], agent_home: Path
+) -> bool:
+    """Migrate this chat to the Claude Code desktop app with NO visible
+    terminal: run `claude --resume <sid> … "/desktop"` on a hidden PTY (the
+    CLI needs a tty to run interactively; it does not need a window - the
+    /desktop-under-script(1) probe proved this, 2026-07-13). POSIX only
+    (macOS + Linux; Windows has no pty module and falls back to the
+    deep-link path).
+
+    A watcher thread drains the PTY (the TUI blocks if nobody reads) and
+    reports: clean exit = migrated (that is /desktop's behavior - hand off,
+    then exit); still running at the deadline = migration unavailable
+    (older CLI / API-key auth), so terminate and tell the user the visible
+    fallback. Returns False only on spawn failure, so the caller can fall
+    back to the deep link immediately."""
+    import os
+    import select
+    import subprocess
+    import sys as _sys
+    import threading
+
+    if _sys.platform != "darwin" and not _sys.platform.startswith("linux"):
+        return False
+    from .backends.claude_cli import find_claude_cli
+
+    claude = find_claude_cli(str(state.config.get("claude_cli_path", "")).strip())
+    if not claude:
+        return False
+    try:
+        import pty
+
+        master, slave = pty.openpty()
+    except Exception:
+        return False
+    env = dict(os.environ)
+    env.setdefault("TERM", "xterm-256color")
+    try:
+        proc = subprocess.Popen(
+            [claude, "--resume", str(sid), *extra_args, "/desktop"],
+            cwd=str(agent_home),
+            stdin=slave,
+            stdout=slave,
+            stderr=slave,
+            env=env,
+            start_new_session=True,
+        )
+    except Exception as exc:
+        os.close(master)
+        os.close(slave)
+        _log_line(f"invisible /desktop spawn failed: {exc}")
+        return False
+    os.close(slave)
+
+    def notice_on_main(text: str) -> None:
+        def push() -> None:
+            if state.dock is not None:
+                state.dock.bridge.push({"type": "notice", "text": text})
+
+        mw.taskman.run_on_main(push)
+
+    def watch() -> None:
+        import time
+
+        deadline = time.monotonic() + 90
+        try:
+            while time.monotonic() < deadline and proc.poll() is None:
+                readable, _, _ = select.select([master], [], [], 0.5)
+                if readable:
+                    try:
+                        if not os.read(master, 4096):
+                            break
+                    except OSError:
+                        break
+        finally:
+            try:
+                os.close(master)
+            except OSError:
+                pass
+        if proc.poll() == 0:
+            notice_on_main("Handed this chat to the Claude Code desktop app.")
+            return
+        if proc.poll() is None:
+            proc.terminate()
+        _log_line(f"invisible /desktop did not migrate (exit={proc.poll()})")
+        notice_on_main(
+            "The desktop migration didn't complete (older CLI or API-key "
+            "auth?). Fallback: Open in Claude Code > Terminal, then type "
+            "/desktop there."
+        )
+
+    threading.Thread(target=watch, name="cwyc-desktop-handoff", daemon=True).start()
+    return True
+
+
+def _open_macos_terminal(command: str, app: str) -> bool:
     """Run `command` in a macOS terminal, honoring the configured terminal_app.
 
     Empty (or "Terminal") drives Apple Terminal via AppleScript `do script`
     (the known-good default). Any other app name launches a throwaway
     executable `.command` script in that app via `open -a`, which most
     terminals (iTerm, Warp, Ghostty, kitty, …) run on open. Best-effort:
-    returns False so the caller can fall back to the clipboard.
-
-    auto_close (Apple Terminal only): watch the tab and close its window once
-    the command finishes - used by the /desktop handoff so the scaffolding
-    terminal disappears after the migration (user-requested 2026-07-14).
-    Deliberately tied to the tab going idle: if /desktop is unavailable and
-    the user lands in the resumed interactive session instead, the tab stays
-    busy and the window stays OPEN, which is exactly the fallback we want."""
+    returns False so the caller can fall back to the clipboard."""
     import subprocess
     import sys as _sys
-    import time as _time
 
     if _sys.platform != "darwin":
         return False
     if not app or app.lower() in ("terminal", "terminal.app"):
         script = command.replace("\\", "\\\\").replace('"', '\\"')
-        if auto_close:
-            osa = f'''
-tell application "Terminal"
-    activate
-    set t to do script "{script}"
-    delay 1
-    repeat 240 times
-        if not busy of t then exit repeat
-        delay 0.5
-    end repeat
-    if not busy of t then
-        try
-            close (first window whose tabs contains t) saving no
-        end try
-    end if
-end tell'''
-            try:
-                proc = subprocess.Popen(
-                    ["osascript", "-e", osa],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-                # The script itself runs for the command's lifetime; only an
-                # immediate exit means osascript rejected it outright.
-                _time.sleep(0.35)
-                if proc.poll() is not None and proc.returncode != 0:
-                    return False
-                return True
-            except Exception:
-                return False
         try:
             subprocess.run(
                 [

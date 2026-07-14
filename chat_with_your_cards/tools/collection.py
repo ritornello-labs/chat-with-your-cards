@@ -122,6 +122,27 @@ def collection_stats(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def get_collection_overview(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    """The compact annotated deck+tag overview (stats.serialize_overview) on
+    demand. This USED to be injected into the first user message of every
+    session (~8k tokens on a large collection, paid whether or not the
+    conversation needed it); it is a tool now (design change 2026-07-14) so
+    a session only spends those tokens when the agent actually wants
+    collection structure."""
+    from ..stats import serialize_overview
+
+    stats = ctx.stats
+    if not stats:
+        return {"available": False, "reason": "stats cache not computed yet"}
+    default_budget = int(ctx.config.get("context_token_budget", 8000))
+    budget = int(args.get("budget_tokens") or default_budget)
+    return {
+        "available": True,
+        "computed_at": stats.get("computed_at"),
+        "overview": serialize_overview(stats, budget),
+    }
+
+
 def list_note_types(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     models = []
     for nt in ctx.col.models.all_names_and_ids():
@@ -258,6 +279,24 @@ def build_registry() -> ToolRegistry:
             "snapshot, with its computed_at timestamp.",
             {"type": "object", "properties": {}},
             collection_stats,
+        ),
+        ToolSpec(
+            "get_collection_overview",
+            "Compact human-readable overview of the whole collection: deck "
+            "hierarchy and top tags annotated with counts and due/review "
+            "load. START HERE when you need the collection's structure; "
+            "deck_tree/tag_tree/collection_stats drill into details.",
+            {
+                "type": "object",
+                "properties": {
+                    "budget_tokens": {
+                        "type": "integer",
+                        "description": "Approximate size cap; the overview "
+                        "folds deeper levels to fit (default from config).",
+                    }
+                },
+            },
+            get_collection_overview,
         ),
         ToolSpec(
             "list_note_types",

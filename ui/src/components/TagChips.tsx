@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { highlightMatch } from "./ComboBox";
+import { MAX_SUGGESTIONS, highlightMatch } from "./ComboBox";
 
 /**
  * Anki-editor-like tag entry: removable chips plus an inline text input with
@@ -30,11 +30,22 @@ export function TagChips({ tags, onChange, suggestions, testid }: TagChipsProps)
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
-  const filtered = useMemo(() => {
+  // Cap the rendered list HARD: real collections have tens of thousands of
+  // tags (36k+ observed, dogfood 2026-07-14), and rendering them all froze
+  // the panel solid. Filtering scans everything; only MAX_SUGGESTIONS reach
+  // the DOM, with an overflow line saying to keep typing.
+  const { filtered, overflow } = useMemo(() => {
     const q = text.trim().toLowerCase();
-    const remaining = suggestions.filter((s) => !tags.includes(s));
-    if (!q) return remaining;
-    return remaining.filter((s) => s.toLowerCase().includes(q));
+    const picked = new Set(tags);
+    const out: string[] = [];
+    let extra = 0;
+    for (const s of suggestions) {
+      if (picked.has(s)) continue;
+      if (q && !s.toLowerCase().includes(q)) continue;
+      if (out.length < MAX_SUGGESTIONS) out.push(s);
+      else extra += 1;
+    }
+    return { filtered: out, overflow: extra };
   }, [suggestions, tags, text]);
 
   const addTag = (raw: string) => {
@@ -129,6 +140,9 @@ export function TagChips({ tags, onChange, suggestions, testid }: TagChipsProps)
               {highlightMatch(option, text)}
             </button>
           ))}
+          {overflow > 0 ? (
+            <div className="cwyc-combo-overflow">…{overflow} more — keep typing</div>
+          ) : null}
         </div>
       ) : null}
     </div>

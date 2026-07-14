@@ -7,6 +7,14 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNod
  * absolutely-positioned suggestion list instead of ever touching native
  * popup UI.
  */
+/**
+ * Hard cap on rendered suggestions, shared with TagChips: real collections
+ * have hundreds of decks and tens of thousands of tags (36k+ observed,
+ * dogfood 2026-07-14), and rendering the unfiltered list froze the pins
+ * panel solid. Filtering scans everything; only this many reach the DOM.
+ */
+export const MAX_SUGGESTIONS = 40;
+
 export interface ComboBoxProps {
   readonly value: string;
   readonly onChange: (v: string) => void;
@@ -54,10 +62,16 @@ export function ComboBox({ value, onChange, options, placeholder, testid, allowF
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
-  const filtered = useMemo(() => {
+  const { filtered, overflow } = useMemo(() => {
     const q = text.trim().toLowerCase();
-    if (!q) return options;
-    return options.filter((o) => o.toLowerCase().includes(q));
+    const out: string[] = [];
+    let extra = 0;
+    for (const o of options) {
+      if (q && !o.toLowerCase().includes(q)) continue;
+      if (out.length < MAX_SUGGESTIONS) out.push(o);
+      else extra += 1;
+    }
+    return { filtered: out, overflow: extra };
   }, [options, text]);
 
   const showClear = value.length > 0;
@@ -175,6 +189,9 @@ export function ComboBox({ value, onChange, options, placeholder, testid, allowF
               </button>
             );
           })}
+          {overflow > 0 ? (
+            <div className="cwyc-combo-overflow">…{overflow} more — keep typing</div>
+          ) : null}
         </div>
       ) : null}
     </div>

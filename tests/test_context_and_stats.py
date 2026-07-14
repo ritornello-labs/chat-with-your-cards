@@ -85,13 +85,13 @@ class ContextTest(unittest.TestCase):
         with self.assertRaises(TypeError):
             build_system_prompt(conventions="be terse")  # type: ignore[call-arg]
 
-    def test_system_prompt_points_at_overview_first_message_and_tools(self) -> None:
-        # Fixed, generalized fallback sentence - present regardless of
-        # whether an overview happens to be available this run, since
-        # build_system_prompt no longer knows either way.
+    def test_system_prompt_points_at_overview_tool(self) -> None:
+        # The overview is a TOOL (get_collection_overview, design change
+        # 2026-07-14) - the prompt must steer the agent to it, never claim
+        # a <collection-overview> block will arrive in a message.
         prompt = build_system_prompt(permission_mode="default")
-        self.assertIn("<collection-overview>", prompt)
-        self.assertIn("first message", prompt)
+        self.assertIn("get_collection_overview", prompt)
+        self.assertNotIn("<collection-overview>", prompt)
         self.assertIn("deck_tree", prompt)
         self.assertIn("collection_stats", prompt)
 
@@ -159,17 +159,46 @@ class ContextTest(unittest.TestCase):
         self.assertTrue(wrapped.startswith("<current-card>"))
         self.assertTrue(wrapped.endswith("hi"))
 
-    def test_wrap_user_message_with_overview_block(self) -> None:
-        overview = "<collection-overview>OV</collection-overview>"
-        card = "<current-card>x</current-card>"
-        # Overview alone.
-        wrapped = wrap_user_message("hi", None, overview)
-        self.assertEqual(f"{overview}\n\nhi", wrapped)
-        # Overview stacks ahead of the card block, both ahead of the text.
-        wrapped = wrap_user_message("hi", card, overview)
-        self.assertEqual(f"{overview}\n\n{card}\n\nhi", wrapped)
-        # Neither block: unchanged text, matching the pre-existing 2-arg call.
-        self.assertEqual("hi", wrap_user_message("hi", None, None))
+    def test_wrap_user_message_takes_no_overview_block(self) -> None:
+        # The overview moved to the get_collection_overview tool (design
+        # change 2026-07-14): wrap_user_message must not re-grow an
+        # overview parameter.
+        with self.assertRaises(TypeError):
+            wrap_user_message("hi", None, "<collection-overview>OV</collection-overview>")  # type: ignore[call-arg]
+
+
+class OverviewToolTest(unittest.TestCase):
+    """get_collection_overview: the on-demand replacement for the overview
+    that used to be injected into the first user message (2026-07-14)."""
+
+    class _Ctx:
+        def __init__(self, stats: dict | None, config: dict) -> None:
+            self.stats = stats
+            self.config = config
+
+    def test_returns_overview_text(self) -> None:
+        from chat_with_your_cards.tools.collection import get_collection_overview
+
+        result = get_collection_overview(
+            self._Ctx(_stats(), {"context_token_budget": 8000}), {}
+        )
+        self.assertTrue(result["available"])
+        self.assertIn("Deck", result["overview"])
+        self.assertIn("tag0", result["overview"])
+
+    def test_budget_arg_overrides_config(self) -> None:
+        from chat_with_your_cards.tools.collection import get_collection_overview
+
+        ctx = self._Ctx(_stats(deck_count=40, tag_count=200), {"context_token_budget": 8000})
+        small = get_collection_overview(ctx, {"budget_tokens": 200})["overview"]
+        large = get_collection_overview(ctx, {})["overview"]
+        self.assertLess(len(small), len(large))
+
+    def test_unavailable_without_stats(self) -> None:
+        from chat_with_your_cards.tools.collection import get_collection_overview
+
+        result = get_collection_overview(self._Ctx(None, {}), {})
+        self.assertFalse(result["available"])
 
 
 class OverviewSerializerTest(unittest.TestCase):

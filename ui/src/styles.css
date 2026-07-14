@@ -1350,6 +1350,11 @@ body {
   background: var(--cwyc-amber) !important;
   color: var(--cwyc-on-amber) !important;
   outline: none !important;
+  /* The block cursor is sized to the glyph under it, and the composer uses a
+     proportional face - so on "i"/"l" it shrank to a sliver (dogfood
+     2026-07-14). A floor keeps it readable; wide glyphs still get their full
+     width (true block-cursor behavior, just never needle-thin). */
+  min-width: 7px;
 }
 .cwyc-vim-editor .cm-editor:not(.cm-focused) .cm-fat-cursor {
   background: none !important;
@@ -1816,6 +1821,12 @@ body {
   display: flex;
   flex-direction: column;
 }
+.cwyc-combo-overflow {
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--cwyc-fg-faint);
+}
+
 #cwyc-root .cwyc-combo-item {
   display: block;
   width: 100%;

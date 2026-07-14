@@ -107,8 +107,8 @@ def build_system_prompt(
     COMPLIANCE.md rule 3: this must stay lean and roughly constant-size. The ceiling test asserts under 4,000 chars in the worst case. The two unbounded inputs that used to be
     inlined here - the collection overview and the user's note conventions -
     are gone from this function's signature on purpose:
-      - the overview travels in the FIRST user message of the session as a
-        <collection-overview> block (see controller.wrap_user_message);
+      - the overview is a TOOL (get_collection_overview, design change
+        2026-07-14; it was previously injected into the first user message);
       - conventions are a skill the harness loads on demand (see
         skills.materialize_conventions_agent_skill), pointed at below by a
         fixed sentence rather than inlined.
@@ -222,25 +222,18 @@ def build_system_prompt(
             "skill - load it before proposing or editing any card."
         )
     parts.append(
-        "\nThe collection overview (when available) arrives as a "
-        "<collection-overview> block on your first message; until then, use "
-        "deck_tree, tag_tree, and collection_stats."
+        "\nFor collection structure call get_collection_overview first "
+        "(compact deck/tag overview); deck_tree, tag_tree, "
+        "collection_stats drill down."
     )
     return "\n".join(parts)
 
 
-def wrap_user_message(
-    text: str, card_block: str | None, overview_block: str | None = None
-) -> str:
-    """Prefix the user text with context blocks.
-
-    `overview_block` (the <collection-overview>...</collection-overview>
-    text, when the controller decides this is the first message of the
-    session - COMPLIANCE.md rule 3) goes first, then `card_block` when the
-    current card changed since the last send. Either, both, or neither may
-    be present.
-    """
-    prefix = "\n\n".join(block for block in (overview_block, card_block) if block)
-    if not prefix:
+def wrap_user_message(text: str, card_block: str | None) -> str:
+    """Prefix the user text with the current-card context block, when the
+    card changed since the last send. (The collection overview is no longer
+    injected here - it moved to the get_collection_overview tool, design
+    change 2026-07-14.)"""
+    if not card_block:
         return text
-    return f"{prefix}\n\n{text}"
+    return f"{card_block}\n\n{text}"

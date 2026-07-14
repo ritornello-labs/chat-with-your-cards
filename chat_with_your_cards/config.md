@@ -15,10 +15,11 @@
 - `vim_mode` (default `false`): vim keybindings in the message box (modal
   editing; Esc/`fd` for normal mode, Enter still sends, Shift+Enter for a
   newline). Also toggleable from the Settings panel.
-- `vim_mappings`: extra vim key mappings as `[keys, mapped-to, mode]` triples
-  with vim `:map` semantics; `mode` is `normal`, `insert`, or `visual`. The
-  defaults map `fd` to Esc in insert mode, `j`/`k` to `gj`/`gk` (move by
-  visual line), `Y` to `y$`, and `[<Space>`/`]<Space>` to add blank lines.
+- `vim_mappings` (default `[]` = stock vim keys): your personal vim mappings
+  as `[keys, mapped-to, mode]` triples with vim `:map` semantics; `mode` is
+  `normal`, `insert`, or `visual`. Example — leave insert mode with `fd` and
+  move by visual line:
+  `[["fd", "<Esc>", "insert"], ["j", "gj", "normal"], ["k", "gk", "normal"]]`.
 - `backend` (default `auto`): `auto` uses the Claude Code CLI when installed and
   falls back to a built-in demo backend; `claude` requires the CLI; `scripted`
   forces the demo backend.
@@ -162,9 +163,10 @@
 - `stats_refresh_minutes` (default `30`): how often the collection overview
   (deck/tag hierarchies with counts and review time) is recomputed in the
   background.
-- `context_token_budget` (default `8000`): approximate token budget for the
-  collection overview included in the assistant's context; larger collections
-  get folded summaries plus drill-down tools.
+- `context_token_budget` (default `8000`): approximate size cap for the
+  `get_collection_overview` tool's output (the assistant fetches the deck/tag
+  overview on demand; it is no longer injected into the chat automatically).
+  Larger collections get folded summaries plus drill-down tools.
 
 Shortcut strings use Qt key-sequence syntax (`Ctrl+J`, `Ctrl+;`, `Ctrl+K`).
 On macOS, `Ctrl` in these strings means the Command key.
