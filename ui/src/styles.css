@@ -1527,9 +1527,14 @@ body {
      width (true block-cursor behavior, just never needle-thin). */
   min-width: 7px;
 }
-.cwyc-vim-editor .cm-editor:not(.cm-focused) .cm-fat-cursor {
-  background: none !important;
-  outline: solid 1px var(--cwyc-accent) !important;
+/* Blurred: hide the block cursor entirely, like a plain textarea shows no
+   caret when unfocused. The old "hollow outline" (terminal-vim style) left an
+   awkward empty square parked on the placeholder's first glyph (dogfood
+   2026-07-14). CM already hides the thin `.cm-cursor` off-focus; the fat cursor
+   is drawn by codemirror-vim and needs this explicit hide. */
+.cwyc-vim-editor .cm-editor:not(.cm-focused) .cm-fat-cursor,
+.cwyc-vim-editor .cm-editor:not(.cm-focused) .cm-cursor {
+  display: none !important;
 }
 .cwyc-vim-editor .cm-selectionBackground,
 .cwyc-vim-editor .cm-editor.cm-focused .cm-selectionBackground {
