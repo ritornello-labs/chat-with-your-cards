@@ -86,7 +86,7 @@ export function SettingsPanel({ store }: { store: ChatStore }) {
           </div>
           <div className="cwyc-panel-title cwyc-panel-title-gap">Shortcuts</div>
           <div className="cwyc-setting-row">
-            <span className="cwyc-setting-label">Open / focus chat</span>
+            <span className="cwyc-setting-label">Toggle chat</span>
             <span className="cwyc-setting-kbd">{settings.toggleShortcut}</span>
           </div>
           <div className="cwyc-setting-row">

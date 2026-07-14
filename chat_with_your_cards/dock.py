@@ -42,6 +42,34 @@ _WIDGET_SIZE_MAX = 16777215
 ANIM_MS = 220
 
 
+class _WebHost(QWidget):
+    """Clips the webview during width animations instead of resizing it.
+
+    Resizing a QtWebEngine view forces a page relayout + re-raster, and doing
+    that on every animation frame is what made the first cut of the
+    collapse/expand animation stutter. The webview is a manually-positioned
+    child of this host (no layout): while the dock width animates, the
+    webview keeps its size and the host merely clips it (cheap widget
+    geometry) - the webview is resized exactly once per transition, in
+    ChatDock._finish_resize. Outside animations the host keeps the webview
+    synced to itself, which is normal drag-resize behavior."""
+
+    def __init__(self, dock: ChatDock) -> None:
+        super().__init__(dock)
+        self._dock = dock
+
+    def resizeEvent(self, event: Any) -> None:  # noqa: N802 (Qt naming)
+        super().resizeEvent(event)
+        web = getattr(self._dock, "web", None)
+        if web is None:
+            return
+        if self._dock._anim is None:
+            web.setGeometry(0, 0, self.width(), self.height())
+        else:
+            # Mid-animation: hold the page width, only track height.
+            web.setGeometry(0, 0, web.width(), self.height())
+
+
 class ChatDock(QDockWidget):
     def __init__(self, dock_width: int, collapsed: bool) -> None:
         super().__init__(DOCK_TITLE, mw)
@@ -62,11 +90,15 @@ class ChatDock(QDockWidget):
             self._pin_width(RAIL_WIDTH)
         else:
             self.setMinimumWidth(min(MIN_DOCK_WIDTH, self._avail_width()))
-        self.web = AnkiWebView(parent=self, title="chat with your cards")
+        # The webview lives inside a clipping host, NOT directly as the dock
+        # widget: the width animation then never resizes the web page per
+        # frame (see _WebHost).
+        self._host = _WebHost(self)
+        self.web = AnkiWebView(parent=self._host, title="chat with your cards")
         # The ready ping and early messages must not be dropped before the
         # collection opens (webview.py drops bridge cmds when requiresCol).
         self.web.requiresCol = False
-        self.setWidget(self.web)
+        self.setWidget(self._host)
         self.bridge = Bridge(self.web)
         self._load_ui()
 
@@ -152,6 +184,11 @@ class ChatDock(QDockWidget):
             self._pin_width(target)
             self._finish_resize()
             return
+        if expanded:
+            # Pre-size the page to its final width while the dock is still
+            # narrow: the host clips it, the animation reveals it, and the
+            # page never reflows mid-slide (see _WebHost).
+            self.web.setGeometry(0, 0, target, self._host.height())
         anim = QVariantAnimation(self)
         anim.setStartValue(self.width())
         anim.setEndValue(target)
@@ -177,6 +214,8 @@ class ChatDock(QDockWidget):
             self.setMinimumWidth(min(MIN_DOCK_WIDTH, self._avail_width()))
             self.setMaximumWidth(_WIDGET_SIZE_MAX)
             mw.resizeDocks([self], [self.expand_target()], Qt.Orientation.Horizontal)
+        # The one real page resize of the transition (see _WebHost).
+        self.web.setGeometry(0, 0, self._host.width(), self._host.height())
         self.push_state(animating=False)
 
     def resizeEvent(self, event: Any) -> None:  # noqa: N802 (Qt naming)

@@ -334,6 +334,19 @@ body {
   transition: opacity 170ms ease 70ms;
 }
 
+/* While the dock width is animating, the page keeps its EXPANDED width and
+   the shrinking dock merely clips it (the Qt-side _WebHost keeps the page
+   un-resized so QtWebEngine never re-rasters per frame). A rail laid out at
+   that width would sit mid-page, so keep it hidden until the final
+   one-shot page resize lands (animating:false push) - then it fades in at
+   its true 44px geometry. */
+#cwyc-root .cwyc-anim .cwyc-rail {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: none;
+}
+
 #cwyc-root .cwyc-rail:hover {
   background: var(--cwyc-amber-soft);
 }

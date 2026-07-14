@@ -58,11 +58,19 @@ function Shell({ store }: { store: ChatStore }) {
   }, [store]);
 
   const railed = dock !== null && !dock.expanded;
+  const animating = dock !== null && dock.animating;
   // Pin the full layer to the expanded width while collapsed or animating so
   // the width animation slides/clips it instead of rewrapping every line.
   const pinWidth = dock !== null && (dock.animating || !dock.expanded) ? dock.width : undefined;
   return (
-    <div className={"cwyc-app" + (railed ? " cwyc-railed" : "") + (dock === null ? " cwyc-boot" : "")}>
+    <div
+      className={
+        "cwyc-app" +
+        (railed ? " cwyc-railed" : "") +
+        (animating ? " cwyc-anim" : "") +
+        (dock === null ? " cwyc-boot" : "")
+      }
+    >
       <div className="cwyc-full" style={pinWidth !== undefined ? { width: pinWidth } : undefined}>
         <Header store={store} />
         <Thread store={store} />

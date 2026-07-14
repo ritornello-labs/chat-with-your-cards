@@ -12,11 +12,12 @@ if TYPE_CHECKING:
 
 
 def toggle_chat_focus(state: AddonState) -> None:
-    """One chord, three context-aware behaviors: expand the rail (and focus
-    the composer), focus an expanded-but-unfocused chat, or hand focus back
-    to the reviewer. The dock itself is always visible (rail when collapsed);
-    collapsing is the header's chevron or the Escape-like click on the rail's
-    own collapse affordance, not this chord."""
+    """One chord, three context-aware behaviors that CYCLE the shell
+    (user-requested 2026-07-13): collapsed rail -> expand + focus the
+    composer; expanded but focus elsewhere -> focus the composer; focus in
+    the chat -> collapse to the rail and hand focus back to the reviewer.
+    So tapping Ctrl+J twice opens then puts the whole panel away. Esc keeps
+    its gentler role: return focus WITHOUT collapsing."""
     dock = state.dock
     if dock is None:
         return
@@ -25,6 +26,7 @@ def toggle_chat_focus(state: AddonState) -> None:
         return
     focused = mw.app.focusWidget()
     if focused is not None and dock.isAncestorOf(focused):
+        dock.set_expanded(False)
         focus_main_window()
     else:
         _focus_chat(state)

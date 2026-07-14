@@ -936,7 +936,7 @@ def _run_checks() -> dict[str, Any]:
         if submenu is None:
             raise AssertionError("Tools entry should be a submenu, not a bare toggle")
         items = [a.text().replace("&", "").split("\t")[0] for a in submenu.actions()]
-        for expected in ("Open / focus chat", "New chat"):
+        for expected in ("Toggle chat", "New chat"):
             if expected not in items:
                 raise AssertionError(f"submenu missing {expected!r}: {items}")
 
@@ -1220,16 +1220,32 @@ def _run_checks() -> dict[str, Any]:
 
     check("collapse/expand round-trip + settings panel", _collapse_expand_cycle)
 
-    def _focus_toggle_returns() -> None:
+    def _focus_toggle_cycles() -> None:
+        # Ctrl+J cycles the shell (2026-07-13): with focus in the chat, the
+        # chord collapses to the rail and hands focus back; from the rail it
+        # expands + focuses again.
+        from chat_with_your_cards.dock import RAIL_WIDTH
+
         dock.web.setFocus()
         QTest.qWait(100)
         addon.toggle_chat_focus()
-        QTest.qWait(200)
+        _wait_until(
+            lambda: not dock.expanded and dock._anim is None and dock.width() == RAIL_WIDTH,
+            3_000,
+            "dock to collapse on second toggle",
+        )
         focused = mw.app.focusWidget()
         if focused is not None and dock.isAncestorOf(focused):
-            raise AssertionError("focus stayed inside the dock after second toggle")
+            raise AssertionError("focus stayed inside the dock after collapse toggle")
+        addon.toggle_chat_focus()
+        _wait_until(
+            lambda: dock.expanded and dock._anim is None
+            and dock.width() >= dock.expand_target(),
+            3_000,
+            "dock to expand again on third toggle",
+        )
 
-    check("second toggle returns focus", _focus_toggle_returns)
+    check("toggle cycles: collapse from chat focus, expand back", _focus_toggle_cycles)
 
     def _proposal_round_trip() -> dict[str, Any]:
         """Scripted propose -> proposal card (data-testid=proposal-card) ->

@@ -121,7 +121,7 @@ def _install_tools_menu(config: dict[str, Any]) -> None:
         return QKeySequence(seq).toString(QKeySequence.SequenceFormat.NativeText)
 
     menu = QMenu("Chat With Your Cards", mw)
-    open_action = QAction(f"Open / focus chat\t{hint(config['toggle_shortcut'])}", mw)
+    open_action = QAction(f"Toggle chat\t{hint(config['toggle_shortcut'])}", mw)
     open_action.triggered.connect(lambda *_a: toggle_chat_focus())
     new_action = QAction(f"New chat\t{hint(config['new_chat_shortcut'])}", mw)
     new_action.triggered.connect(lambda *_a: new_chat())
@@ -856,23 +856,49 @@ def _open_in_claude_code(target: str = "terminal") -> None:
             notice(
                 "Opened in the Claude Code desktop app (new session - the "
                 "app can't resume by id yet, so it reads this chat's "
-                "transcript instead)."
+                "transcript instead). For a true resume: open in Terminal, "
+                "then type /desktop there."
             )
         except Exception:
             notice(f"Could not open the desktop app; deep link: {url}")
         return
 
+    # Carry the dock's agent settings into the terminal session so the
+    # conversation continues under the same model/effort/fast-mode - and the
+    # same environment power: full agent tools maps to bypassPermissions,
+    # exactly what the dock itself spawns with (user-requested 2026-07-13).
+    # The collection-write permission mode needs no flag: it is enforced live
+    # by our MCP server, which the terminal session talks to via .mcp.json.
+    from .backends.claude_cli import VALID_EFFORTS
+
+    extra_args: list[str] = []
+    model = str(state.config.get("model", "")).strip()
+    effort = str(state.config.get("effort", "")).strip()
+    if model:
+        extra_args += ["--model", model]
+    if effort in VALID_EFFORTS:
+        extra_args += ["--effort", effort]
+    if state.config.get("fast_mode"):
+        import json as _json
+
+        extra_args += ["--settings", _json.dumps({"fastMode": True})]
+    if str(state.config.get("agent_tools", "sandbox")) == "full":
+        extra_args += ["--permission-mode", "bypassPermissions"]
+
     cmd = f"cd {shlex.quote(str(agent_home))} && claude"
     if sid:
         cmd += f" --resume {shlex.quote(str(sid))}"
+    for arg in extra_args:
+        cmd += f" {shlex.quote(arg)}"
 
     app = str(state.config.get("terminal_app", "")).strip()
     if _open_macos_terminal(cmd, app):
         where = app or "Terminal"
         if sid:
+            carried = " under this chat's model/effort settings" if extra_args else ""
             notice(
-                f"Resumed this chat in Claude Code ({where}) - it has your anki "
-                "tools via .mcp.json plus Claude Code's full toolset."
+                f"Resumed this chat in Claude Code ({where}){carried} - it has "
+                "your anki tools via .mcp.json plus Claude Code's full toolset."
             )
         else:
             # No exchanged message yet -> no session to resume. Be honest
