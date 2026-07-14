@@ -49,6 +49,18 @@ export function VimComposer({ store }: { store: ChatStore }) {
   const mappings = ui.settings?.vimMappings ?? [];
 
   useEffect(() => {
+    // Clear our previous user mappings before re-applying, so a LIVE config
+    // edit (Python's setConfigUpdatedAction re-pushes settings without an Anki
+    // restart) fully replaces the old set instead of layering on top - a
+    // removed/changed mapping actually goes away. mapclear() drops only USER
+    // maps; built-in vim commands are preserved (verified in the vendored
+    // source). Guarded in case a vim build lacks it (then it's additive, the
+    // pre-live-reload behavior).
+    try {
+      (Vim as unknown as { mapclear?: () => void }).mapclear?.();
+    } catch {
+      /* fall through to additive mapping */
+    }
     for (const m of mappings) {
       try {
         Vim.map(m[0], m[1], m[2]);

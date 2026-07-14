@@ -443,6 +443,10 @@ def _wire_bridge() -> None:
     )
     bridge.on("set_setting", _set_setting)
     bridge.on("open_addon_config", lambda _msg: _open_addon_config())
+    # Saving the add-on's config in Anki's built-in editor re-pushes the live
+    # preferences (vim mode/mappings, theme, dock side, ...) so an edit applies
+    # without an Anki restart.
+    mw.addonManager.setConfigUpdatedAction(__name__, _on_config_updated)
 
 
 def _mark_web_ready() -> None:
@@ -587,6 +591,42 @@ def _set_setting(msg: dict[str, Any]) -> None:
     config[key] = state.config[key]
     mw.addonManager.writeConfig(__name__, config)
     _push_settings()
+
+
+def _on_config_updated(*_args: Any) -> None:
+    """Anki's built-in add-on config editor was saved (registered via
+    setConfigUpdatedAction). Reload config and re-push the *preferences* that
+    can change live - vim mode/mappings, theme, dock side, shortcuts, suggested
+    questions, open-in-Claude target - so editing them (e.g. a vim mapping) now
+    applies WITHOUT an Anki restart. Agent keys (model/effort/fast/agent_tools/
+    permission_mode) keep their existing "applies on your next message"
+    semantics and are deliberately not re-applied here, so a config edit can't
+    yank the model out from under an in-flight chat. Reads getConfig fresh
+    rather than the passed arg, so it's robust to the callback's signature."""
+    if state.dock is None:
+        return
+    merged = dict(DEFAULT_CONFIG)
+    merged.update(mw.addonManager.getConfig(__name__) or {})
+    # Mutate the existing dict in place - do NOT rebind `state.config`. Other
+    # components (ProposalManager, controller, dock) captured a reference to
+    # this dict at init; rebinding would leave them reading a stale config.
+    state.config.clear()
+    state.config.update(merged)
+    desired_side = "left" if merged.get("dock_side") == "left" else "right"
+    if state.dock.side != desired_side:
+        from .dock import move_dock
+
+        move_dock(state.dock, desired_side)
+    _push_settings()
+    state.dock.bridge.push(
+        {
+            "type": "ui_config",
+            "suggested_questions": bool(merged.get("suggested_questions", True)),
+            "open_in_claude_target": _norm_open_target(
+                merged.get("open_in_claude_target", "terminal")
+            ),
+        }
+    )
 
 
 def _set_permission_mode(msg: dict[str, Any]) -> None:

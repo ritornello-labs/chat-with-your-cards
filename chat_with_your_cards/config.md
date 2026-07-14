@@ -201,4 +201,10 @@
 Shortcut strings use Qt key-sequence syntax (`Ctrl+J`, `Ctrl+;`, `Ctrl+K`).
 On macOS, `Ctrl` in these strings means the Command key.
 
-Restart Anki (or reload the profile) after changing settings.
+Most preferences apply **live** when you save this config in Anki's add-on
+config editor — no restart needed. That covers `vim_mode`/`vim_mappings`,
+`theme`, `dock_side`, the shortcuts, `suggested_questions`, and
+`open_in_claude_target`. Agent keys (`model`, `effort`, `fast_mode`,
+`agent_tools`, `permission_mode`) intentionally take effect on your next message
+rather than mid-chat. A few structural keys (`backend`, `claude_cli_path`, MCP
+widening, `stats_refresh_minutes`) still want a restart to fully re-init.
