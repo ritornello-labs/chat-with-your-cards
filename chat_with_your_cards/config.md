@@ -17,9 +17,19 @@
   newline). Also toggleable from the Settings panel.
 - `vim_mappings` (default `[]` = stock vim keys): your personal vim mappings
   as `[keys, mapped-to, mode]` triples with vim `:map` semantics; `mode` is
-  `normal`, `insert`, or `visual`. Example — leave insert mode with `fd` and
-  move by visual line:
-  `[["fd", "<Esc>", "insert"], ["j", "gj", "normal"], ["k", "gk", "normal"]]`.
+  `normal`, `insert`, or `visual`. Example — leave insert mode with `fd`, and
+  make `j`/`k`/`0`/`$` move by *visual* (screen) line inside a wrapped message
+  instead of the whole logical line:
+  ```json
+  [["fd", "<Esc>", "insert"],
+   ["j", "gj", "normal"], ["k", "gk", "normal"],
+   ["0", "g0", "normal"], ["0", "g0", "visual"],
+   ["$", "g$", "normal"], ["$", "g$", "visual"]]
+  ```
+  All four motions (`gj`/`gk`/`g0`/`g$`) are genuinely visual-line-aware in the
+  bundled vim engine (verified 2026-07-14 against wrapped lines), and mapping
+  `0` does **not** break numeric counts — `10j` still moves ten lines, because
+  the count parser treats a `0` mid-count as a digit, not the mapped motion.
 - `theme` (default `teal`): the dock's colour palette, also selectable from the
   Settings panel. One of `teal` (cool porcelain + deep teal), `indigo` (neutral
   paper + muted indigo), or `evergreen` (oat paper + deep pine). Each has a
