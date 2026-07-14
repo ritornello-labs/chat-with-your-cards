@@ -182,6 +182,29 @@ export interface DoctorRow {
   readonly link?: string;
 }
 
+/**
+ * Dock shell state (mirrors events.ts DockStateEvent). `null` until the host
+ * reports it: in Anki that is window.CWYC_INITIAL_DOCK (read at mount, set by
+ * dock.py's body fragment so the first paint is already correct) followed by
+ * live dock_state pushes; in dev the replayer pushes one on ready. While
+ * null the App renders the quiet boot state (plain warm background, no
+ * chrome) instead of guessing wrong and flashing.
+ */
+export interface DockUiState {
+  readonly expanded: boolean;
+  readonly animating: boolean;
+  readonly width: number;
+  readonly side: "left" | "right";
+}
+
+/** User-facing settings snapshot (events.ts SettingsEvent); null = not pushed yet. */
+export interface SettingsState {
+  readonly restoreLastChat: boolean;
+  readonly dockSide: "left" | "right";
+  readonly toggleShortcut: string;
+  readonly newChatShortcut: string;
+}
+
 export interface UiState {
   readonly agent: AgentState;
   readonly openTarget: "terminal" | "desktop";
@@ -190,6 +213,8 @@ export interface UiState {
   readonly history: readonly HistoryEntry[] | null; // null = never fetched
   readonly doctor: readonly DoctorRow[] | null; // null = never run
   readonly notice: { text: string; seq: number } | null;
+  readonly dock: DockUiState | null; // null = host has not reported yet
+  readonly settings: SettingsState | null; // null = not pushed yet
 }
 
 export const PERMISSION_MODES: readonly { id: string; label: string; hint: string }[] = [
@@ -210,6 +235,8 @@ const DEFAULT_UI_STATE: UiState = {
   history: null,
   doctor: null,
   notice: null,
+  dock: null,
+  settings: null,
 };
 
 export interface ChatState {
@@ -392,6 +419,20 @@ export class ChatStore {
     postCommand({ type: "run_doctor" });
   }
 
+  /**
+   * Expand/collapse the dock shell. NOT optimistic on purpose: the crossfade
+   * must be driven by the host's dock_state pushes (which arrive at width-
+   * animation start/end) so the webview resize and the fade stay in step.
+   */
+  setDockExpanded(expanded: boolean): void {
+    postCommand({ type: "set_dock_expanded", expanded });
+  }
+
+  /** Persist one whitelisted setting; Python re-pushes "settings" after. */
+  setSetting(key: string, value: unknown): void {
+    postCommand({ type: "set_setting", key, value });
+  }
+
   // ---- inbound: Python -> UI ----
 
   /**
@@ -515,6 +556,44 @@ export class ChatStore {
       case "doctor": {
         const results = ((event as { results?: unknown[] }).results ?? []) as DoctorRow[];
         this.ui = { ...this.ui, doctor: results };
+        this.emit();
+        break;
+      }
+      case "dock_state": {
+        const dock = event as {
+          expanded?: boolean;
+          animating?: boolean;
+          width?: number;
+          side?: string;
+        };
+        this.ui = {
+          ...this.ui,
+          dock: {
+            expanded: Boolean(dock.expanded),
+            animating: Boolean(dock.animating),
+            width: typeof dock.width === "number" && dock.width > 0 ? dock.width : 420,
+            side: dock.side === "left" ? "left" : "right",
+          },
+        };
+        this.emit();
+        break;
+      }
+      case "settings": {
+        const s = event as {
+          restore_last_chat?: boolean;
+          dock_side?: string;
+          toggle_shortcut?: string;
+          new_chat_shortcut?: string;
+        };
+        this.ui = {
+          ...this.ui,
+          settings: {
+            restoreLastChat: Boolean(s.restore_last_chat),
+            dockSide: s.dock_side === "left" ? "left" : "right",
+            toggleShortcut: String(s.toggle_shortcut ?? ""),
+            newChatShortcut: String(s.new_chat_shortcut ?? ""),
+          },
+        };
         this.emit();
         break;
       }

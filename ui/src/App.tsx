@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ChatRuntimeProvider, useChatState } from "./ChatRuntimeProvider";
 import { Thread } from "./Thread";
 import { Header } from "./components/Header";
+import { Rail } from "./components/Rail";
 import { UsageFooter } from "./components/UsageFooter";
 import type { ChatStore } from "./store";
 
@@ -29,18 +30,58 @@ function NoticeStrip({ store }: { store: ChatStore }) {
 }
 
 /**
+ * The dock shell: two layers over one warm surface. `.cwyc-full` is the whole
+ * chat UI; `.cwyc-rail` is the slim collapsed presence. The host (dock.py, or
+ * the dev replayer) drives which one shows via dock_state pushes; the two
+ * crossfade while Python animates the real dock width, and the full layer is
+ * width-pinned during the animation so its text never rewraps mid-slide.
+ *
+ * Until the first dock_state is known the shell renders the quiet boot state
+ * (bare background, no chrome) rather than guessing and flashing the wrong
+ * layer. In Anki, dock.py plants window.CWYC_INITIAL_DOCK in the body
+ * fragment so this resolves at mount, before the first paint.
+ */
+function Shell({ store }: { store: ChatStore }) {
+  const { ui } = useChatState(store);
+  const dock = ui.dock;
+
+  useEffect(() => {
+    // The production bundle runs in <head>, before dock.py's body fragment
+    // (and its initial-state script) exists - so read it at mount, not at
+    // store construction. Live dock_state pushes take over from there.
+    if (store.getSnapshot().ui.dock === null) {
+      const initial = (window as unknown as { CWYC_INITIAL_DOCK?: unknown }).CWYC_INITIAL_DOCK;
+      if (initial && typeof initial === "object") {
+        store.dispatch({ type: "dock_state", animating: false, ...initial });
+      }
+    }
+  }, [store]);
+
+  const railed = dock !== null && !dock.expanded;
+  // Pin the full layer to the expanded width while collapsed or animating so
+  // the width animation slides/clips it instead of rewrapping every line.
+  const pinWidth = dock !== null && (dock.animating || !dock.expanded) ? dock.width : undefined;
+  return (
+    <div className={"cwyc-app" + (railed ? " cwyc-railed" : "") + (dock === null ? " cwyc-boot" : "")}>
+      <div className="cwyc-full" style={pinWidth !== undefined ? { width: pinWidth } : undefined}>
+        <Header store={store} />
+        <Thread store={store} />
+        <NoticeStrip store={store} />
+        <Footer store={store} />
+      </div>
+      <Rail store={store} />
+    </div>
+  );
+}
+
+/**
  * Mounted into the host page's #cwyc-root container (see main.tsx / dev-main.tsx) -
  * this component does not own that id itself, so it can be mounted anywhere.
  */
 export function App({ store }: { store: ChatStore }) {
   return (
     <ChatRuntimeProvider store={store}>
-      <div className="cwyc-app">
-        <Header store={store} />
-        <Thread store={store} />
-        <NoticeStrip store={store} />
-        <Footer store={store} />
-      </div>
+      <Shell store={store} />
     </ChatRuntimeProvider>
   );
 }

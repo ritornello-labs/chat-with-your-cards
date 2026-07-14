@@ -22,6 +22,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "toggle_shortcut": "Ctrl+J",
     "new_chat_shortcut": "Ctrl+Shift+J",
     "dock_width": 420,
+    # The dock is always visible; collapsed means the slim rail. Both persist
+    # across sessions (saved at teardown alongside dock_width).
+    "dock_collapsed": True,
+    "dock_side": "right",
     "backend": "auto",
     "claude_cli_path": "",
     "model": "",
@@ -147,7 +151,11 @@ def _setup() -> None:
     )
     state.stats_cache.start()
 
-    state.dock = dock_mod.create_dock(dock_width=int(config["dock_width"]))
+    state.dock = dock_mod.create_dock(
+        dock_width=int(config["dock_width"]),
+        collapsed=bool(config.get("dock_collapsed", True)),
+        side=str(config.get("dock_side", "right")),
+    )
 
     from .transcripts import TranscriptStore
 
@@ -407,6 +415,13 @@ def _wire_bridge() -> None:
     )
     bridge.on("set_agent", _set_agent)
     bridge.on("set_permission_mode", _set_permission_mode)
+    bridge.on(
+        "set_dock_expanded",
+        lambda msg: state.dock.set_expanded(bool(msg.get("expanded", True)))
+        if state.dock is not None
+        else None,
+    )
+    bridge.on("set_setting", _set_setting)
 
 
 def _mark_web_ready() -> None:
@@ -431,6 +446,12 @@ def _mark_web_ready() -> None:
         )
     if state.controller is not None:
         state.controller.push_context_chip()
+    # Authoritative dock + settings state (the body fragment planted the
+    # initial dock state for first paint; this keeps a reloaded webview honest
+    # and feeds the Settings panel).
+    if state.dock is not None:
+        state.dock.push_state(animating=False)
+    _push_settings()
     _push_collection_meta()
     _scan_learning()
     # Optionally reopen the last chat where the user left off (default off:
@@ -461,6 +482,44 @@ def _push_collection_meta() -> None:
             "tags": tags,
         }
     )
+
+
+def _push_settings() -> None:
+    """Feed the Settings panel (gear icon) its authoritative snapshot."""
+    if state.dock is None:
+        return
+    state.dock.bridge.push(
+        {
+            "type": "settings",
+            "restore_last_chat": bool(state.config.get("restore_last_chat", False)),
+            "dock_side": str(state.config.get("dock_side", "right")),
+            "toggle_shortcut": str(state.config.get("toggle_shortcut", "")),
+            "new_chat_shortcut": str(state.config.get("new_chat_shortcut", "")),
+        }
+    )
+
+
+def _set_setting(msg: dict[str, Any]) -> None:
+    """Settings-panel writes: a small whitelist, each persisted via
+    writeConfig and applied live where it can be. Unknown keys are ignored
+    (never a generic config poke - the panel is not a JSON editor)."""
+    key = str(msg.get("key", ""))
+    value = msg.get("value")
+    if key == "restore_last_chat":
+        state.config["restore_last_chat"] = bool(value)
+    elif key == "dock_side":
+        side = "left" if value == "left" else "right"
+        state.config["dock_side"] = side
+        if state.dock is not None:
+            from .dock import move_dock
+
+            move_dock(state.dock, side)
+    else:
+        return
+    config = mw.addonManager.getConfig(__name__) or {}
+    config[key] = state.config[key]
+    mw.addonManager.writeConfig(__name__, config)
+    _push_settings()
 
 
 def _set_permission_mode(msg: dict[str, Any]) -> None:
@@ -922,7 +981,9 @@ def _save_dock_width() -> None:
     if state.dock is None:
         return
     config = mw.addonManager.getConfig(__name__) or {}
-    config["dock_width"] = state.dock.width()
+    # expanded_width, not width(): while collapsed the live width is the rail.
+    config["dock_width"] = state.dock.expanded_width
+    config["dock_collapsed"] = not state.dock.expanded
     mw.addonManager.writeConfig(__name__, config)
 
 

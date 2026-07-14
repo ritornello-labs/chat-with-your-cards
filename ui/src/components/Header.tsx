@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useChatState } from "../ChatRuntimeProvider";
-import type { ChatStore, DoctorRow, HistoryEntry } from "../store";
+import { SettingsPanel } from "./SettingsPanel";
+import type { ChatStore, HistoryEntry } from "../store";
 
 /**
- * The dock header (DESIGN.md section 9): chat management only - New chat,
- * History, the Open-in-Claude-Code split button, and the doctor cog. Every
- * action posts a bridge command whose Python handler already exists
- * (__init__.py's _wire_bridge); this component adds no new protocol.
+ * The dock header (DESIGN.md section 9): the collapse-to-rail control, chat
+ * management (New chat, History), the Open-in-Claude-Code split button, and
+ * the Settings cog (which also hosts the Setup check). With the native Qt
+ * title bar gone (dock.py), this row IS the dock's chrome.
  */
 
 /** Close an open panel on outside-click or Esc, the classic menu contract. */
@@ -69,25 +70,6 @@ function HistoryPanel({ store, onClose }: { store: ChatStore; onClose: () => voi
   );
 }
 
-function DoctorPanel({ rows }: { rows: readonly DoctorRow[] | null }) {
-  return (
-    <div className="cwyc-panel cwyc-panel-header" role="dialog" aria-label="Setup check">
-      <div className="cwyc-panel-title">Setup check</div>
-      {rows === null ? (
-        <div className="cwyc-panel-empty">Checking…</div>
-      ) : (
-        rows.map((row, i) => (
-          <div key={i} className={"cwyc-doctor-row cwyc-doctor-" + row.status}>
-            <span className="cwyc-doctor-dot" aria-hidden="true" />
-            <span className="cwyc-doctor-label">{row.label}</span>
-            <span className="cwyc-doctor-detail">{row.detail}</span>
-          </div>
-        ))
-      )}
-    </div>
-  );
-}
-
 function HeaderButton(props: {
   title: string;
   testid: string;
@@ -128,13 +110,42 @@ function TargetGlyph({ target }: { target: "terminal" | "desktop" }) {
 }
 
 export function Header({ store }: { store: ChatStore }) {
-  const [open, setOpen] = useState<"history" | "doctor" | "cc" | null>(null);
+  const [open, setOpen] = useState<"history" | "settings" | "cc" | null>(null);
   const ref = useDismiss(open !== null, () => setOpen(null));
   const ui = useChatState(store).ui;
   const targetLabel = ui.openTarget === "desktop" ? "Desktop app" : "Terminal";
+  const side = ui.dock?.side ?? "right";
 
   return (
     <div className="cwyc-header" data-testid="header" ref={ref}>
+      <HeaderButton
+        title="Collapse to the side rail (stays one click away)"
+        testid="collapse"
+        onClick={() => store.setDockExpanded(false)}
+      >
+        {/* Double chevron pointing INTO the dock edge: the direction the panel folds away. */}
+        <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+          {side === "right" ? (
+            <path
+              d="M4.5 4 8.5 8l-4 4M8.5 4l4 4-4 4"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              fill="none"
+            />
+          ) : (
+            <path
+              d="M11.5 4 7.5 8l4 4M7.5 4l-4 4 4 4"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              fill="none"
+            />
+          )}
+        </svg>
+      </HeaderButton>
       <HeaderButton title="New chat" testid="new-chat" onClick={() => store.newChat()}>
         <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
           <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" fill="none" />
@@ -189,10 +200,11 @@ export function Header({ store }: { store: ChatStore }) {
         </button>
       </div>
 
-      <HeaderButton title="Setup check" testid="settings" onClick={() => {
-        if (open !== "doctor") store.runDoctor();
-        setOpen(open === "doctor" ? null : "doctor");
-      }}>
+      <HeaderButton
+        title="Settings"
+        testid="settings"
+        onClick={() => setOpen(open === "settings" ? null : "settings")}
+      >
         <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
           <path
             d="M8 10.2A2.2 2.2 0 1 0 8 5.8a2.2 2.2 0 0 0 0 4.4zm5.4-2.2.9-1.6-1.4-1.4-1.6.9a4.7 4.7 0 0 0-1-.6L10 3.5H8l-.3 1.8a4.7 4.7 0 0 0-1 .6l-1.6-.9-1.4 1.4.9 1.6a4.7 4.7 0 0 0-.6 1L2.2 9v2h1.8"
@@ -205,7 +217,7 @@ export function Header({ store }: { store: ChatStore }) {
       </HeaderButton>
 
       {open === "history" ? <HistoryPanel store={store} onClose={() => setOpen(null)} /> : null}
-      {open === "doctor" ? <DoctorPanel rows={ui.doctor} /> : null}
+      {open === "settings" ? <SettingsPanel store={store} /> : null}
       {open === "cc" ? (
         <div className="cwyc-panel cwyc-panel-header" role="menu">
           <div className="cwyc-panel-title">Open in</div>

@@ -50,6 +50,10 @@ body.night-mode #dev-toolbar button {
   border-left: 1px solid #ccc;
   border-right: 1px solid #ccc;
   overflow: hidden;
+  /* Stand-in for dock.py's QVariantAnimation so the rail crossfade can be
+     judged in the browser (the replayer toggles this width on
+     set_dock_expanded). */
+  transition: width 220ms cubic-bezier(0.33, 1, 0.68, 1);
 }
 
 body.night-mode #dev-frame {

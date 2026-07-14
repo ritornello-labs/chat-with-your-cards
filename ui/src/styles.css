@@ -182,6 +182,31 @@ body.nightMode {
   --cwyc-card-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
 }
 
+/* ---------- host page fill ---------- */
+
+/* Inside Anki, stdHtml serves a bare page: the body keeps its default margin
+   and background, nothing gives #cwyc-root a height, so .cwyc-app's
+   height:100% collapsed to content height and the chat floated as a
+   different-colored box inside the dock (the "panel inside a panel" look,
+   dogfood 2026-07-13). The dev harness papers over this with its own rules
+   (dev-harness.css, imported after this file, keeps its toolbar layout);
+   these make production match: one warm surface, edge to edge. */
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--cwyc-bg);
+}
+
+#cwyc-root {
+  height: 100%;
+}
+
 /* ---------- base ---------- */
 
 .cwyc-app,
@@ -255,6 +280,108 @@ body.nightMode {
 
 .cwyc-app ::selection {
   background: var(--cwyc-selection);
+}
+
+/* ---------- dock shell: full layer <-> rail crossfade ---------- */
+
+/* Two layers over the one warm surface. Python (dock.py) animates the real
+   dock width; the webview only crossfades between them (dock_state pushes at
+   animation start/end - see App.tsx Shell). The full layer is width-pinned
+   inline while collapsed/animating so the shrinking viewport CLIPS it at the
+   edge instead of rewrapping every line mid-slide. */
+.cwyc-full {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  opacity: 1;
+  transition: opacity 150ms ease 40ms;
+}
+
+.cwyc-railed .cwyc-full {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 130ms ease,
+    visibility 0s linear 130ms;
+}
+
+/* The slim collapsed presence: one generous click target. */
+#cwyc-root .cwyc-rail {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 15px 0 13px;
+  background: var(--cwyc-bg);
+  cursor: pointer;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 140ms ease,
+    visibility 0s linear 140ms;
+}
+
+#cwyc-root .cwyc-railed .cwyc-rail {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity 170ms ease 70ms;
+}
+
+#cwyc-root .cwyc-rail:hover {
+  background: var(--cwyc-amber-soft);
+}
+
+/* The ember is the rail's identity: calm amber at rest, breathing while a
+   reply is streaming (so a collapsed dock still shows life at a glance). */
+.cwyc-rail-ember {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--cwyc-amber);
+  box-shadow: 0 0 5px 0 var(--cwyc-amber-ring);
+}
+
+.cwyc-rail-ember-live {
+  animation: cwyc-ember-breathe 2.5s ease-in-out infinite;
+}
+
+.cwyc-rail-word {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  writing-mode: vertical-rl;
+  font: 500 10px var(--cwyc-mono);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--cwyc-fg-faint);
+}
+
+.cwyc-rail-chevron {
+  flex: 0 0 auto;
+  color: var(--cwyc-fg-faint);
+}
+
+#cwyc-root .cwyc-rail:hover .cwyc-rail-word,
+#cwyc-root .cwyc-rail:hover .cwyc-rail-chevron {
+  color: var(--cwyc-fg-subtle);
+}
+
+/* Before the host reports the dock state (a frame or two at boot): bare warm
+   surface, no chrome - never a flash of the wrong layer. */
+.cwyc-boot .cwyc-full,
+.cwyc-boot .cwyc-rail {
+  opacity: 0;
+  visibility: hidden;
+  transition: none;
 }
 
 /* Amber focus ring on every interactive element; the composer textarea is
@@ -1095,8 +1222,8 @@ body.nightMode {
 
 #cwyc-root .cwyc-send {
   flex: 0 0 auto;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border: none;
   border-radius: 50%;
   background: var(--cwyc-amber);
@@ -1354,13 +1481,22 @@ body.nightMode {
 .cwyc-composer-bar {
   justify-content: space-between;
   align-items: center;
-  gap: 6px;
+  gap: 5px 6px;
+  /* Narrow dock: the model/send group wraps to its own line instead of the
+     chips crushing into each other (dogfood 2026-07-13: "buttons crammed
+     together" at small widths). */
+  flex-wrap: wrap;
 }
 .cwyc-composer-left,
 .cwyc-composer-right {
   display: flex;
   align-items: center;
   gap: 5px;
+  min-width: 0;
+}
+.cwyc-composer-right {
+  /* Stay glued to the right edge even on a wrapped second line. */
+  margin-left: auto;
 }
 #cwyc-root .cwyc-chip {
   border: 1px solid var(--cwyc-border);
@@ -1371,6 +1507,13 @@ body.nightMode {
   padding: 3px 9px;
   cursor: pointer;
   white-space: nowrap;
+}
+/* Long model labels ("Default model · high · fast · full") ellipsize instead
+   of shoving the send button around. */
+#cwyc-root .cwyc-composer-bar .cwyc-chip {
+  max-width: 168px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 #cwyc-root .cwyc-chip:hover {
   background: var(--cwyc-surface);
@@ -1389,6 +1532,72 @@ body.nightMode {
 .cwyc-chip-primary:hover {
   background: var(--cwyc-amber-hover);
   color: var(--cwyc-on-amber);
+}
+
+/* ---- settings panel ------------------------------------------------------ */
+
+.cwyc-panel-settings {
+  min-width: 252px;
+}
+.cwyc-setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 8px;
+  font-size: 12.5px;
+  color: var(--cwyc-fg);
+}
+.cwyc-setting-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.cwyc-setting-kbd {
+  flex: 0 0 auto;
+  font: 400 11px var(--cwyc-mono);
+  color: var(--cwyc-fg-subtle);
+  background: var(--cwyc-surface);
+  border: 1px solid var(--cwyc-border-subtle);
+  border-radius: 5px;
+  padding: 1px 7px;
+}
+.cwyc-setting-check {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--cwyc-amber);
+}
+.cwyc-seg {
+  flex: 0 0 auto;
+  display: inline-flex;
+  border: 1px solid var(--cwyc-border);
+  border-radius: 7px;
+  overflow: hidden;
+}
+#cwyc-root .cwyc-seg-btn {
+  font: 500 11px var(--cwyc-font);
+  color: var(--cwyc-fg-subtle);
+  background: transparent;
+  padding: 3px 11px;
+  cursor: pointer;
+}
+#cwyc-root .cwyc-seg-btn + .cwyc-seg-btn {
+  border-left: 1px solid var(--cwyc-border);
+}
+#cwyc-root .cwyc-seg-btn:hover {
+  background: var(--cwyc-surface);
+  color: var(--cwyc-fg);
+}
+#cwyc-root .cwyc-seg-btn.cwyc-active {
+  background: var(--cwyc-amber-soft);
+  color: var(--cwyc-amber-ink);
+}
+.cwyc-setting-footnote {
+  padding: 8px 8px 3px;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--cwyc-fg-faint);
 }
 
 /* pins panel rows */

@@ -903,13 +903,26 @@ def _run_checks() -> dict[str, Any]:
     dock = mw.findChild(QDockWidget, DOCK_OBJECT_NAME)
 
     def _dock_exists() -> Any:
+        # Shell redesign (2026-07-13): the dock is ALWAYS visible; it starts
+        # as the collapsed rail (config default dock_collapsed=True), pinned
+        # at the rail width, with the native Qt title bar replaced by an
+        # empty widget (the webview header is the chrome).
+        from chat_with_your_cards.dock import RAIL_WIDTH
+
         if dock is None or state.dock is not dock:
             raise AssertionError("chat dock not found on the main window")
-        if dock.isVisible():
-            raise AssertionError("dock should start hidden")
+        if not dock.isVisible():
+            raise AssertionError("dock should start visible (as the rail)")
+        if dock.expanded:
+            raise AssertionError("dock should start collapsed (rail)")
+        if dock.width() != RAIL_WIDTH:
+            raise AssertionError(f"rail width {dock.width()}, expected {RAIL_WIDTH}")
+        title_bar = dock.titleBarWidget()
+        if title_bar is None or title_bar.height() > 0:
+            raise AssertionError("native title bar should be replaced by an empty widget")
         return dock
 
-    check("dock exists and starts hidden", _dock_exists)
+    check("dock starts visible as the collapsed rail, no native title bar", _dock_exists)
 
     def _tools_action() -> None:
         actions = mw.form.menuTools.actions()
@@ -966,11 +979,19 @@ def _run_checks() -> dict[str, Any]:
 
     check("webview ready ping received", _web_ready)
 
-    def _toggle_shows_dock() -> None:
+    def _toggle_expands_dock() -> None:
+        # expand_target(), not MIN_DOCK_WIDTH: in a small window the target
+        # is clamped below the nominal floor so the dock never gets laid out
+        # wider than the window (which Qt "solves" by clipping it).
         addon.toggle_chat_focus()
-        _wait_until(dock.isVisible, 3_000, "dock to become visible after toggle")
+        _wait_until(
+            lambda: dock.expanded and dock._anim is None
+            and dock.width() >= dock.expand_target(),
+            3_000,
+            "dock to finish expanding after toggle",
+        )
 
-    check("toggle shows dock", _toggle_shows_dock)
+    check("toggle expands the rail to the full dock", _toggle_expands_dock)
 
     def _scripted_chat() -> dict[str, Any]:
         controller = state.controller
@@ -1009,6 +1030,12 @@ def _run_checks() -> dict[str, Any]:
             "  markdown: document.querySelectorAll('[data-testid=assistant-message] .cwyc-markdown').length,"
             "  composer_input_rect: compInput ? compInput.getBoundingClientRect().height : -1,"
             "  send: document.querySelector('[data-testid=send]') ? true : false,"
+            "  send_overflow: (function() {"
+            "    var b = document.querySelector('[data-testid=send]');"
+            "    if (!b) return 0;"
+            "    return Math.max(0, Math.round(b.getBoundingClientRect().right"
+            "      - document.documentElement.clientWidth));"
+            "  })(),"
             "  stop: document.querySelector('[data-testid=stop]') ? true : false,"
             "  thinking_indicator: document.querySelectorAll('[data-testid=thinking-indicator]').length,"
             "  thinking_summary: document.querySelectorAll('[data-testid=thinking-summary]').length,"
@@ -1043,6 +1070,14 @@ def _run_checks() -> dict[str, Any]:
         # Stop button).
         if not dom["send"] or dom["stop"]:
             raise AssertionError(f"composer not back to Send after done: {dom}")
+        # The whole composer row must sit INSIDE the visible viewport: a
+        # too-wide layout (e.g. a dock width the window couldn't honor - Qt
+        # clips the dock at the window edge rather than failing) cuts the
+        # send button in half (real Anki, stock ~670px window, 2026-07-13).
+        if dom.get("send_overflow", 0) > 0:
+            raise AssertionError(
+                f"send button overflows the viewport by {dom['send_overflow']}px: {dom}"
+            )
         # TOOL_SCRIPT (backends/fixtures.py, DEMO_MESSAGE selects it via the
         # "tool" keyword) opens with a thinking phase (empty-text,
         # growing-estimated_tokens ThinkingDelta beats - see scripted.py). By
@@ -1071,7 +1106,7 @@ def _run_checks() -> dict[str, Any]:
             "(function() {"
             "  var ids = ['header','new-chat','history-button','open-cc',"
             "             'open-cc-caret','settings','mode-chip','pins-button',"
-            "             'model-picker'];"
+            "             'model-picker','collapse','rail'];"
             "  var out = {};"
             "  ids.forEach(function(id) {"
             "    out[id.replace(/-/g, '_')] ="
@@ -1096,6 +1131,94 @@ def _run_checks() -> dict[str, Any]:
         return controls
 
     check("control surface present (header + composer row)", _control_surface)
+
+    def _collapse_expand_cycle() -> dict[str, Any]:
+        """Drive the shell round-trip through the real webview controls: the
+        header's collapse chevron shrinks the dock to the rail (animated,
+        width pinned at RAIL_WIDTH), the rail click grows it back to the
+        expanded width. Also asserts the settings panel opens (the cog is
+        Settings now, with the Setup check folded inside - dogfood
+        2026-07-13)."""
+        from chat_with_your_cards.dock import RAIL_WIDTH
+
+        _eval_js(
+            dock.web,
+            "(function() { document.querySelector('[data-testid=collapse]').click();"
+            " return true; })();",
+            DOM_TIMEOUT_MS,
+            "collapse click",
+        )
+        _wait_until(
+            lambda: not dock.expanded and dock._anim is None and dock.width() == RAIL_WIDTH,
+            3_000,
+            "dock to collapse to the rail",
+        )
+        rail_visible = _eval_js(
+            dock.web,
+            "(function() {"
+            "  var rail = document.querySelector('[data-testid=rail]');"
+            "  return rail ? getComputedStyle(rail).visibility : 'missing';"
+            "})();",
+            DOM_TIMEOUT_MS,
+            "rail visibility",
+        )
+        if rail_visible != "visible":
+            raise AssertionError(f"rail layer not visible when collapsed: {rail_visible}")
+        _eval_js(
+            dock.web,
+            "(function() { document.querySelector('[data-testid=rail]').click();"
+            " return true; })();",
+            DOM_TIMEOUT_MS,
+            "rail click",
+        )
+        _wait_until(
+            lambda: dock.expanded and dock._anim is None
+            and dock.width() >= dock.expand_target(),
+            3_000,
+            "dock to expand back",
+        )
+        _eval_js(
+            dock.web,
+            "(function() { document.querySelector('[data-testid=settings]').click();"
+            " return true; })();",
+            DOM_TIMEOUT_MS,
+            "settings cog click",
+        )
+
+        def _panel_state() -> Any:
+            # React renders the panel a tick after the click lands, so poll
+            # instead of querying in the same eval (that raced and lost).
+            return _eval_js(
+                dock.web,
+                "(function() {"
+                "  var panel = document.querySelector('[data-testid=settings-panel]');"
+                "  if (!panel) return null;"
+                "  return {"
+                "    panel: true,"
+                "    restore: !!panel.querySelector('[data-testid=setting-restore-last-chat]'),"
+                "    dock_side: !!panel.querySelector('[data-testid=setting-dock-right]'),"
+                "    doctor: !!panel.querySelector('[data-testid=run-doctor]')"
+                "  };"
+                "})();",
+                DOM_TIMEOUT_MS,
+                "settings panel state",
+            )
+
+        _wait_until(lambda: bool(_panel_state()), DOM_TIMEOUT_MS, "settings panel to open")
+        settings = _panel_state()
+        if not (settings and settings.get("restore")
+                and settings.get("dock_side") and settings.get("doctor")):
+            raise AssertionError(f"settings panel incomplete: {settings}")
+        _eval_js(
+            dock.web,
+            "(function() { document.querySelector('[data-testid=settings]').click();"
+            " return true; })();",
+            DOM_TIMEOUT_MS,
+            "settings cog close click",
+        )
+        return {"rail_round_trip": True, "settings": settings}
+
+    check("collapse/expand round-trip + settings panel", _collapse_expand_cycle)
 
     def _focus_toggle_returns() -> None:
         dock.web.setFocus()
@@ -1346,6 +1469,22 @@ def _save_screenshots(result: dict[str, Any]) -> None:
     if not mw.grab().save(str(light_path), "PNG"):
         raise RuntimeError(f"failed to save screenshot to {light_path}")
     result["screenshot"] = str(light_path)
+
+    # The collapsed rail is a first-class UI state now: grab it too.
+    try:
+        addon = importlib.import_module(ADDON_PACKAGE)
+        chat_dock = addon.state.dock
+        chat_dock.set_expanded(False)
+        _wait_until(lambda: chat_dock._anim is None, 3_000, "rail collapse for screenshot")
+        QTest.qWait(400)
+        rail_path = light_path.with_name(light_path.stem + "-rail.png")
+        if mw.grab().save(str(rail_path), "PNG"):
+            result["screenshot_rail"] = str(rail_path)
+        chat_dock.set_expanded(True)
+        _wait_until(lambda: chat_dock._anim is None, 3_000, "re-expand after rail screenshot")
+        QTest.qWait(300)
+    except Exception as exc:
+        result["screenshot_rail_error"] = str(exc)
 
     if os.environ.get("CWYC_SMOKE_HOVER"):
         for tid in ("open-cc", "new-chat", "settings"):

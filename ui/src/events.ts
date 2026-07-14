@@ -126,6 +126,34 @@ export interface UsageEvent {
   fast_mode_state?: string | null;
 }
 
+/**
+ * Dock shell state pushed by Python (dock.py). `animating: true` arrives at
+ * the START of a width animation (so the UI can crossfade + pin its layout
+ * width before the webview starts resizing) and `animating: false` at the
+ * end. `width` is the EXPANDED width in px (the rail width is a constant the
+ * CSS owns); `side` picks the chevron directions.
+ */
+export interface DockStateEvent {
+  type: "dock_state";
+  expanded: boolean;
+  animating: boolean;
+  width: number;
+  side: "left" | "right";
+}
+
+/**
+ * The user-facing settings snapshot (__init__.py's _push_settings): pushed on
+ * ready and re-pushed after every accepted set_setting command, so the panel
+ * always reflects the authoritative persisted config.
+ */
+export interface SettingsEvent {
+  type: "settings";
+  restore_last_chat: boolean;
+  dock_side: "left" | "right";
+  toggle_shortcut: string;
+  new_chat_shortcut: string;
+}
+
 export interface DoneEvent {
   type: "done";
 }
@@ -152,6 +180,8 @@ export type KnownChatEvent =
   | ProposalResolvedEvent
   | ProposalErrorEvent
   | UsageEvent
+  | DockStateEvent
+  | SettingsEvent
   | DoneEvent
   | CancelledEvent
   | ErrorEvent

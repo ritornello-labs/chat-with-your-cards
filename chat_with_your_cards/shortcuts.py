@@ -12,11 +12,15 @@ if TYPE_CHECKING:
 
 
 def toggle_chat_focus(state: AddonState) -> None:
-    """One chord, three context-aware behaviors."""
+    """One chord, three context-aware behaviors: expand the rail (and focus
+    the composer), focus an expanded-but-unfocused chat, or hand focus back
+    to the reviewer. The dock itself is always visible (rail when collapsed);
+    collapsing is the header's chevron or the Escape-like click on the rail's
+    own collapse affordance, not this chord."""
     dock = state.dock
     if dock is None:
         return
-    if not dock.isVisible():
+    if not dock.expanded or not dock.isVisible():
         _focus_chat(state)
         return
     focused = mw.app.focusWidget()

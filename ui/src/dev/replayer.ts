@@ -282,6 +282,7 @@ const WELCOME_SCRIPT: Step[] = [
 export function installDevReplayer(): void {
   let generation = 0;
   let pendingTimers: number[] = [];
+  const devSettings: Record<string, unknown> = { restore_last_chat: false, dock_side: "right" };
 
   function scheduleAll(timeline: Array<[number, ChatEvent]>): void {
     const gen = generation;
@@ -343,6 +344,20 @@ export function installDevReplayer(): void {
           tags: ["ai-created", "analysis", "kimball", "probe"],
         });
         window.chatUI?.dispatch({ type: "pins", pins: { deck: "", note_type: "", tags: [], fields: {} } });
+        window.chatUI?.dispatch({
+          type: "dock_state",
+          expanded: true,
+          animating: false,
+          width: 420,
+          side: "right",
+        });
+        window.chatUI?.dispatch({
+          type: "settings",
+          restore_last_chat: false,
+          dock_side: "right",
+          toggle_shortcut: "Ctrl+J",
+          new_chat_shortcut: "Ctrl+Shift+J",
+        });
         break;
       case "list_history":
         window.chatUI?.dispatch({
@@ -485,6 +500,33 @@ export function installDevReplayer(): void {
       case "open_in_claude":
         window.chatUI?.dispatch({ type: "notice", text: `Would open in Claude Code (${msg.target}).` });
         break;
+      case "set_dock_expanded": {
+        // Mirror dock.py's animation contract: dock_state {animating:true} at
+        // the start of the width animation, {animating:false} at the end. The
+        // #dev-frame width transition (dev-harness.css) plays the role of
+        // Qt's QVariantAnimation so the crossfade can be judged visually.
+        const expanded = Boolean(msg.expanded);
+        const frame = document.getElementById("dev-frame");
+        const state = { type: "dock_state", expanded, width: 420, side: "right" };
+        window.chatUI?.dispatch({ ...state, animating: true });
+        if (frame) frame.style.width = expanded ? "420px" : "44px";
+        window.setTimeout(() => {
+          window.chatUI?.dispatch({ ...state, animating: false });
+        }, 240);
+        break;
+      }
+      case "set_setting": {
+        // Persist-and-echo, like __init__.py's _set_setting.
+        devSettings[String(msg.key)] = msg.value;
+        window.chatUI?.dispatch({
+          type: "settings",
+          restore_last_chat: Boolean(devSettings.restore_last_chat),
+          dock_side: devSettings.dock_side === "left" ? "left" : "right",
+          toggle_shortcut: "Ctrl+J",
+          new_chat_shortcut: "Ctrl+Shift+J",
+        });
+        break;
+      }
       case "send":
         scheduleAll(compile(selectScript(String(msg.text ?? ""))));
         break;
