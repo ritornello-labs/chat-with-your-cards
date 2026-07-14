@@ -895,15 +895,19 @@ def _open_in_claude_code(target: str = "terminal") -> None:
     if str(state.config.get("agent_tools", "sandbox")) == "full":
         extra_args += ["--permission-mode", "bypassPermissions"]
 
-    def resume_command(initial_prompt: str | None = None) -> str:
-        cmd = f"cd {shlex.quote(str(agent_home))} && claude"
+    def resume_argv(initial_prompt: str | None = None) -> list[str]:
+        argv = ["claude"]
         if sid:
-            cmd += f" --resume {shlex.quote(str(sid))}"
-        for arg in extra_args:
-            cmd += f" {shlex.quote(arg)}"
+            argv += ["--resume", str(sid)]
+        argv += extra_args
         if initial_prompt is not None:
-            cmd += f" {shlex.quote(initial_prompt)}"
-        return cmd
+            argv.append(initial_prompt)
+        return argv
+
+    def resume_command(initial_prompt: str | None = None) -> str:
+        # POSIX-shell form (macOS/Linux terminals and the clipboard fallback).
+        parts = " ".join(shlex.quote(a) for a in resume_argv(initial_prompt))
+        return f"cd {shlex.quote(str(agent_home))} && {parts}"
 
     if _norm_open_target(target) == "desktop":
         if sid and _desktop_handoff_invisible(sid, extra_args, agent_home):
@@ -949,8 +953,15 @@ def _open_in_claude_code(target: str = "terminal") -> None:
 
     cmd = resume_command()
     app = str(state.config.get("terminal_app", "")).strip()
-    if _open_macos_terminal(cmd, app):
-        where = app or "Terminal"
+    opened = False
+    if _sys.platform == "darwin":
+        opened = _open_macos_terminal(cmd, app)
+    elif _sys.platform.startswith("linux"):
+        opened = _open_linux_terminal(cmd)
+    elif _sys.platform == "win32":
+        opened = _open_windows_terminal(resume_argv(), agent_home)
+    if opened:
+        where = app or ("Terminal" if _sys.platform == "darwin" else "a terminal window")
         if sid:
             carried = " under this chat's model/effort settings" if extra_args else ""
             notice(
@@ -1071,6 +1082,54 @@ def _desktop_handoff_invisible(
 
     threading.Thread(target=watch, name="cwyc-desktop-handoff", daemon=True).start()
     return True
+
+
+def _open_linux_terminal(command: str) -> bool:
+    """Open a visible terminal running `command` on Linux (user-requested
+    2026-07-14 - the terminal handoff was macOS-only). Best-effort sweep of
+    common emulators; the first one found wins. Returns False so the caller
+    can fall back to the clipboard."""
+    import shutil
+    import subprocess
+
+    candidates: list[tuple[str, list[str]]] = [
+        ("x-terminal-emulator", ["-e"]),  # Debian alternatives symlink
+        ("gnome-terminal", ["--"]),
+        ("konsole", ["-e"]),
+        ("xfce4-terminal", ["-x"]),
+        ("kitty", []),
+        ("alacritty", ["-e"]),
+        ("wezterm", ["start", "--"]),
+        ("xterm", ["-e"]),
+    ]
+    for name, flags in candidates:
+        path = shutil.which(name)
+        if not path:
+            continue
+        try:
+            subprocess.Popen(
+                [path, *flags, "bash", "-lc", command], start_new_session=True
+            )
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def _open_windows_terminal(argv: list[str], cwd: Path) -> bool:
+    """Open a visible cmd window running `argv` on Windows (user-requested
+    2026-07-14). `start` is a cmd builtin, hence shell=True; the empty ""
+    is the window title - without it, start eats a quoted program path as
+    the title. /k keeps the window open, which is the point (it hosts the
+    interactive resumed session)."""
+    import subprocess
+
+    try:
+        quoted = subprocess.list2cmdline(argv)
+        subprocess.Popen(f'start "" cmd /k "{quoted}"', shell=True, cwd=str(cwd))
+        return True
+    except Exception:
+        return False
 
 
 def _open_macos_terminal(command: str, app: str) -> bool:

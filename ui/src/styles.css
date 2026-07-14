@@ -1327,9 +1327,12 @@ body {
   outline: none;
 }
 .cwyc-vim-editor .cm-scroller {
-  font-family: var(--cwyc-font);
-  font-size: 13.5px;
-  line-height: 1.45;
+  /* Monospace when vim keys are on (user-requested 2026-07-14): uniform
+     glyph widths give the block cursor a constant size and column motions
+     their editor feel. IBM Plex Mono is already bundled. */
+  font-family: var(--cwyc-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
   max-height: 160px;
   overflow-y: auto;
 }
@@ -1793,12 +1796,12 @@ body {
 .cwyc-combo-input {
   width: 100%;
   min-width: 0;
-  font: 400 12px var(--cwyc-font);
+  font: 400 12.5px var(--cwyc-font);
   color: var(--cwyc-fg);
   background: var(--cwyc-bg);
   border: 1px solid var(--cwyc-border);
   border-radius: 6px;
-  padding: 3px 6px;
+  padding: 4px 7px;
 }
 .cwyc-combo-input:focus {
   outline: none;
@@ -1861,33 +1864,37 @@ body {
 .cwyc-tagchips {
   position: relative;
   width: 100%;
-  min-height: 24px;
+  min-height: 32px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
-  font: 400 12px var(--cwyc-font);
+  gap: 5px;
+  font: 400 12.5px var(--cwyc-font);
   background: var(--cwyc-bg);
   border: 1px solid var(--cwyc-border);
   border-radius: 6px;
-  padding: 3px 6px;
+  padding: 4px 7px;
   cursor: text;
 }
 .cwyc-tagchips:focus-within {
   border-color: var(--cwyc-amber);
   box-shadow: 0 0 0 2px var(--cwyc-amber-soft);
 }
+/* Anki-editor-like tag chips (dogfood 2026-07-14: the first cut's 11px
+   pills were unreadably small): rounded-rect surface chips at full text
+   size with a clearly clickable delete affordance. */
 .cwyc-tagchip {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
   max-width: 100%;
-  background: var(--cwyc-amber-soft);
-  color: var(--cwyc-amber-ink);
-  border-radius: 999px;
-  padding: 1px 4px 1px 8px;
-  font-size: 11px;
-  line-height: 1.6;
+  background: var(--cwyc-surface);
+  color: var(--cwyc-fg);
+  border: 1px solid var(--cwyc-border);
+  border-radius: 6px;
+  padding: 2px 3px 2px 9px;
+  font-size: 12.5px;
+  line-height: 1.5;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1895,16 +1902,17 @@ body {
 #cwyc-root .cwyc-tagchip-remove {
   flex: 0 0 auto;
   border: none;
+  border-radius: 4px;
   background: none;
-  color: inherit;
-  font-size: 13px;
+  color: var(--cwyc-fg-subtle);
+  font-size: 15px;
   line-height: 1;
-  padding: 0 3px;
+  padding: 1px 5px 2px;
   cursor: pointer;
-  opacity: 0.7;
 }
 #cwyc-root .cwyc-tagchip-remove:hover {
-  opacity: 1;
+  background: var(--cwyc-red-soft);
+  color: var(--cwyc-red);
 }
 .cwyc-tagchips-input {
   flex: 1 1 60px;
