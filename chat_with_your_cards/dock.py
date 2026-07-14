@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from aqt import mw
-from aqt.qt import QDockWidget, Qt, QTimer, QWidget
+from aqt.qt import QDockWidget, QRect, Qt, QTimer, QWidget
 from aqt.webview import AnkiWebView
 
 from .bridge import Bridge
@@ -34,6 +34,13 @@ RAIL_WIDTH = 44
 # 360 keeps the composer control row on one line for the common chip labels;
 # longer ones wrap onto a second row rather than cramming (styles.css).
 MIN_DOCK_WIDTH = 360
+
+# The usable column we always leave the central widget (reviewer/deck browser)
+# when sizing the dock. A dock width the window cannot honor over this gets
+# CLIPPED at the window edge rather than laid out (see _avail_width). Also the
+# threshold for "the window is too thin" - below CENTRAL_MIN + wanted dock the
+# window is grown to fit (see _maybe_grow_window_for_expand).
+CENTRAL_MIN = 330
 
 # Qt's QWIDGETSIZE_MAX (not re-exported by aqt.qt): "no maximum".
 _WIDGET_SIZE_MAX = 16777215
@@ -80,6 +87,13 @@ class ChatDock(QDockWidget):
         # Collapse-only: the mid-slide width snap (see set_expanded).
         self._mid_snap: QTimer | None = None
         self._width_applied = False
+        # Window-grow bookkeeping: when the Anki window is too thin to give the
+        # dock a usable width, expand grows the whole window and collapse shrinks
+        # it back. `_grew_window_to` is the width we set it to (None if we did
+        # not grow); `_geom_before_grow` is the pre-grow window rect to restore.
+        # (See _maybe_grow_window_for_expand / _maybe_restore_window_after_collapse.)
+        self._grew_window_to: int | None = None
+        self._geom_before_grow: QRect | None = None
         self.setObjectName(DOCK_OBJECT_NAME)
         self.setAllowedAreas(
             Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
@@ -118,7 +132,7 @@ class ChatDock(QDockWidget):
         at the window edge (real Anki, stock ~670px window, 2026-07-13: the
         composer's send button was cut in half). Leave the central widget a
         usable column and never demand more than that."""
-        return max(mw.width() - 330, RAIL_WIDTH + 36)
+        return max(mw.width() - CENTRAL_MIN, RAIL_WIDTH + 36)
 
     def expand_target(self) -> int:
         """The width an expand actually aims for: the saved width, clamped
@@ -126,6 +140,61 @@ class ChatDock(QDockWidget):
         MIN_DOCK_WIDTH floor."""
         avail = self._avail_width()
         return max(min(self.expanded_width, avail), min(MIN_DOCK_WIDTH, avail))
+
+    def _screen_geo(self) -> QRect | None:
+        screen = mw.screen()
+        return screen.availableGeometry() if screen is not None else None
+
+    def _maybe_grow_window_for_expand(self) -> None:
+        """If the Anki window is too thin to give the dock a usable width
+        without squeezing the central column below CENTRAL_MIN, widen the whole
+        window so the dock opens at full width - and remember the old size so
+        collapse can shrink it back (unless the user resizes it themselves in
+        between). Skipped when maximized/fullscreen (can't grow a tiled window)
+        or when it's already wide enough."""
+        if self._grew_window_to is not None:
+            return  # already grown for this expansion
+        if mw.isMaximized() or mw.isFullScreen():
+            return
+        wanted_dock = max(self.expanded_width, MIN_DOCK_WIDTH)
+        if mw.width() - CENTRAL_MIN >= wanted_dock:
+            return  # the window can already give the dock its width
+        needed = CENTRAL_MIN + wanted_dock
+        screen = self._screen_geo()
+        if screen is not None:
+            needed = min(needed, screen.width())
+        if needed <= mw.width():
+            return  # screen can't give more; nothing to gain by growing
+        before = QRect(mw.geometry())
+        grown = QRect(before)
+        grown.setWidth(needed)
+        # Keep the grown window on-screen: if it now runs past the right edge,
+        # shift it left, but never past the left edge.
+        if screen is not None and grown.right() > screen.right():
+            grown.moveLeft(max(screen.left(), grown.left() - (grown.right() - screen.right())))
+        mw.setGeometry(grown)
+        self._geom_before_grow = before
+        self._grew_window_to = mw.width()
+
+    def _maybe_restore_window_after_collapse(self) -> None:
+        """Undo a grow from _maybe_grow_window_for_expand, unless the user has
+        since resized the window themselves - then their size wins and we just
+        forget we grew it."""
+        grew_to, before = self._grew_window_to, self._geom_before_grow
+        self._grew_window_to = None
+        self._geom_before_grow = None
+        if before is None or grew_to is None:
+            return
+        if mw.isMaximized() or mw.isFullScreen():
+            return
+        # A manual resize since we grew (a few px tolerance for WM rounding)
+        # means the user chose this size - don't shrink out from under them.
+        if abs(mw.width() - grew_to) > 4:
+            return
+        restored = QRect(mw.geometry())
+        restored.setWidth(before.width())
+        restored.moveLeft(before.left())
+        mw.setGeometry(restored)
 
     def _load_ui(self) -> None:
         # The assistant-ui frontend is the only UI (DESIGN.md section 9,
@@ -202,6 +271,9 @@ class ChatDock(QDockWidget):
         animating = animate and self.isVisible()
         self.push_state(animating=animating)
         if expanded:
+            # Widen the whole window first if it's too thin, so expand_target
+            # below sees the roomier window and the dock opens at full width.
+            self._maybe_grow_window_for_expand()
             target = self.expand_target()
             # Lay the page out at its final width BEFORE the dock widens
             # (the host clips it), so the slide-in starts from a settled
@@ -256,6 +328,9 @@ class ChatDock(QDockWidget):
             mw.resizeDocks([self], [self.expand_target()], Qt.Orientation.Horizontal)
         else:
             self._pin_width(RAIL_WIDTH)
+            # Dock is back to the rail: give the window its pre-grow width back
+            # (a no-op unless we grew it, and skipped if the user resized it).
+            self._maybe_restore_window_after_collapse()
         # The one real page resize of the transition (see _WebHost).
         self.web.setGeometry(0, 0, self._host.width(), self._host.height())
         self.push_state(animating=False)

@@ -1328,6 +1328,108 @@ def _run_checks() -> dict[str, Any]:
 
     check("vim composer toggles on/off via Settings", _vim_mode_round_trip)
 
+    def _vim_mode_persists() -> dict[str, Any]:
+        """Close+reopen reloads the add-on config from disk, so the Settings vim
+        toggle only survives a restart if its writeConfig actually lands in
+        meta.json - not just runtime state. Drive the real handler ON, run the
+        profile-close writer (which must not clobber it), then read the config
+        back the three ways a cold start would: getConfig, the DEFAULT_CONFIG
+        merge startup does, and straight off meta.json on disk."""
+        import json as _json
+        from pathlib import Path as _Path
+
+        try:
+            addon._set_setting({"key": "vim_mode", "value": True})
+            QTest.qWait(50)
+            # Profile-close persists dock geometry; it reads getConfig +
+            # writes, so a stale snapshot here would silently drop vim_mode.
+            addon._save_dock_width()
+            QTest.qWait(20)
+
+            live = bool((mw.addonManager.getConfig(ADDON_PACKAGE) or {}).get("vim_mode"))
+            fresh = dict(addon.DEFAULT_CONFIG)  # same merge as add-on startup
+            fresh.update(mw.addonManager.getConfig(ADDON_PACKAGE) or {})
+            reload_on = bool(fresh.get("vim_mode"))
+            meta_path = _Path(mw.addonManager.addonsFolder(ADDON_PACKAGE)) / "meta.json"
+            disk = _json.loads(meta_path.read_text()) if meta_path.exists() else {}
+            disk_on = bool((disk.get("config") or {}).get("vim_mode"))
+        finally:
+            # Leave the profile stock for later checks/screenshots.
+            addon._set_setting({"key": "vim_mode", "value": False})
+            QTest.qWait(50)
+
+        if not (live and reload_on and disk_on):
+            raise AssertionError(
+                "vim_mode did not persist across a simulated restart: "
+                f"getConfig={live} startup-merge={reload_on} meta.json={disk_on}"
+            )
+        return {"getConfig": live, "startup_merge": reload_on, "meta_json": disk_on}
+
+    check("vim_mode persists across a simulated restart", _vim_mode_persists)
+
+    def _thin_window_grows_and_restores() -> dict[str, Any]:
+        """A window too thin to give the dock a usable column grows to fit on
+        expand and shrinks back on collapse - unless the user resized it, whose
+        size then wins. Defensive: if Anki's own minimum window width won't let
+        us make the window thin enough to need a grow, the grow assertions are
+        skipped (the path is a safe no-op on wide windows)."""
+        from aqt.qt import QRect
+
+        from chat_with_your_cards.dock import CENTRAL_MIN, MIN_DOCK_WIDTH
+
+        def _set_window_width(w: int) -> int:
+            geo = QRect(mw.geometry())
+            geo.setWidth(w)
+            mw.setGeometry(geo)
+            QTest.qWait(60)
+            return mw.width()
+
+        dock.set_expanded(False, animate=False)
+        QTest.qWait(60)
+        # Too thin: room for the central column plus far less than the dock floor.
+        thin = _set_window_width(CENTRAL_MIN + 80)
+        result: dict[str, Any] = {"thin_window": thin}
+        if thin - CENTRAL_MIN >= MIN_DOCK_WIDTH:
+            # The window would not go thin enough (Anki min size); can't exercise
+            # the grow. Still assert expand doesn't break, then restore state.
+            dock.set_expanded(True, animate=False)
+            QTest.qWait(80)
+            result["skipped"] = "window min width too large to force a thin state"
+            return result
+
+        dock.set_expanded(True, animate=False)
+        QTest.qWait(100)
+        grew = mw.width()
+        dock_w = dock.width()
+        if grew <= thin:
+            raise AssertionError(f"window did not grow on expand: {thin} -> {grew}")
+        if dock_w < MIN_DOCK_WIDTH:
+            raise AssertionError(f"dock still below its floor after grow: {dock_w}")
+
+        dock.set_expanded(False, animate=False)
+        QTest.qWait(100)
+        restored = mw.width()
+        if abs(restored - thin) > 6:
+            raise AssertionError(f"window did not restore on collapse: {thin} -> {restored}")
+
+        # A manual resize between grow and collapse must survive the collapse.
+        dock.set_expanded(True, animate=False)
+        QTest.qWait(100)
+        user_w = _set_window_width(mw.width() + 140)
+        dock.set_expanded(False, animate=False)
+        QTest.qWait(100)
+        if abs(mw.width() - user_w) > 6:
+            raise AssertionError(f"collapse clobbered a manual resize: {user_w} -> {mw.width()}")
+
+        # Leave a comfortable window + expanded dock for later checks/screenshots.
+        _set_window_width(CENTRAL_MIN + MIN_DOCK_WIDTH + 240)
+        dock.set_expanded(True, animate=False)
+        QTest.qWait(80)
+        result.update({"grew": grew, "dock": dock_w, "restored": restored, "manual_kept": user_w})
+        return result
+
+    check("thin window grows on expand and restores on collapse", _thin_window_grows_and_restores)
+
     def _focus_toggle_cycles() -> None:
         # Ctrl+J cycles the shell (2026-07-13): with focus in the chat, the
         # chord collapses to the rail and hands focus back; from the rail it
