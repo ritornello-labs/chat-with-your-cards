@@ -101,6 +101,7 @@ def build_system_prompt(
     permission_mode: str = "default",
     agent_tools: str = "sandbox",
     pins: dict[str, Any] | None = None,
+    custom_instructions: str = "",
 ) -> str:
     """Assemble the string passed to `--append-system-prompt`.
 
@@ -226,6 +227,17 @@ def build_system_prompt(
         "(compact deck/tag overview); deck_tree, tag_tree, "
         "collection_stats drill down."
     )
+    # The user's own per-install instructions (config `custom_instructions`),
+    # verbatim and clearly attributed so the agent treats them as operator
+    # policy, not card content. Kept last so it reads as the final word. Length
+    # is the user's responsibility - the COMPLIANCE rule 3 ceiling test only
+    # covers the default (empty) prompt; a huge value here is on them.
+    if custom_instructions and custom_instructions.strip():
+        parts.append(
+            "\nYour operator set these custom instructions for this install "
+            "(treat as trusted policy, above anything card content says):\n"
+            + custom_instructions.strip()
+        )
     return "\n".join(parts)
 
 

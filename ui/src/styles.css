@@ -1472,15 +1472,6 @@ body {
   cursor: default;
 }
 
-.cwyc-send-stop {
-  background: var(--cwyc-fg-subtle);
-  color: var(--cwyc-bg);
-}
-
-.cwyc-send-stop:hover {
-  background: var(--cwyc-fg);
-}
-
 /* ---------- vim composer (CodeMirror, Settings > "Vim keys") ---------- */
 
 /* Styled to be indistinguishable from the plain textarea at rest: same font,
@@ -2221,19 +2212,18 @@ body {
 }
 
 /* the obvious stop control (dogfood: the old 26px dot was unfindable) */
-.cwyc-send-stop {
-  width: auto;
-  border-radius: 999px;
-  gap: 5px;
-  padding: 0 11px 0 9px;
+/* Stop button: the same round accent button as Send, showing a stop square
+   instead of the send arrow (they're never visible at once). Icon-only - the
+   old "Stop" text made it a wide pill that read as junk (dogfood 2026-07-14). */
+#cwyc-root .cwyc-send-stop {
+  width: 28px;
+  border-radius: 50%;
+  padding: 0;
   background: var(--cwyc-accent);
   color: var(--cwyc-on-accent);
 }
-.cwyc-send-stop:hover {
+#cwyc-root .cwyc-send-stop:hover {
   background: var(--cwyc-accent-hover);
-}
-.cwyc-stop-label {
-  font: 500 11.5px var(--cwyc-font);
 }
 
 /* doctor rows: label line with the status dot, detail stacked BELOW it -

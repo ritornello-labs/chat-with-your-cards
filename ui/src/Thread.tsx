@@ -113,7 +113,6 @@ function Composer({ store }: { store: ChatStore }) {
               data-testid="stop"
             >
               <StopIcon />
-              <span className="cwyc-stop-label">Stop</span>
             </ComposerPrimitive.Cancel>
           </ThreadPrimitive.If>
         </div>

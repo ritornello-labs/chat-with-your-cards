@@ -60,6 +60,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "auto_accept_cap": 20,
     "write_budget": 200,
     "conventions_prompt": "",
+    "custom_instructions": "",
     "created_tag": "ai-created",
     "edited_tag": "ai-edited",
     "session_tag_prefix": "ai-chat-dock::session-",
@@ -235,6 +236,7 @@ def _setup() -> None:
             permission_mode=str(config["permission_mode"]),
             agent_tools=str(config.get("agent_tools", "sandbox")),
             pins=state.proposals.pins if state.proposals else None,
+            custom_instructions=str(config.get("custom_instructions", "")),
         )
 
     state.controller = ChatController(

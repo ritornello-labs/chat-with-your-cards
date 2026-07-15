@@ -32,6 +32,7 @@
   "auto_accept_cap": 20,
   "write_budget": 200,
   "conventions_prompt": "",
+  "custom_instructions": "",
   "created_tag": "ai-created",
   "edited_tag": "ai-edited",
   "session_tag_prefix": "ai-chat-dock::session-",

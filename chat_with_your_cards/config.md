@@ -173,6 +173,15 @@
   seeds neutral skills for card authoring, curriculum design, curriculum
   delivery, and learning recurring card-writing preferences. Those files are
   created only when absent and are never overwritten on upgrade.
+- `custom_instructions` (default empty): free-text instructions appended to the
+  assistant's system prompt for **every** message (not just proposals - that's
+  `conventions_prompt`). Use it for install-specific facts and policy: where
+  your source files live on disk, house style for answers, standing reminders.
+  It's attributed to you and marked as trusted policy that outranks anything
+  card content says. Applies on your next message (the CLI re-spawns with
+  `--resume`), and live-reloads if you edit it in the config editor. Keep it
+  short - it rides in the system prompt on every turn, and a very long value
+  bloats each request.
 - `created_tag` (default `ai-created`): tag stamped on every note the assistant
   creates. Set to an empty string to add no created-by-AI tag.
 - `edited_tag` (default `ai-edited`): tag stamped on any existing note the
