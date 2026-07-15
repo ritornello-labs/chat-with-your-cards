@@ -92,6 +92,41 @@ def find_claude_cli(configured: str = "") -> str | None:
     return None
 
 
+# Standard CLI-tool locations a Finder/Dock-launched GUI app's PATH omits.
+# Order matters: homebrew first, matching what a login shell puts up front.
+_TOOL_DIRS = [
+    "/opt/homebrew/bin",  # Apple Silicon Homebrew
+    "/opt/homebrew/sbin",
+    "/usr/local/bin",  # Intel Homebrew / general
+    "/opt/local/bin",  # MacPorts
+    str(Path.home() / ".local" / "bin"),
+    str(Path.home() / "bin"),
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+]
+
+
+def augmented_path(current: str) -> str:
+    """Prepend the standard CLI-tool dirs onto PATH, keeping only real dirs.
+
+    Anki launched from Finder/Dock inherits a minimal PATH that omits
+    /opt/homebrew/bin etc. The claude subprocess then can't find tools its
+    built-ins shell out to - notably poppler's `pdftoppm`, which Read uses to
+    rasterize PDFs - so reading a PDF fails with "install poppler" even when
+    poppler is installed and the user's terminal Claude Code reads PDFs fine
+    (dogfood 2026-07-15). Give the subprocess the PATH a login shell would, so
+    installed tools are visible. Non-existent dirs (e.g. /opt/homebrew on
+    Linux) are dropped, so this is a safe no-op where they don't apply."""
+    ordered: list[str] = []
+    for d in _TOOL_DIRS + current.split(os.pathsep):
+        d = d.strip()
+        if d and d not in ordered and os.path.isdir(d):
+            ordered.append(d)
+    return os.pathsep.join(ordered)
+
+
 def _compact(value: Any, limit: int) -> str:
     text = json.dumps(value, ensure_ascii=False) if not isinstance(value, str) else value
     text = " ".join(text.split())
@@ -697,6 +732,10 @@ class ClaudeCliSession:
         )
         env = os.environ.copy()
         env.setdefault("PYTHONUNBUFFERED", "1")
+        # Restore the tool PATH a login shell would have (Anki's GUI PATH omits
+        # /opt/homebrew/bin etc.), so the agent's Read can find poppler's
+        # pdftoppm for PDFs and other CLI tools it shells out to.
+        env["PATH"] = augmented_path(env.get("PATH", ""))
         env.update(self._extra_env)  # e.g. ANTHROPIC_API_KEY for BYOK
         self._process = subprocess.Popen(
             args,

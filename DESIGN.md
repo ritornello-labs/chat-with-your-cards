@@ -42,7 +42,7 @@ Original analysis below kept for the record; its "BYOK direct-API backend as a l
 ### Why not CLI-only
 
 1. **Install friction.** "Have Claude Code or Codex installed and logged in" breaks the "as simple as any AnkiWeb add-on" bar for most users. BYOK-with-a-key is the more conventional add-on experience (cf. every TTS/AI add-on on AnkiWeb).
-2. **Environment fragility.** CLI discovery (PATH inside a GUI app on macOS is not the shell PATH), version drift, login/session expiry, per-CLI flag changes. Needs a "doctor" panel that diagnoses this in one click.
+2. **Environment fragility.** CLI discovery (PATH inside a GUI app on macOS is not the shell PATH), version drift, login/session expiry, per-CLI flag changes. Needs a "doctor" panel that diagnoses this in one click. *The GUI-PATH gap bites the subprocess too, not just binary discovery (dogfood 2026-07-15): reading a PDF failed with "install poppler" because Claude Code's `Read` shells out to poppler's `pdftoppm`, which was installed at `/opt/homebrew/bin` but invisible to the Anki-spawned subprocess's truncated PATH. Fixed by `augmented_path` (`claude_cli.py`), which prepends the standard tool dirs (homebrew/MacPorts/`~/.local/bin`/system, existing only) onto the subprocess `PATH` — so installed CLI tools the agent shells out to are visible, matching what the user's terminal Claude Code sees. Not a missing dependency; a visibility bug.*
 3. **Latency.** Process spawn + CLI startup adds seconds vs. a direct API call. Mitigation: keep one persistent session process per chat, not one per message.
 
 ### Consequences for the design

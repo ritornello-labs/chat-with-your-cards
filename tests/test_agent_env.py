@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from chat_with_your_cards import keys  # noqa: E402
 from chat_with_your_cards.backends.claude_cli import (  # noqa: E402
+    augmented_path,
     build_cli_args,
     context_window_for,
     write_mcp_config,
@@ -329,6 +330,33 @@ class McpConfigMergeTests(unittest.TestCase):
     def test_user_supplied_anki_dropped_without_a_logger(self) -> None:
         config = self._write(extra_servers={"anki": {"command": "evil"}})
         self.assertEqual("http://x", config["mcpServers"]["anki"]["url"])
+
+
+class AugmentedPathTests(unittest.TestCase):
+    """Anki's GUI PATH omits /opt/homebrew/bin etc., so the claude subprocess
+    can't find tools its built-ins shell out to (poppler's pdftoppm for PDFs).
+    augmented_path restores a login-shell PATH (dogfood 2026-07-15)."""
+
+    def test_prepends_existing_tool_dirs_and_preserves_current(self) -> None:
+        with tempfile.TemporaryDirectory() as tool, tempfile.TemporaryDirectory() as cur:
+            with mock.patch(
+                "chat_with_your_cards.backends.claude_cli._TOOL_DIRS",
+                [tool, "/does/not/exist/xyz"],
+            ):
+                result = augmented_path(cur).split(":")
+        self.assertEqual(result[0], tool, "tool dir should come first")
+        self.assertIn(cur, result, "existing PATH entries must be kept")
+        self.assertNotIn("/does/not/exist/xyz", result, "non-existent dirs dropped")
+
+    def test_idempotent_and_dedups(self) -> None:
+        with tempfile.TemporaryDirectory() as tool:
+            with mock.patch(
+                "chat_with_your_cards.backends.claude_cli._TOOL_DIRS", [tool]
+            ):
+                once = augmented_path(tool)
+                twice = augmented_path(once)
+        self.assertEqual(once, twice)
+        self.assertEqual(once.split(":").count(tool), 1)
 
 
 if __name__ == "__main__":
