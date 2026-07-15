@@ -154,6 +154,12 @@ class ParserState:
     turn_text_chars: int = 0
     last_block_index: int | None = None
     pending_break: bool = False
+    # Set true when the user hit Stop and the CLI acknowledged the interrupt.
+    # The turn then ends with a `result` of subtype `error_during_execution`,
+    # which is an EXPECTED consequence of stopping, not a failure - so the
+    # result handler turns it into a clean Done instead of a red ErrorEvent
+    # (dogfood 2026-07-15). Consumed (cleared) by that result.
+    interrupt_pending: bool = False
 
 
 def _text_separator(state: ParserState, index: Any) -> str:
@@ -317,7 +323,12 @@ def parse_stream_line(obj: dict[str, Any], state: ParserState) -> list[ChatEvent
                     fast_mode_state=str(fast_state) if fast_state else None,
                 )
             )
-        if obj.get("subtype") == "success" or not obj.get("is_error"):
+        # A user-requested stop ends the turn with an error result
+        # (error_during_execution); consume the flag and treat it as a clean
+        # stop, not a failure, so Stop doesn't paint a red error banner.
+        interrupted = state.interrupt_pending
+        state.interrupt_pending = False
+        if obj.get("subtype") == "success" or not obj.get("is_error") or interrupted:
             return [*result_events, Done()]
         return [
             *result_events,
@@ -923,6 +934,9 @@ class ClaudeCliSession:
             self.cancel()
             return False
         self._log.write(f"interrupt acknowledged pid={process.pid}")
+        # Mark the turn so its incoming error_during_execution result reads as a
+        # clean stop, not a failure (see ParserState.interrupt_pending).
+        self._state.interrupt_pending = True
         return True
 
     def cancel(self) -> None:

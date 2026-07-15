@@ -722,17 +722,26 @@ class ParseStreamLineTest(unittest.TestCase):
         )
 
     def test_real_interrupt_sequence_ends_turn_cleanly(self) -> None:
+        # The user hit Stop, so the session marked the turn interrupted (see
+        # ClaudeCliSession.interrupt) before the CLI's aborted-turn result
+        # arrives. That result's error_during_execution is EXPECTED, not a
+        # failure - it must NOT paint a red error banner (dogfood 2026-07-15);
+        # the turn just ends with UsageUpdate + Done. The identical result
+        # WITHOUT the flag still surfaces an ErrorEvent -
+        # test_result_error_emits_error_then_done covers that genuine-error path.
         from chat_with_your_cards.backends import UsageUpdate
 
+        self.state.interrupt_pending = True
         events: list = []
         for obj in self.INTERRUPT_SEQUENCE:
             events.extend(parse_stream_line(obj, self.state))
-        self.assertEqual(3, len(events))
+        self.assertEqual(2, len(events))
         self.assertIsInstance(events[0], UsageUpdate)
-        error = events[1]
-        assert isinstance(error, ErrorEvent)
-        self.assertEqual("error_during_execution", error.message)
-        self.assertIsInstance(events[2], Done)
+        self.assertIsInstance(events[1], Done)
+        self.assertFalse(
+            any(isinstance(e, ErrorEvent) for e in events), "Stop must not error"
+        )
+        self.assertFalse(self.state.interrupt_pending, "flag consumed by the result")
         self.assertEqual("sess-interrupt-demo", self.state.session_id)
 
 
