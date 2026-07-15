@@ -16,3 +16,6 @@ user_files/
 .tmp-gui-smoke/
 meta.json
 .smoke-artifacts/
+
+# Local backups of the Anki-managed meta.json (never commit user config)
+chat_with_your_cards/meta.json.bak*
