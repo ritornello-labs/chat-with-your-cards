@@ -136,6 +136,33 @@ export function SettingsPanel({ store }: { store: ChatStore }) {
               ))}
             </div>
           </div>
+          <div className="cwyc-panel-title cwyc-panel-title-gap">MCP tools (advanced)</div>
+          <Toggle
+            label="Use my Claude Code MCP servers"
+            testid="setting-mcp-inherit"
+            checked={settings.mcpInheritUser}
+            onChange={(v) => store.setSetting("mcp_inherit_user", v)}
+          />
+          <div className="cwyc-setting-row">
+            <span className="cwyc-setting-label">
+              Custom servers (<code>mcp_servers</code>)
+            </span>
+            <button
+              type="button"
+              className="cwyc-chip"
+              data-testid="open-mcp-config"
+              title="Add MCP servers, or disable inherited ones, in the add-on config"
+              onClick={() => store.openAddonConfig()}
+            >
+              Edit servers…
+            </button>
+          </div>
+          <div className="cwyc-setting-footnote cwyc-setting-warn">
+            Off by default: card content is untrusted, so the agent only sees this
+            add-on&rsquo;s <code>anki</code> tools. Widening lets a booby-trapped
+            deck reach whatever those servers expose — enable only for collections
+            you trust. Takes effect on your next new chat.
+          </div>
           <div className="cwyc-panel-title cwyc-panel-title-gap">Shortcuts</div>
           <div className="cwyc-setting-row">
             <span className="cwyc-setting-label">Toggle chat</span>

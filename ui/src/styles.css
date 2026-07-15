@@ -1926,6 +1926,16 @@ body {
   line-height: 1.45;
   color: var(--cwyc-fg-faint);
 }
+/* The MCP-widening caution: same size, but warm-tinted with a rule so the
+   trust warning doesn't read as a throwaway footnote. */
+#cwyc-root .cwyc-setting-warn {
+  color: var(--cwyc-fg-subtle);
+  background: var(--cwyc-warn-soft);
+  border-left: 2px solid var(--cwyc-warn);
+  border-radius: 4px;
+  margin: 4px 2px 0;
+  padding: 7px 9px;
+}
 
 /* pins panel rows */
 .cwyc-panel-pins {

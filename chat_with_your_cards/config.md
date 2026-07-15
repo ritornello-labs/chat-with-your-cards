@@ -112,8 +112,11 @@
   page fetching (useful for sourcing card content). Set `false` to keep the
   agent strictly inside your collection.
 - `mcp_servers` / `mcp_inherit_user` / `mcp_disabled` — **advanced, opt-in MCP
-  widening (config-file only for now; no settings-panel UI yet).** By default
-  the assistant only ever sees this add-on's own `anki` tools: the CLI is
+  widening.** The Settings panel (gear) has an "MCP tools" section: a toggle for
+  `mcp_inherit_user` and an "Edit servers…" button that opens this config for
+  the `mcp_servers`/`mcp_disabled` JSON. MCP setup is read when the backend is
+  built, so changes take effect **on your next new chat** (not mid-conversation).
+  By default the assistant only ever sees this add-on's own `anki` tools: the CLI is
   launched with `--strict-mcp-config` and a config containing just that one
   server, so nothing else you have configured for coding agents is reachable
   from inside a chat about your cards.

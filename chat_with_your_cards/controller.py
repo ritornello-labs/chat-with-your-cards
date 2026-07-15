@@ -233,6 +233,12 @@ class ChatController:
         if self._session is not None:
             self._session.close()
             self._session = None
+        # Rebuild the backend on a fresh chat so config read as VALUES at build
+        # time - the MCP setup (mcp_servers / mcp_inherit_user / mcp_disabled),
+        # unlike model/effort which are read fresh via callables - is picked up.
+        # This is why MCP config changes "apply to new chats". Cheap: the build
+        # constructs an object; no process spawns until ensure_ready/prewarm.
+        self._backend = None
         self._last_card_id_sent = None
         self._pending_resume = None
         self._assistant_buffer = ""

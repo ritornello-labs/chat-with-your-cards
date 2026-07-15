@@ -158,6 +158,8 @@ export interface SettingsEvent {
   vim_mappings?: [string, string, string][];
   /** Selected colour palette: "teal" (default) | "indigo" | "evergreen". */
   theme?: string;
+  /** Whether the agent inherits the user's own Claude Code MCP servers. */
+  mcp_inherit_user?: boolean;
 }
 
 export interface DoneEvent {

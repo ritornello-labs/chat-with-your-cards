@@ -564,6 +564,7 @@ def _push_settings() -> None:
             "vim_mode": bool(state.config.get("vim_mode", False)),
             "vim_mappings": mappings,
             "theme": _norm_theme(state.config.get("theme")),
+            "mcp_inherit_user": bool(state.config.get("mcp_inherit_user", False)),
         }
     )
 
@@ -578,6 +579,10 @@ def _set_setting(msg: dict[str, Any]) -> None:
         state.config["restore_last_chat"] = bool(value)
     elif key == "vim_mode":
         state.config["vim_mode"] = bool(value)
+    elif key == "mcp_inherit_user":
+        # Widening MCP scope is read as a value at backend-build time, so it
+        # takes effect on the next new chat (see ChatController.new_chat).
+        state.config["mcp_inherit_user"] = bool(value)
     elif key == "theme":
         state.config["theme"] = _norm_theme(value)
     elif key == "dock_side":

@@ -11,6 +11,7 @@ subprocesses can take a second each) and push the result to the UI.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -89,6 +90,27 @@ def gather_report(
             "label": "Collection tool server (MCP)",
             "status": "ok" if mcp_url else "warn",
             "detail": mcp_url or "starts with the first real chat",
+        }
+    )
+    # PDF reading: Claude Code's Read tool shells out to poppler's pdftoppm and
+    # does NOT bundle it. Probe the SAME augmented PATH the chat subprocess gets
+    # (find_claude already knows the GUI-PATH gap), so this reflects what the
+    # agent will actually find - not Anki's truncated GUI PATH.
+    from .backends.claude_cli import augmented_path  # local: avoid import cycle
+
+    pdftoppm = shutil.which("pdftoppm", path=augmented_path(os.environ.get("PATH", "")))
+    rows.append(
+        {
+            "label": "PDF reading (poppler)",
+            "status": "ok" if pdftoppm else "warn",
+            "detail": (
+                f"pdftoppm found — {pdftoppm}"
+                if pdftoppm
+                else "pdftoppm not found; the agent can't read local PDFs. "
+                "Install poppler (macOS: brew install poppler; Debian/Ubuntu: "
+                "apt install poppler-utils). EPUBs and web pages work without it."
+            ),
+            "link": "https://poppler.freedesktop.org/",
         }
     )
     skills_root = agent_home / ".claude" / "skills"

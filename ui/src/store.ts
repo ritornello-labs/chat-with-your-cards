@@ -231,6 +231,7 @@ export interface SettingsState {
   readonly vimMode: boolean;
   readonly vimMappings: readonly [string, string, string][];
   readonly theme: ThemeName;
+  readonly mcpInheritUser: boolean;
 }
 
 export interface UiState {
@@ -653,6 +654,7 @@ export class ChatStore {
           vim_mode?: boolean;
           vim_mappings?: unknown;
           theme?: string;
+          mcp_inherit_user?: boolean;
         };
         const rawMappings = Array.isArray(s.vim_mappings) ? s.vim_mappings : [];
         const vimMappings = rawMappings.filter(
@@ -670,6 +672,7 @@ export class ChatStore {
             vimMode: Boolean(s.vim_mode),
             vimMappings,
             theme,
+            mcpInheritUser: Boolean(s.mcp_inherit_user),
           },
         };
         applyThemeClass(theme);
