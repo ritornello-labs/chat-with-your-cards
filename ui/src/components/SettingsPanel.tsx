@@ -136,6 +136,16 @@ export function SettingsPanel({ store }: { store: ChatStore }) {
               ))}
             </div>
           </div>
+          <Toggle
+            label="Inline widgets (sandboxed)"
+            testid="setting-widget-rendering"
+            checked={settings.widgetRendering}
+            onChange={(v) => store.setSetting("widget_rendering", v)}
+          />
+          <div className="cwyc-setting-footnote">
+            Lets the agent draw charts and small interactive views in the chat. They run
+            in a strict sandbox: no internet, no access to your collection or this app.
+          </div>
           <div className="cwyc-panel-title cwyc-panel-title-gap">MCP tools (advanced)</div>
           <Toggle
             label="Use my Claude Code MCP servers"

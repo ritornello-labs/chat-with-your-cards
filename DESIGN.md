@@ -670,3 +670,53 @@ for no gain).
 **Deferred (out of near-term scope):** a **mobile** progress bubble
 (desktop-only for now, §17.8). The cross-platform server itself is core,
 not deferred.
+
+## 18. Rich rendering: images, math/diagrams, sandboxed widgets (2026-07-16)
+
+Three rendering channels, ordered by trust in what executes:
+
+1. **Inline images** (`show_image`, landed 2026-07-15): local png/jpg/gif/webp
+   as data URIs, SVG excluded (can carry script). Trusted renderer (`<img>`),
+   inert payload.
+2. **Trusted renderers over constrained input** (always-on, no gate): KaTeX
+   for `$…$`/`$$…$$`, mermaid for ```` ```mermaid ```` fences
+   (securityLevel strict), GFM tables. No arbitrary script runs; the model's
+   input drives a renderer we ship. DOMPurify stays the final gate on all
+   markdown-derived HTML.
+3. **Sandboxed inline widgets** (`render_widget`, opt-in via
+   `widget_rendering`): arbitrary self-contained HTML/JS the agent writes.
+
+Widget security model — the payload is treated as HOSTILE even after the user
+opts in (the agent reads untrusted card content; an injected card can steer
+what it renders). The consent toggle controls surface area; the boundary is:
+
+- `<iframe sandbox="allow-scripts">` **without** `allow-same-origin` → opaque
+  origin: no parent DOM, no store, **no pycmd bridge** (the crown jewel — an
+  unsandboxed payload could accept proposals or rewrite settings), no cookies.
+  Nested frames can only tighten, never loosen.
+- A trusted `<meta>` CSP prepended first in the srcdoc:
+  `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline';
+  img/font/media-src data:` → no network, so nothing can be exfiltrated even
+  under full injection. Agent-supplied CSPs can only intersect.
+- **Display-only**: no postMessage listener anywhere in the app. If
+  interactivity is ever added, widget→app messages must surface as VISIBLE
+  user messages, never silent commands.
+- Residual risk ≈ markdown's: the widget can *show* something misleading, but
+  can't send anything anywhere or touch anything.
+
+State channel (how the agent knows the gate's position): the tool is always
+registered; the RESULT is the truth. Disabled → the call pushes an inline
+enable-offer chip (consent right where the need arises, not buried in
+settings) and returns `disabled_pending_user`; enabling flips the config
+live and auto-sends a visible "(I've enabled widget rendering…)" user message
+(queued until turn end if one is running) so the agent deterministically
+learns and retries. No reliance on mid-session MCP schema/notification
+support in the CLI.
+
+Explicitly rejected for CWYC: exposing a generic semantic-chip display
+vocabulary to the agent as a third channel (per-user "promotion" of recurring
+widgets into trusted blocks can't be autonomous — agent-authored code running
+trusted is exactly what the sandbox prevents; recurring shapes get promoted
+by the developer into typed product features instead), and a saved-widget
+catalog (premature optimization, decided 2026-07-16 — the agent just
+regenerates; custom_instructions can carry per-user standing requests).

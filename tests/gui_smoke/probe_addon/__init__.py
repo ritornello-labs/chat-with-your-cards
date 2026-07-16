@@ -1168,6 +1168,98 @@ def _run_checks() -> dict[str, Any]:
 
     check("data: URI images load in the Anki webview (show_image)", _inline_image_data_uri_loads)
 
+    def _widget_sandbox_holds() -> dict[str, Any]:
+        """render_widget end-to-end THROUGH THE REAL PATH (tool -> record_push
+        -> bridge -> store -> WidgetCard iframe), then adversarial sandbox
+        verification from BOTH sides:
+        - inside: the injected widget's own script tries to reach
+          window.parent.document (must throw: opaque origin) and to fetch()
+          the network (must reject: CSP default-src 'none'), reporting via
+          postMessage - the one channel a sandboxed frame legitimately has,
+          which the app itself deliberately never listens on (display-only).
+        - outside: the iframe must carry exactly sandbox="allow-scripts"
+          (no allow-same-origin) and parent JS must NOT be able to reach
+          iframe.contentDocument.
+        A leak on any of these is a security regression, not a flake."""
+        import chat_with_your_cards as cwyc
+        from chat_with_your_cards.tools.widgets import render_widget
+
+        # Probe-scoped message listener (the app has none, by design).
+        _eval_js(
+            dock.web,
+            "(function(){window.__cwycWidgetProbe=null;"
+            "window.addEventListener('message',function(e){window.__cwycWidgetProbe=e.data;});"
+            "return true;})();",
+            DOM_TIMEOUT_MS,
+            "install widget probe listener",
+        )
+        widget_html = (
+            "<div id='ok'>widget alive</div><script>"
+            "var out={alive:true};"
+            "try{void window.parent.document;out.parentBlocked=false;}"
+            "catch(e){out.parentBlocked=true;}"
+            "fetch('https://example.com/').then(function(){out.fetchBlocked=false;})"
+            ".catch(function(){out.fetchBlocked=true;})"
+            ".then(function(){window.parent.postMessage(out,'*');});"
+            "</script>"
+        )
+        prior = bool(cwyc.state.config.get("widget_rendering", False))
+        cwyc.state.config["widget_rendering"] = True
+        try:
+            off_result = None
+            if not prior:
+                # Also pin the consent gate: with the flag restored off, the
+                # tool must refuse and surface the offer chip instead.
+                cwyc.state.config["widget_rendering"] = False
+                off_result = render_widget(
+                    cwyc._ToolCtx(), {"html": "<b>x</b>", "title": "gate probe"}
+                )
+                if off_result.get("status") != "disabled_pending_user":
+                    raise AssertionError(f"consent gate did not hold: {off_result}")
+                cwyc.state.config["widget_rendering"] = True
+            result = render_widget(
+                cwyc._ToolCtx(), {"html": widget_html, "title": "sandbox probe"}
+            )
+            if result.get("status") != "displayed":
+                raise AssertionError(f"render_widget (enabled) failed: {result}")
+            QTest.qWait(900)  # let the iframe boot, run its script, postMessage
+            info = _eval_js(
+                dock.web,
+                "(function(){"
+                "var f=document.querySelector('[data-testid=inline-widget] iframe');"
+                "if(!f)return {missing:true};"
+                "var r={sandbox:f.getAttribute('sandbox'),"
+                "cspInSrcdoc:(f.getAttribute('srcdoc')||'').indexOf(\"default-src 'none'\")>=0,"
+                "report:window.__cwycWidgetProbe};"
+                "try{r.contentReachable=!!(f.contentDocument&&f.contentDocument.body);}"
+                "catch(e){r.contentReachable=false;}"
+                "return r;})();",
+                DOM_TIMEOUT_MS,
+                "widget sandbox verdicts",
+            )
+            if not isinstance(info, dict) or info.get("missing"):
+                raise AssertionError(f"widget iframe never rendered: {info}")
+            if info.get("sandbox") != "allow-scripts":
+                raise AssertionError(f"SANDBOX WEAKENED: sandbox={info.get('sandbox')!r}")
+            if not info.get("cspInSrcdoc"):
+                raise AssertionError("no-network CSP missing from widget srcdoc")
+            if info.get("contentReachable"):
+                raise AssertionError("SANDBOX LEAK: parent can reach iframe document")
+            report = info.get("report")
+            if not isinstance(report, dict) or not report.get("alive"):
+                raise AssertionError(
+                    f"widget script did not run / report (allow-scripts broken?): {info}"
+                )
+            if not report.get("parentBlocked"):
+                raise AssertionError("SANDBOX LEAK: widget reached window.parent.document")
+            if not report.get("fetchBlocked"):
+                raise AssertionError("CSP LEAK: widget fetch() reached the network")
+            return {"gate": off_result, "verdicts": info}
+        finally:
+            cwyc.state.config["widget_rendering"] = prior
+
+    check("widget sandbox holds (opaque origin + no-network CSP)", _widget_sandbox_holds)
+
     def _collapse_expand_cycle() -> dict[str, Any]:
         """Drive the shell round-trip through the real webview controls: the
         header's collapse chevron shrinks the dock to the rail (animated,

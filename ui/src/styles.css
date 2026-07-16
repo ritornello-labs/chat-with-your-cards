@@ -700,6 +700,60 @@ body {
   text-align: center;
 }
 
+/* Sandboxed inline widget (render_widget): fixed default height with a
+   user-draggable vertical resize on the wrapper (no postMessage channel to
+   auto-size from inside — by design). */
+#cwyc-root .cwyc-widget {
+  margin: 6px 0 4px;
+  max-width: 100%;
+}
+#cwyc-root .cwyc-widget-title {
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--cwyc-fg-subtle);
+}
+#cwyc-root .cwyc-widget-frame-box {
+  height: 320px;
+  min-height: 96px;
+  max-height: 720px;
+  resize: vertical;
+  overflow: hidden;
+  border: 1px solid var(--cwyc-border);
+  border-radius: 8px;
+  background: var(--cwyc-surface);
+  box-sizing: border-box;
+  /* keep the resize grip outside the iframe, which eats mouse events */
+  padding-bottom: 12px;
+}
+#cwyc-root .cwyc-widget-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+/* Enable-offer consent chip (render_widget while the feature is off). */
+#cwyc-root .cwyc-widget-offer {
+  margin: 6px 0 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--cwyc-border);
+  border-radius: 8px;
+  background: var(--cwyc-surface);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--cwyc-fg);
+}
+#cwyc-root .cwyc-widget-offer-resolved {
+  color: var(--cwyc-fg-subtle);
+  font-size: 11px;
+}
+#cwyc-root .cwyc-widget-offer-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .cwyc-row-user {
   justify-content: flex-end;
 }

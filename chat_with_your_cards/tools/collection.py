@@ -337,8 +337,10 @@ def build_registry() -> ToolRegistry:
     from .learning import register_learning_tools
     from .media import register_media_tools
     from .proposals import register_proposal_tools
+    from .widgets import register_widget_tools
 
     register_media_tools(registry)
+    register_widget_tools(registry)
     register_document_tools(registry)
     register_proposal_tools(registry)
     register_deck_tools(registry)

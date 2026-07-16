@@ -147,6 +147,14 @@
     inherited one) to turn back off, e.g. `["github"]` after enabling
     `mcp_inherit_user`. `"anki"` cannot be disabled this way - it is ignored
     (logged) because that would silently break every card proposal.
+- `widget_rendering` (default `false`): let the assistant render small
+  interactive HTML widgets inline in the chat (`render_widget` tool) — charts,
+  diagrams, mini-dashboards. Also in the Settings panel (gear), and offered
+  inline the first time the assistant tries while it is off. Widgets run in a
+  hard sandbox regardless of this setting: an opaque-origin iframe (no access
+  to the chat, this add-on, or your collection) with a CSP that blocks all
+  network access — display only. The toggle is about consent and surface
+  area, not the security boundary. Applies immediately, mid-chat included.
 - `anthropic_api_key` / `openai_api_key` (default empty): paste an API key to
   bill usage to it instead of the agent's own login. Stored in Anki's
   plain-text add-on config - the less-secure option.

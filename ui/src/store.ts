@@ -117,13 +117,31 @@ interface ImageDataPart {
   readonly data: { src: string; caption: string };
 }
 
+/** Sandboxed widget (render_widget). `html` is UNTRUSTED agent output;
+ *  only WidgetCard's opaque-origin iframe may render it. */
+interface WidgetDataPart {
+  readonly type: "data";
+  readonly name: "widget";
+  readonly data: { html: string; title: string };
+}
+
+/** Inline consent chip: render_widget was called while the feature is off.
+ *  `resolved` is client-only ("Not now" dismissal / after enabling). */
+interface WidgetOfferDataPart {
+  readonly type: "data";
+  readonly name: "widget_offer";
+  readonly data: { id: string; title: string; resolved: boolean };
+}
+
 type AssistantPart =
   | TextPart
   | ReasoningPart
   | ToolCallPart
   | ProposalDataPart
   | ErrorDataPart
-  | ImageDataPart;
+  | ImageDataPart
+  | WidgetDataPart
+  | WidgetOfferDataPart;
 
 type MessageStatus =
   | { type: "running" }
@@ -244,6 +262,7 @@ export interface SettingsState {
   readonly vimMappings: readonly [string, string, string][];
   readonly theme: ThemeName;
   readonly mcpInheritUser: boolean;
+  readonly widgetRendering: boolean;
 }
 
 export interface UiState {
@@ -553,20 +572,30 @@ export class ChatStore {
       case "inline_image":
         this.appendImage(event as { src: string; caption?: string });
         break;
+      case "inline_widget":
+        this.appendWidget(event as { html?: string; title?: string });
+        break;
+      case "widget_offer":
+        this.appendWidgetOffer(event as { title?: string });
+        break;
       case "usage":
         this.setUsage(event as UsageEvent);
         break;
       case "done":
         this.finishTurn({ type: "complete", reason: "stop" });
+        this.flushPendingAutoSend();
         break;
       case "cancelled":
         this.finishTurn({ type: "incomplete", reason: "cancelled" });
+        this.flushPendingAutoSend();
         break;
       case "error":
         this.appendError(String((event as { message?: string }).message ?? "Unknown error"));
         this.finishTurn({ type: "incomplete", reason: "error" });
+        this.flushPendingAutoSend();
         break;
       case "reset":
+        this.pendingAutoSend = null; // never leak a queued nudge into a new chat
         this.reset();
         break;
       case "history_load":
@@ -678,6 +707,7 @@ export class ChatStore {
           vim_mappings?: unknown;
           theme?: string;
           mcp_inherit_user?: boolean;
+          widget_rendering?: boolean;
         };
         const rawMappings = Array.isArray(s.vim_mappings) ? s.vim_mappings : [];
         const vimMappings = rawMappings.filter(
@@ -696,6 +726,7 @@ export class ChatStore {
             vimMappings,
             theme,
             mcpInheritUser: Boolean(s.mcp_inherit_user),
+            widgetRendering: Boolean(s.widget_rendering),
           },
         };
         applyThemeClass(theme);
@@ -851,6 +882,73 @@ export class ChatStore {
     };
     this.updateMessage(current.id, (msg) => ({ ...msg, content: [...msg.content, part] }));
     this.emit();
+  }
+
+  private appendWidget(event: { html?: string; title?: string }): void {
+    if (!event.html) return;
+    const current = this.ensureCurrentAssistant();
+    const part: WidgetDataPart = {
+      type: "data",
+      name: "widget",
+      data: { html: String(event.html), title: String(event.title ?? "") },
+    };
+    this.updateMessage(current.id, (msg) => ({ ...msg, content: [...msg.content, part] }));
+    this.emit();
+  }
+
+  private appendWidgetOffer(event: { title?: string }): void {
+    const current = this.ensureCurrentAssistant();
+    const part: WidgetOfferDataPart = {
+      type: "data",
+      name: "widget_offer",
+      data: { id: nextId("wo"), title: String(event.title ?? ""), resolved: false },
+    };
+    this.updateMessage(current.id, (msg) => ({ ...msg, content: [...msg.content, part] }));
+    this.emit();
+  }
+
+  /**
+   * The enable-offer chip's buttons. Enabling flips the persisted setting AND
+   * posts a visible user message so the agent (whose render_widget call
+   * already returned "disabled") deterministically learns the state changed
+   * and retries - tool results and user messages are the only channels that
+   * reliably reach a mid-conversation CLI session.
+   */
+  resolveWidgetOffer(offerId: string, enable: boolean): void {
+    this.messages = this.messages.map((msg) => {
+      if (msg.role !== "assistant") return msg;
+      let touched = false;
+      const content = msg.content.map((part) => {
+        if (part.type !== "data" || part.name !== "widget_offer" || part.data.id !== offerId) {
+          return part;
+        }
+        touched = true;
+        return { ...part, data: { ...part.data, resolved: true } };
+      });
+      return touched ? { ...msg, content } : msg;
+    });
+    this.emit();
+    if (enable) {
+      this.setSetting("widget_rendering", true);
+      const note = "(I've enabled widget rendering - go ahead and render it.)";
+      // The offer usually appears MID-turn (the tool already returned
+      // "disabled" and the agent is still streaming its fallback), and
+      // sendUserMessage drops input while running - so queue and flush on
+      // the turn-ending event instead of losing the retry nudge.
+      if (this.isRunning) {
+        this.pendingAutoSend = note;
+      } else {
+        this.sendUserMessage(note);
+      }
+    }
+  }
+
+  private pendingAutoSend: string | null = null;
+
+  private flushPendingAutoSend(): void {
+    const note = this.pendingAutoSend;
+    this.pendingAutoSend = null;
+    if (note) this.sendUserMessage(note);
   }
 
   private upsertProposal(proposal: ProposalPayload): void {

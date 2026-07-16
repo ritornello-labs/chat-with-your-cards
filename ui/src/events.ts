@@ -162,6 +162,8 @@ export interface SettingsEvent {
   theme?: string;
   /** Whether the agent inherits the user's own Claude Code MCP servers. */
   mcp_inherit_user?: boolean;
+  /** Whether sandboxed inline widgets (render_widget) may render. */
+  widget_rendering?: boolean;
 }
 
 export interface DoneEvent {
@@ -189,6 +191,27 @@ export interface InlineImageEvent {
   bytes?: number;
 }
 
+/**
+ * A sandboxed widget the agent rendered (render_widget tool). `html` is
+ * agent output and therefore UNTRUSTED - WidgetCard (Thread.tsx) confines it
+ * to an opaque-origin iframe with a no-network CSP; it must never reach the
+ * document any other way.
+ */
+export interface InlineWidgetEvent {
+  type: "inline_widget";
+  html: string;
+  title: string;
+}
+
+/**
+ * render_widget was called while widget rendering is off: offer the user the
+ * consent switch inline (ephemeral - not recorded to the transcript).
+ */
+export interface WidgetOfferEvent {
+  type: "widget_offer";
+  title: string;
+}
+
 export type KnownChatEvent =
   | TextDeltaEvent
   | ThinkingDeltaEvent
@@ -204,7 +227,9 @@ export type KnownChatEvent =
   | CancelledEvent
   | ErrorEvent
   | ResetEvent
-  | InlineImageEvent;
+  | InlineImageEvent
+  | InlineWidgetEvent
+  | WidgetOfferEvent;
 
 /** Any dict Python (or the dev replayer) pushes; unknown types are ignored. */
 export type ChatEvent = KnownChatEvent | { type: string; [key: string]: unknown };

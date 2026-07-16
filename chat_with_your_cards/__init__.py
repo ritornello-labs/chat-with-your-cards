@@ -44,6 +44,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "web_access": True,
     "mcp_servers": {},
     "mcp_inherit_user": False,
+    # Sandboxed inline widgets (render_widget). Consent gate only - the
+    # iframe sandbox is the security boundary and holds regardless.
+    "widget_rendering": False,
     "mcp_disabled": [],
     "suggested_questions": True,
     "restore_last_chat": False,
@@ -577,6 +580,7 @@ def _push_settings() -> None:
             "vim_mappings": mappings,
             "theme": _norm_theme(state.config.get("theme")),
             "mcp_inherit_user": bool(state.config.get("mcp_inherit_user", False)),
+            "widget_rendering": bool(state.config.get("widget_rendering", False)),
         }
     )
 
@@ -595,6 +599,10 @@ def _set_setting(msg: dict[str, Any]) -> None:
         # Widening MCP scope is read as a value at backend-build time, so it
         # takes effect on the next new chat (see ChatController.new_chat).
         state.config["mcp_inherit_user"] = bool(value)
+    elif key == "widget_rendering":
+        # Read live at each render_widget call, so flipping it (from the
+        # settings panel OR the in-chat enable chip) applies immediately.
+        state.config["widget_rendering"] = bool(value)
     elif key == "theme":
         state.config["theme"] = _norm_theme(value)
     elif key == "dock_side":

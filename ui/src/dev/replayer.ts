@@ -30,6 +30,8 @@ type Step =
   | { kind: "tool"; tool: string; summary: string; result: string; ok: boolean; durationMs: number }
   | { kind: "proposal"; proposal: ProposalPayload }
   | { kind: "image"; src: string; caption: string }
+  | { kind: "widget"; html: string; title: string }
+  | { kind: "widget_offer"; title: string }
   | { kind: "error"; message: string };
 
 const DEMO_CSS =
@@ -90,6 +92,10 @@ function compile(steps: readonly Step[]): Array<[number, ChatEvent]> {
       timeline.push([delay(), { type: "proposal", proposal: step.proposal }]);
     } else if (step.kind === "image") {
       timeline.push([delay(), { type: "inline_image", src: step.src, caption: step.caption }]);
+    } else if (step.kind === "widget") {
+      timeline.push([delay(), { type: "inline_widget", html: step.html, title: step.title }]);
+    } else if (step.kind === "widget_offer") {
+      timeline.push([delay(), { type: "widget_offer", title: step.title }]);
     } else if (step.kind === "error") {
       timeline.push([delay(), { type: "error", message: step.message }]);
       endedWithError = true;
@@ -275,9 +281,72 @@ const IMAGE_SCRIPT: Step[] = [
   { kind: "text", text: "That's the page with the `docker network rm` example." },
 ];
 
+// The demo widget doubles as a sandbox SELF-TEST: it renders a small
+// interactive bar chart (proves inline JS runs), then attempts a network
+// fetch and a window.parent DOM read and prints both verdicts inside the
+// widget - so a preview screenshot is direct evidence the CSP and the
+// opaque-origin sandbox hold. Mirrors the GUI smoke probe's check.
+const WIDGET_HTML =
+  "<div id='chart' style='display:flex;gap:6px;align-items:flex-end;height:90px'></div>" +
+  "<button id='more' style='margin-top:8px'>Add a bar</button>" +
+  "<div id='probe' style='margin-top:10px;font-size:11px'></div>" +
+  "<script>" +
+  "var vals=[42,71,30,88,55];" +
+  "function draw(){var c=document.getElementById('chart');c.innerHTML='';" +
+  "vals.forEach(function(v){var b=document.createElement('div');" +
+  "b.style.cssText='flex:1;background:#0e7c7b;border-radius:3px 3px 0 0;height:'+v+'%';" +
+  "b.title=v;c.appendChild(b);});}" +
+  "document.getElementById('more').onclick=function(){vals.push(20+Math.floor(Math.random()*70));draw();};" +
+  "draw();" +
+  "var p=document.getElementById('probe');" +
+  "function line(t,ok){var d=document.createElement('div');d.textContent=(ok?'\\u2713 ':'\\u2717 ')+t;" +
+  "d.style.color=ok?'#177245':'#b3261e';p.appendChild(d);}" +
+  "try{void window.parent.document;line('SANDBOX LEAK: parent DOM reachable',false);}" +
+  "catch(e){line('parent DOM blocked (opaque origin)',true);}" +
+  "fetch('https://example.com/').then(function(){line('CSP LEAK: network fetch succeeded',false);})" +
+  ".catch(function(){line('network fetch blocked (CSP)',true);});" +
+  "<\/script>";
+
+function widgetScript(): Step[] {
+  if (!devSettings.widget_rendering) {
+    return [
+      {
+        kind: "text",
+        text: "I'd like to show this as an interactive chart, but widget rendering is off.\n\n",
+      },
+      { kind: "widget_offer", title: "Review-load chart" },
+      {
+        kind: "text",
+        text: "Meanwhile in plain text: Mon 42, Tue 71, Wed 30, Thu 88, Fri 55.",
+      },
+    ];
+  }
+  return [
+    { kind: "text", text: "Here's your review load this week:\n\n" },
+    { kind: "widget", html: WIDGET_HTML, title: "Review-load chart (sandbox self-test)" },
+    { kind: "text", text: "Bars are hoverable; the button adds data. The two lines below the chart are the sandbox self-test." },
+  ];
+}
+
+// Exercises the trusted-renderer pipeline: KaTeX inline/display (plus the
+// currency string that must NOT become math), a mermaid fence, a GFM table.
+const MATH_SCRIPT: Step[] = [
+  {
+    kind: "text",
+    text:
+      "The quadratic formula is $x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}$, and " +
+      "the Gaussian integral:\n\n$$\\int_{-\\infty}^{\\infty} e^{-x^2}\\,dx = \\sqrt{\\pi}$$\n\n" +
+      "Currency stays text: R$ 50 and $5 vs $10 are not math.\n\n" +
+      "A quick diagram:\n\n```mermaid\nflowchart LR\n  A[Card shown] --> B{Recalled?}\n  B -- yes --> C[Good]\n  B -- no --> D[Again]\n```\n\n" +
+      "| Deck | Due | Ease |\n|---|---|---|\n| Kanji | 42 | 2.4 |\n| Geo | 17 | 2.6 |\n| Quant | 8 | 2.1 |\n",
+  },
+];
+
 function selectScript(userText: string): Step[] {
   const text = userText.toLowerCase();
   if (text.includes("error")) return ERROR_SCRIPT;
+  if (text.includes("math") || text.includes("mermaid")) return MATH_SCRIPT;
+  if (text.includes("widget") || text.includes("chart")) return widgetScript();
   if (text.includes("image") || text.includes("picture")) return IMAGE_SCRIPT;
   if (text.includes("think") || text.includes("reason")) return REASONING_SCRIPT;
   if (text.includes("edit")) return editProposalScript();
@@ -302,15 +371,18 @@ const WELCOME_SCRIPT: Step[] = [
     kind: "text",
     text:
       "Hi! This is the assistant-ui scaffold running against the scripted dev replayer.\n\nTry typing " +
-      "**tool**, **propose**, **edit**, **think**, **long**, or **error** to see each event path, or just " +
-      "send anything else for the default reply.",
+      "**tool**, **propose**, **edit**, **think**, **long**, **widget**, **image**, or **error** to see each " +
+      "event path, or just send anything else for the default reply.",
   },
 ];
+
+// Module scope (not inside installDevReplayer): widgetScript() branches on it
+// at send time, mirroring how the real tool reads live config per call.
+const devSettings: Record<string, unknown> = { restore_last_chat: false, dock_side: "right" };
 
 export function installDevReplayer(): void {
   let generation = 0;
   let pendingTimers: number[] = [];
-  const devSettings: Record<string, unknown> = { restore_last_chat: false, dock_side: "right" };
 
   function scheduleAll(timeline: Array<[number, ChatEvent]>): void {
     const gen = generation;
@@ -399,6 +471,7 @@ export function installDevReplayer(): void {
             ["Y", "y$", "normal"],
           ],
           theme: String(devSettings.theme ?? "teal"),
+          widget_rendering: Boolean(devSettings.widget_rendering),
         });
         break;
       case "list_history":
@@ -587,6 +660,7 @@ export function installDevReplayer(): void {
             ["Y", "y$", "normal"],
           ],
           theme: String(devSettings.theme ?? "teal"),
+          widget_rendering: Boolean(devSettings.widget_rendering),
         });
         break;
       }

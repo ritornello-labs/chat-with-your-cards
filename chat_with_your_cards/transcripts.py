@@ -29,6 +29,7 @@ RECORDED_TYPES = {
     "proposal",
     "proposal_resolved",
     "inline_image",
+    "inline_widget",
     "usage",
     "notice",
 }

@@ -10,6 +10,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { TextPart } from "./components/TextPart";
 import { ModeChip, ModelPicker, PinsButton, ToolsChip } from "./components/ComposerControls";
 import { VimComposer } from "./components/VimComposer";
+import { WidgetCard, WidgetOfferChip } from "./components/WidgetCard";
 
 function UserMessage() {
   return (
@@ -52,6 +53,15 @@ function AssistantMessage({ store }: { store: ChatStore }) {
                 error: ErrorBanner,
                 image: (props) => (
                   <InlineImage {...(props as { data: { src: string; caption: string } })} />
+                ),
+                widget: (props) => (
+                  <WidgetCard {...(props as { data: { html: string; title: string } })} />
+                ),
+                widget_offer: (props) => (
+                  <WidgetOfferChip
+                    {...(props as { data: { id: string; title: string; resolved: boolean } })}
+                    store={store}
+                  />
                 ),
               },
             },
