@@ -1,0 +1,68 @@
+/**
+ * Styling for the always-on rich-rendering additions to assistant markdown:
+ * KaTeX math, mermaid diagrams, and GFM table polish (see markdown.ts,
+ * katex-math.ts, mermaid.ts).
+ *
+ * Deliberately additive only: `.cwyc-markdown table/th/td/pre/code` already
+ * have borders/header-shading/a horizontal-scroll wrapper defined in
+ * styles.css (out of scope for this change - see AGENTS.md file-ownership
+ * note). Every rule below either targets a selector styles.css does not
+ * touch (the katex/mermaid wrapper classes) or adds a property styles.css's
+ * rules for that selector do not already set (e.g. table zebra striping),
+ * so this file's position in the final concatenated bundle.css relative to
+ * styles.css never matters - there is nothing here for cascade order to
+ * flip. Uses the existing --cwyc-* custom properties (styles.css) so
+ * everything follows the active palette/night-mode automatically.
+ */
+
+/* ---- KaTeX ------------------------------------------------------------- */
+
+/* Long equations must scroll inside themselves, never widen the dock. */
+.cwyc-markdown .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0;
+}
+
+/* KaTeX's own error-color span (throwOnError:false) already colors the
+ * broken LaTeX source red; this only applies to the extra fallback path in
+ * katex-math.ts (a katex.renderToString throw it should not normally take). */
+.cwyc-math-error {
+  color: var(--cwyc-red);
+  background: var(--cwyc-red-soft);
+  border-radius: 4px;
+  padding: 0 0.2em;
+  font-family: var(--cwyc-mono);
+  font-size: 0.9em;
+}
+
+/* ---- Mermaid ------------------------------------------------------------
+ * A pending diagram (data-mermaid-pending, mermaid.ts) intentionally gets NO
+ * extra box here - its inner <pre><code> already looks like an ordinary
+ * code block via styles.css, so a still-streaming/not-yet-attempted fence
+ * reads as plain code, matching the "degrade to the fenced code block"
+ * requirement even before mermaid has had a chance to run. */
+
+.cwyc-mermaid[data-mermaid-rendered="true"] {
+  display: block;
+  margin: 0.5em 0;
+  padding: 10px;
+  background: var(--cwyc-surface);
+  border: 1px solid var(--cwyc-border-subtle);
+  border-radius: var(--cwyc-radius);
+  overflow-x: auto;
+  text-align: center;
+}
+
+.cwyc-mermaid[data-mermaid-rendered="true"] svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* ---- Tables (GFM, via marked) -------------------------------------------
+ * Borders/header background/scroll wrapper already come from styles.css;
+ * this only adds zebra striping on top. */
+
+.cwyc-markdown tbody tr:nth-child(even) > td {
+  background: var(--cwyc-surface);
+}

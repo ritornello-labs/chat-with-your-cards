@@ -9,20 +9,52 @@
  * DOM via dangerouslySetInnerHTML. This is the classic UI's marked.js
  * posture (app.js's renderMarkdown) plus the sanitize step it lacked.
  *
+ * DOMPurify is called here with NO custom ALLOWED_TAGS/ALLOWED_ATTR/ADD_TAGS
+ * - the default profile - and that is deliberate, not an oversight: both the
+ * KaTeX math extension (katex-math.ts) and the mermaid diagram renderer
+ * (mermaid.ts) were designed so their output needs no allowlist changes at
+ * all. See katex-math.ts's header for exactly which tags KaTeX emits and
+ * why DOMPurify's default handling of them (in particular, quietly
+ * dropping the MathML accessibility subtree) is the right outcome here, not
+ * a gap to patch over.
+ *
  * STREAMING SAFETY: renderMarkdown runs on every text_delta, so it is fed
  * partial/incomplete markdown mid-stream (an unclosed ``` fence, a dangling
- * `[link`, half a table). marked tolerates partial input by design, but a
- * try/catch guards anyway - on any failure the raw text is escaped and shown
- * verbatim rather than throwing and blanking the turn. Nothing here mutates
- * layout-breaking state, so a mid-stream render is always safe.
+ * `[link`, half a table, an unclosed `$`/`$$`/```mermaid). marked tolerates
+ * partial input by design, but a try/catch guards anyway - on any failure
+ * the raw text is escaped and shown verbatim rather than throwing and
+ * blanking the turn. Nothing here mutates layout-breaking state, so a
+ * mid-stream render is always safe. katex-math.ts and mermaid.ts each carry
+ * their own streaming-safety notes for their specific delimiters/fences.
  */
 import { marked } from "marked";
+import type { Tokens } from "marked";
 import DOMPurify from "dompurify";
+import { katexMarkedExtension } from "./katex-math";
+import { renderMermaidCode } from "./mermaid";
+import "./katex-inline.css";
+import "./markdown-extras.css";
 
 // gfm + breaks mirrors the chat convention (single newline -> <br>), matching
 // how Claude Code / ChatGPT render streamed assistant text. Synchronous
 // (async stays off) so parse() returns a string, never a Promise.
 marked.setOptions({ gfm: true, breaks: true });
+
+// $/$$ math (katex-math.ts) - registered before the mermaid `code` renderer
+// override below since marked.use() merges are independent (math is inline
+// tokenizer/renderer extensions, mermaid is a block-level renderer
+// override; order between the two calls does not matter).
+marked.use(katexMarkedExtension);
+
+// ```mermaid fences: everything else falls through to marked's default code
+// renderer (returning `false` - see mermaid.ts's renderMermaidCode header).
+marked.use({
+  renderer: {
+    code(token: Tokens.Code) {
+      return renderMermaidCode(token);
+    },
+  },
+});
 
 // Force links to open outside the dock webview and never leak referrer/opener
 // (defense-in-depth on top of DOMPurify): a link in rendered agent output
