@@ -421,6 +421,8 @@ def make_manager(
     checkpoint_ok: bool = True,
     observes: list | None = None,
     apply_skill=None,
+    apply_skill_create=None,
+    list_skill_names=None,
 ):
     col = FakeCol()
     pushed: list[dict[str, Any]] = []
@@ -438,6 +440,8 @@ def make_manager(
         checkpoint=checkpoint,
         observe=(observes.append if observes is not None else None),
         apply_skill=apply_skill,
+        apply_skill_create=apply_skill_create,
+        list_skill_names=list_skill_names,
     )
     return manager, col, pushed
 
@@ -1384,6 +1388,114 @@ class SkillUpdateTests(unittest.TestCase):
         manager.accept({"id": result["proposal_id"]})
         (error,) = pushes_of(pushed, "proposal_error")
         self.assertIn("not available", error["message"])
+
+
+NEW_SKILL_ARGS = {
+    "name": "tts-audio-workflow",
+    "description": "Generate TTS audio via the user's API.",
+    "markdown": "# TTS workflow\n\nDo the thing.\n",
+    "rationale": "We worked this out together and it'll come up again.",
+}
+
+
+class SkillCreateTests(unittest.TestCase):
+    """propose_new_skill's proposal round-trip (workspace task #20):
+    validation, always-pending review (even under trusted-writes), accept
+    writes via the injected callable, reject writes nothing, and the
+    submission-time collision check against existing skill names."""
+
+    def test_always_pending_even_under_trusted_writes(self) -> None:
+        manager, _, pushed = make_manager(
+            config={"permission_mode": "trusted-writes"},
+            apply_skill_create=lambda _p: [],
+        )
+        result = manager.submit_skill_create(dict(NEW_SKILL_ARGS))
+        self.assertEqual("pending_user_review", result["status"])
+        (proposal,) = pushes_of(pushed, "proposal")
+        self.assertEqual("skill_create", proposal["proposal"]["kind"])
+
+    def test_accept_applies_via_callable_and_is_not_revertible(self) -> None:
+        applied: list[Any] = []
+
+        def apply_skill_create(proposal: Any) -> list[str]:
+            applied.append(dict(proposal.op_args))
+            return ["New skill written to user_files/agent-home/.claude/skills/x/SKILL.md"]
+
+        manager, _, pushed = make_manager(apply_skill_create=apply_skill_create)
+        result = manager.submit_skill_create(dict(NEW_SKILL_ARGS))
+        manager.accept({"id": result["proposal_id"]})
+        self.assertEqual(1, len(applied))
+        self.assertEqual(NEW_SKILL_ARGS["name"], applied[0]["name"])
+        self.assertEqual(NEW_SKILL_ARGS["markdown"], applied[0]["markdown"])
+        (resolved,) = pushes_of(pushed, "proposal_resolved")
+        self.assertEqual("accepted", resolved["status"])
+        self.assertFalse(resolved["revertible"])
+        # Skill creation never enters the note ledger.
+        self.assertEqual([], pushes_of(pushed, "ledger")[-1]["entries"])
+
+    def test_reject_writes_nothing(self) -> None:
+        applied: list[Any] = []
+        manager, _, pushed = make_manager(
+            apply_skill_create=lambda p: applied.append(p) or []
+        )
+        result = manager.submit_skill_create(dict(NEW_SKILL_ARGS))
+        manager.reject({"id": result["proposal_id"]})
+        self.assertEqual([], applied)
+        (resolved,) = pushes_of(pushed, "proposal_resolved")
+        self.assertEqual("rejected", resolved["status"])
+
+    def test_accept_without_apply_callable_reports_error(self) -> None:
+        manager, _, pushed = make_manager()
+        result = manager.submit_skill_create(dict(NEW_SKILL_ARGS))
+        manager.accept({"id": result["proposal_id"]})
+        (error,) = pushes_of(pushed, "proposal_error")
+        self.assertIn("not available", error["message"])
+
+    def test_rejects_non_kebab_case_name(self) -> None:
+        manager, _, _ = make_manager()
+        for bad_name in ("TTS_Audio", "tts audio", "Tts-Audio", "-leading", "trailing-", ""):
+            with self.assertRaises(ProposalError):
+                manager.submit_skill_create(dict(NEW_SKILL_ARGS, name=bad_name))
+
+    def test_rejects_missing_description_markdown_or_rationale(self) -> None:
+        manager, _, _ = make_manager()
+        with self.assertRaises(ProposalError):
+            manager.submit_skill_create(dict(NEW_SKILL_ARGS, description=""))
+        with self.assertRaises(ProposalError):
+            manager.submit_skill_create(dict(NEW_SKILL_ARGS, markdown="   "))
+        with self.assertRaises(ProposalError):
+            manager.submit_skill_create(dict(NEW_SKILL_ARGS, rationale=""))
+
+    def test_rejects_oversized_name_description_and_markdown(self) -> None:
+        manager, _, _ = make_manager()
+        with self.assertRaises(ProposalError):
+            manager.submit_skill_create(dict(NEW_SKILL_ARGS, name="x" * 65))
+        with self.assertRaises(ProposalError):
+            manager.submit_skill_create(dict(NEW_SKILL_ARGS, description="x" * 1025))
+        with self.assertRaises(ProposalError):
+            manager.submit_skill_create(dict(NEW_SKILL_ARGS, markdown="x" * 50_001))
+
+    def test_collision_with_existing_skill_name_is_rejected(self) -> None:
+        manager, _, _ = make_manager(
+            list_skill_names=lambda: {"anki-card-authoring", "note-conventions"}
+        )
+        with self.assertRaises(ProposalError) as ctx:
+            manager.submit_skill_create(dict(NEW_SKILL_ARGS, name="anki-card-authoring"))
+        self.assertIn("already exists", str(ctx.exception))
+        self.assertIn("propose_skill_update", str(ctx.exception))
+        # Case-insensitive collision check.
+        with self.assertRaises(ProposalError):
+            manager.submit_skill_create(dict(NEW_SKILL_ARGS, name="Note-Conventions".lower()))
+
+    def test_no_collision_when_name_is_new(self) -> None:
+        manager, _, pushed = make_manager(
+            list_skill_names=lambda: {"anki-card-authoring"},
+            apply_skill_create=lambda _p: [],
+        )
+        result = manager.submit_skill_create(dict(NEW_SKILL_ARGS))
+        self.assertEqual("pending_user_review", result["status"])
+        (proposal,) = pushes_of(pushed, "proposal")
+        self.assertEqual("skill_create", proposal["proposal"]["kind"])
 
 
 class DeckOpTests(unittest.TestCase):

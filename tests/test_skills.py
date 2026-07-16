@@ -17,11 +17,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from chat_with_your_cards.skills import (  # noqa: E402
+    agent_skill_names,
     load_conventions,
     materialize_agent_environment,
     materialize_agent_skills,
     materialize_conventions_agent_skill,
     materialize_conventions_skill,
+    write_new_skill,
 )
 
 
@@ -196,6 +198,91 @@ class MaterializeAgentSkillsTest(unittest.TestCase):
             path.write_text("custom curriculum rules\n", encoding="utf-8")
             materialize_agent_skills(agent_home)
             self.assertEqual(path.read_text(encoding="utf-8"), "custom curriculum rules\n")
+
+
+class AgentSkillNamesTest(unittest.TestCase):
+    """agent_skill_names feeds ProposalManager.submit_skill_create's
+    collision check (workspace task #20)."""
+
+    def test_empty_when_no_skills_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(set(), agent_skill_names(Path(tmp) / "agent-home"))
+
+    def test_lists_existing_skill_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            agent_home = Path(tmp) / "agent-home"
+            materialize_agent_skills(agent_home)
+            names = agent_skill_names(agent_home)
+            self.assertIn("anki-card-authoring", names)
+            self.assertIn("skill-maintenance", names)
+
+    def test_ignores_stray_files_not_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            agent_home = Path(tmp) / "agent-home"
+            skills_root = agent_home / ".claude" / "skills"
+            skills_root.mkdir(parents=True)
+            (skills_root / "not-a-skill.txt").write_text("stray file", encoding="utf-8")
+            self.assertEqual(set(), agent_skill_names(agent_home))
+
+
+class WriteNewSkillTest(unittest.TestCase):
+    """write_new_skill is the ONLY path that ever writes an agent-proposed
+    new skill to disk (proposals.py kind "skill_create", accepted via
+    __init__.py's _apply_new_skill). Security-critical: must never
+    overwrite an existing skill, even under a same-name race."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.agent_home = Path(self._tmp.name) / "agent-home"
+
+    def test_writes_frontmatter_and_body(self) -> None:
+        path = write_new_skill(
+            self.agent_home,
+            "tts-audio-workflow",
+            "Generate TTS audio via the user's API.",
+            "# TTS workflow\n\nDo the thing.\n",
+        )
+        self.assertEqual(
+            path,
+            self.agent_home / ".claude" / "skills" / "tts-audio-workflow" / "SKILL.md",
+        )
+        body = path.read_text(encoding="utf-8")
+        self.assertTrue(body.startswith("---\nname: tts-audio-workflow\n"))
+        self.assertIn('description: "Generate TTS audio', body)
+        self.assertIn("# TTS workflow", body)
+        self.assertIn("Do the thing.", body)
+
+    def test_tags_the_file_as_agent_authored(self) -> None:
+        path = write_new_skill(self.agent_home, "foo-bar", "Foo the bar.", "Body.\n")
+        body = path.read_text(encoding="utf-8")
+        self.assertIn("Agent-authored skill", body)
+        self.assertIn("propose_new_skill", body)
+
+    def test_description_with_colon_and_quote_stays_valid_yaml(self) -> None:
+        # A raw colon or double-quote in the description would otherwise
+        # break the frontmatter's `key: value` line or the fence structure.
+        path = write_new_skill(
+            self.agent_home,
+            "quoting-test",
+            'Uses a colon: and a "quoted" word.',
+            "Body.\n",
+        )
+        lines = path.read_text(encoding="utf-8").splitlines()
+        self.assertEqual("---", lines[0])
+        self.assertEqual("name: quoting-test", lines[1])
+        self.assertTrue(lines[2].startswith("description: "))
+        self.assertEqual("---", lines[3])
+        self.assertIn('\\"quoted\\"', lines[2])
+        self.assertIn("colon:", lines[2])
+
+    def test_raises_file_exists_error_without_overwriting(self) -> None:
+        write_new_skill(self.agent_home, "dup-name", "First version.", "Original body.\n")
+        with self.assertRaises(FileExistsError):
+            write_new_skill(self.agent_home, "dup-name", "Second version.", "New body.\n")
+        path = self.agent_home / ".claude" / "skills" / "dup-name" / "SKILL.md"
+        self.assertIn("Original body.", path.read_text(encoding="utf-8"))
+        self.assertNotIn("New body.", path.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

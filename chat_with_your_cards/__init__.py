@@ -237,6 +237,8 @@ def _setup() -> None:
         observe=_learning_observe,
         apply_skill=_apply_skill_update,
         after_deck_change=_refresh_deck_ui,
+        apply_skill_create=_apply_new_skill,
+        list_skill_names=_agent_skill_names,
     )
 
     def system_prompt() -> str:
@@ -765,6 +767,36 @@ def _apply_skill_update(proposal: Any) -> list[str]:
             f"user_files/learning/skill-backups/{backup.name}"
         ]
     return []
+
+
+def _agent_skill_names() -> set[str]:
+    """Skills that already exist under agent-home, for
+    ProposalManager.submit_skill_create's collision check (workspace task
+    #20)."""
+    from .skills import agent_skill_names
+
+    return agent_skill_names(USER_FILES / "agent-home")
+
+
+def _apply_new_skill(proposal: Any) -> list[str]:
+    """Accepted skill_create proposal: write the brand-new SKILL.md. See
+    skills.write_new_skill's security note - this is the ONLY path that ever
+    writes a new skill file, and it always runs from an already-accepted,
+    user-reviewed proposal. Re-checks existence itself (not just at propose
+    time), so a race with another proposal accepted for the same name in the
+    meantime fails loudly as a ProposalError instead of overwriting it."""
+    from .proposals import ProposalError
+    from .skills import write_new_skill
+
+    args = proposal.op_args
+    name = str(args.get("name", ""))
+    description = str(args.get("description", ""))
+    markdown = str(args.get("markdown", ""))
+    try:
+        path = write_new_skill(USER_FILES / "agent-home", name, description, markdown)
+    except FileExistsError as exc:
+        raise ProposalError(str(exc)) from None
+    return [f"New skill written to user_files/{path.relative_to(USER_FILES)}"]
 
 
 def _push_learning_state() -> None:

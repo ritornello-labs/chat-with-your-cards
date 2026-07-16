@@ -191,6 +191,25 @@ The existing `ai-enhanced-learning` skill (`skills/anki-card-authoring/`) is the
 
 **Agent environment / tool limits (added 2026-07-12; made mode-conditional 2026-07-13).** In the default `sandbox` agent-tools mode the dock spawns the CLI with `--disallowedTools Bash,Edit,Write,NotebookEdit` (card content is untrusted input → RCE risk, §5), and that disallow propagates to subagents (verified: a subagent's `Write` failed). But the agent wasn't *told* this, so it assumed it had shell via a subagent, tried to write a file, failed, and flip-flopped (dogfood). Fix has two channels: a tight one-line constraint in `--append-system-prompt` (guaranteed main-agent delivery, kept under the rule-3 length ceiling), plus a fuller `user_files/agent-home/CLAUDE.md` (`skills.materialize_agent_environment`, regenerated each run) — Claude Code loads CLAUDE.md from cwd for the main agent *and* subagents, so it's the one place the limits reach a subagent. In sandbox the agent is told to hand the user a recipe when a task needs code execution or media generation, rather than attempting it. **Both channels are now conditional on `agent_tools` (§5):** in `full` mode the shell/file tools are actually on, so the same two channels instead tell the agent it *has* shell/write, warn that card content is untrusted (injection risk), and steer it to the proposal tools and AnkiConnect (never direct `.anki2` writes) — they must never lie about the live tool posture in either direction. Length ceiling (< 4,000 chars) is re-tested for both modes. **Session-preamble freshness — intentional Claude-Code parity (decided 2026-07-13):** the system prompt and CLAUDE.md are captured at session start (per Anki run for CLAUDE.md), so a *mid-session* sandbox↔full switch (which respawns with `--resume`) does **not** rewrite them until the next chat/launch — same as model/effort/permission-mode. This deliberately mirrors Claude Code's own model: a continued/resumed conversation keeps the preamble it was born with rather than retroactively rewriting it, and switching the model there doesn't re-read CLAUDE.md either. We do not special-case this: a fresh chat always gets the correct text, which is the same escape hatch Claude Code offers. (We *could* regenerate the append-prompt/CLAUDE.md on our respawn, but chose parity over a bespoke divergence — the switch is rare and the next chat is correct.)
 
+**Agent-proposed NEW skills (workspace task #20, added 2026-07-16).** The
+self-improvement loop generalized: `propose_new_skill(name, description,
+markdown, rationale)` lets the agent propose saving a reusable workflow it
+worked out with the user (the canonical example: a TTS-audio pipeline via the
+user's own API key — but nothing in the mechanism is task-specific) as a
+brand-new skill under `agent-home/.claude/skills/<name>/SKILL.md`. Security
+posture mirrors `propose_skill_update` and is non-negotiable: a skill is
+standing instructions loaded into every future session, and the agent reads
+untrusted card content, so creation ALWAYS flows through a reviewable
+proposal (`kind: "skill_create"`, rendered by the UI's generic proposal
+fallback — no UI changes) that the user must accept, in every permission
+mode; the file write happens only on accept (`skills.write_new_skill`,
+exclusive-create so racing proposals can't overwrite each other), with our
+own generated frontmatter (agent YAML is never trusted verbatim) and an
+agent-authored provenance tag. Kebab-case names, collision-checked against
+existing skills (factory, hand-dropped, or previously agent-created), bounded
+sizes. Non-revertible by the ledger (file write, not a collection mutation) —
+the user deletes the directory to undo.
+
 **Conventions delivery (updated 2026-07-10, COMPLIANCE.md rule 3).** Previously the resolved prompt-tier conventions text was inlined into `--append-system-prompt` and only the `anki-card-authoring` template lived in the discovered agent-home directory. Now the resolved conventions (config prompt wins, else the `user_files/skills/note-conventions/SKILL.md` body) are **also mirrored** into `user_files/agent-home/.claude/skills/note-conventions/SKILL.md` (`skills.materialize_conventions_agent_skill`), where the harness auto-discovers them like any other skill; the system prompt carries a one-line pointer instead of the text. Unlike the hand-editable templates, this mirror is regenerated every run — its source of truth stays `user_files/skills/` / the config field. Tradeoff accepted: conventions now depend on the agent loading the skill (same mechanism `anki-card-authoring` already relies on) rather than being unconditionally in context; if dogfooding shows proposals ignoring conventions, the fallback is re-inlining a trimmed version.
 
 ## 8. Proposals: note creation and note editing

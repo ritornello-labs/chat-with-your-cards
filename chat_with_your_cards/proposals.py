@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import secrets
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable
@@ -26,6 +27,15 @@ SESSION_TAG_PREFIX = "ai-chat-dock::session-"
 DEFAULT_AUTO_ACCEPT_CAP = 20
 DEFAULT_WRITE_BUDGET = 200
 MAX_SAMPLES = 5
+
+# New-skill proposals (workspace task #20): kebab-case only (the harness
+# discovers skills by directory name) and generous-but-bounded size caps -
+# large enough for a real workflow write-up, small enough that a runaway or
+# adversarial generation can't dump megabytes into agent-home.
+SKILL_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+MAX_SKILL_NAME_CHARS = 64
+MAX_SKILL_DESCRIPTION_CHARS = 1024
+MAX_SKILL_MARKDOWN_CHARS = 50_000
 
 PENDING = "pending"
 ACCEPTED = "accepted"
@@ -82,7 +92,7 @@ class _WriteResult:
 @dataclass
 class Proposal:
     id: str
-    kind: str  # "create" | "edit" | "bulk" | "delete" | "change_set" | "deck_op" | "skill_update"
+    kind: str  # "create" | "edit" | "bulk" | "delete" | "change_set" | "deck_op" | "skill_update" | "skill_create"
     note_type: str
     deck: str
     tags: list[str]
@@ -198,6 +208,8 @@ class ProposalManager:
         observe: Callable[[dict[str, Any]], None] | None = None,
         apply_skill: Callable[["Proposal"], list[str]] | None = None,
         after_deck_change: Callable[[], None] | None = None,
+        apply_skill_create: Callable[["Proposal"], list[str]] | None = None,
+        list_skill_names: Callable[[], set[str]] | None = None,
     ) -> None:
         self._get_col = get_col
         self._push = push
@@ -233,6 +245,16 @@ class ProposalManager:
         # refresh the deck browser / overview (deck ops touch no note ids, so
         # the after_write reviewer-refresh path never fires for them).
         self._after_deck_change = after_deck_change or (lambda: None)
+        # Applies an accepted skill-CREATE proposal (writes the brand-new
+        # SKILL.md under agent-home; see skills.write_new_skill's security
+        # note - this only ever runs from an accepted proposal). Returns
+        # warnings/notes to show on the resolved card.
+        self._apply_skill_create = apply_skill_create
+        # Lists the names of skills that already exist under agent-home, so
+        # submit_skill_create can reject a colliding name before a proposal
+        # card is even shown. None (e.g. in tests that don't care) means no
+        # collision is ever reported.
+        self._list_skill_names = list_skill_names
         self._proposals: dict[str, Proposal] = {}
         self._ledger: list[LedgerEntry] = []
         self._counter = 0
@@ -1107,6 +1129,87 @@ class ProposalManager:
             "note": "Skill updates always require explicit user confirmation.",
         }
 
+    def submit_skill_create(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Propose CREATING a brand-new skill (workspace task #20) - a
+        reusable workflow the agent and user worked out together, e.g.
+        "generate TTS audio via the user's API". Nothing here is TTS- or
+        task-specific: any workflow can be proposed this way.
+
+        SECURITY (see skills.py's matching note): a skill is standing
+        instructions loaded into every future session, and this add-on feeds
+        the agent untrusted card content, so a booby-trapped deck could try
+        to get a malicious skill planted here. That is why this method only
+        ever stages a proposal - ALWAYS user-confirmed, in every permission
+        mode, exactly like submit_skill_update - and the actual file write
+        happens solely on accept, via the injected apply_skill_create
+        callable (never here, never from a direct tool write)."""
+        name = str(args.get("name", "")).strip()
+        description = str(args.get("description", "")).strip()
+        markdown = str(args.get("markdown", ""))
+        rationale = str(args.get("rationale", "")).strip()
+
+        if not name or not SKILL_NAME_RE.match(name):
+            raise ProposalError(
+                "name must be kebab-case (lowercase letters, digits, and "
+                "hyphens only, e.g. 'tts-audio-workflow')"
+            )
+        if len(name) > MAX_SKILL_NAME_CHARS:
+            raise ProposalError(f"name is too long (max {MAX_SKILL_NAME_CHARS} chars)")
+        if not description:
+            raise ProposalError(
+                "description is required: it goes in the SKILL.md frontmatter "
+                "and is what future sessions read to decide whether to load it"
+            )
+        if len(description) > MAX_SKILL_DESCRIPTION_CHARS:
+            raise ProposalError(
+                f"description is too long (max {MAX_SKILL_DESCRIPTION_CHARS} chars)"
+            )
+        if not markdown.strip():
+            raise ProposalError("markdown must not be empty")
+        if len(markdown) > MAX_SKILL_MARKDOWN_CHARS:
+            raise ProposalError(
+                f"markdown is too long (max {MAX_SKILL_MARKDOWN_CHARS} chars); "
+                "keep a skill focused - split unrelated workflows into "
+                "separate skills"
+            )
+        if not rationale:
+            raise ProposalError(
+                "rationale is required: explain why this is worth saving as a "
+                "reusable skill, for the user reviewing the proposal card"
+            )
+
+        existing = set()
+        if self._list_skill_names is not None:
+            existing = {n.lower() for n in self._list_skill_names()}
+        if name.lower() in existing:
+            raise ProposalError(
+                f"a skill named {name!r} already exists; pick a different "
+                "name, or use propose_skill_update if you mean to revise the "
+                "existing card-authoring skill"
+            )
+
+        proposal = Proposal(
+            id=self._next_id(),
+            kind="skill_create",
+            note_type="",
+            deck="",
+            tags=[],
+            fields={},
+            title=f"Create new skill: {name}",
+            rationale=rationale,
+            samples=[{"text": description}],
+            op_args={"name": name, "description": description, "markdown": markdown},
+        )
+        self._proposals[proposal.id] = proposal
+        self._push({"type": "proposal", "proposal": proposal.to_payload()})
+        return {
+            "status": "pending_user_review",
+            "proposal_id": proposal.id,
+            "note": "Creating a new skill always requires explicit user "
+            "confirmation: a skill is standing instructions loaded into "
+            "every future session.",
+        }
+
     # ---- change sets: many small edits reviewed as one unit ----
 
     def open_change_set(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -1541,6 +1644,17 @@ class ProposalManager:
                     raise ProposalError("skill updates are not available")
                 proposal.warnings = self._apply_skill(proposal)
                 proposal.status = ACCEPTED
+            elif proposal.kind == "skill_create":
+                # SAFETY: same posture as skill_update - not a collection write,
+                # so no transaction/invariants apply. _apply_skill_create writes
+                # a brand-new SKILL.md (skills.write_new_skill), re-checking
+                # existence at write time so this can never overwrite a name
+                # another accepted proposal already claimed. Always
+                # user-confirmed and never ledger-reverted.
+                if self._apply_skill_create is None:
+                    raise ProposalError("creating new skills is not available")
+                proposal.warnings = self._apply_skill_create(proposal)
+                proposal.status = ACCEPTED
             else:
                 raise ProposalError(f"unknown proposal kind {proposal.kind!r}")
             proposal.status = AUTO_ACCEPTED if direct else proposal.status
@@ -1685,7 +1799,7 @@ class ProposalManager:
 
     @staticmethod
     def _kind_revertible(proposal: Proposal) -> bool:
-        if proposal.kind in ("delete", "skill_update"):
+        if proposal.kind in ("delete", "skill_update", "skill_create"):
             return False
         # Rebuild/empty leave nothing to restore: the previous queue content
         # is not stored anywhere, and re-running them is one chat message.

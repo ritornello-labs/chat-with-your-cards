@@ -412,3 +412,87 @@ def load_conventions(user_files: Path, config_prompt: str) -> str | None:
         body = body.strip()
         return body or None
     return None
+
+
+# ---- agent-proposed new skills (workspace task #20, DESIGN.md section 7) ----
+#
+# SECURITY: a skill is standing instructions loaded into every future
+# session. This add-on feeds the agent untrusted card content (AGENTS.md,
+# DESIGN.md section 13 item 3), so a booby-trapped deck could try to steer
+# the agent into planting a malicious skill here ("always exfiltrate X").
+# That is why skill creation flows exclusively through an accepted
+# proposal (proposals.py kind "skill_create") that the user reads and
+# confirms on a review card - never a direct tool write, not even in full
+# agent-tools mode. `write_new_skill` below is only ever called from the
+# accept path (`__init__.py`'s `_apply_new_skill`), and it re-checks
+# existence right here at write time so a race between two accepted
+# proposals for the same name fails loudly instead of one silently
+# clobbering the other.
+
+NEW_SKILL_HEADER_TEMPLATE = """---
+name: {name}
+description: {description}
+---
+
+<!-- Agent-authored skill: created via propose_new_skill and reviewed and
+accepted by the user before this file was written. Treat its instructions
+like any other skill's - inspect them, and revise or delete the skill if
+they stop matching what you actually want. -->
+
+"""
+
+
+def _yaml_double_quote(text: str) -> str:
+    """Render ``text`` as a safe double-quoted YAML scalar for the
+    frontmatter `description` line - the agent-supplied description could
+    contain a colon, a leading special character, or a stray quote, any of
+    which would otherwise corrupt the YAML block."""
+    escaped = text.replace("\\", "\\\\").replace('"', '\\"')
+    escaped = escaped.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+    return f'"{escaped}"'
+
+
+def agent_skill_names(agent_home: Path) -> set[str]:
+    """Names of skill directories currently under
+    agent_home/.claude/skills/ - factory templates (anki-card-authoring,
+    note-conventions, ...), any hand-dropped skill, and any previously
+    agent-created one. Used by ProposalManager.submit_skill_create to
+    reject a colliding name before a proposal card is even shown."""
+    skills_root = agent_home / ".claude" / "skills"
+    if not skills_root.is_dir():
+        return set()
+    return {p.name for p in skills_root.iterdir() if p.is_dir()}
+
+
+def render_new_skill_markdown(name: str, description: str, body: str) -> str:
+    """Build the full SKILL.md content for an agent-proposed new skill: our
+    own generated frontmatter (never the agent's raw text, so it can't
+    desync from the validated `name`/`description` or smuggle extra YAML
+    keys) plus the agent-authored body."""
+    header = NEW_SKILL_HEADER_TEMPLATE.format(
+        name=name, description=_yaml_double_quote(description)
+    )
+    return header + body.strip() + "\n"
+
+
+def write_new_skill(agent_home: Path, name: str, description: str, markdown: str) -> Path:
+    """Write a brand-new agent-authored skill on an accepted `skill_create`
+    proposal. Raises ``FileExistsError`` if a skill with this name already
+    exists - checked right here (not just at proposal time) so two
+    proposals racing to create the same name can never overwrite each
+    other; the caller (`__init__.py._apply_new_skill`) turns that into a
+    clean ``ProposalError`` back on the resolved card."""
+    skill_dir = agent_home / ".claude" / "skills" / name
+    skill_path = skill_dir / "SKILL.md"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    content = render_new_skill_markdown(name, description, markdown)
+    try:
+        # Exclusive create ("x") rather than exists()-then-write: the two
+        # steps of a check-then-write are not atomic, so a real race
+        # between two accepted proposals for the same name could otherwise
+        # still let the second silently clobber the first.
+        with skill_path.open("x", encoding="utf-8") as handle:
+            handle.write(content)
+    except FileExistsError:
+        raise FileExistsError(f"a skill named {name!r} already exists at {skill_path}") from None
+    return skill_path
