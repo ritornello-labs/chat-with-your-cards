@@ -98,6 +98,11 @@ function useSmartPanel(open: boolean) {
   }, [open]);
   return {
     panelRef,
+    // `down` = opens below the trigger (top-anchored). When it opens ABOVE
+    // (bottom-anchored, the common case) a caller that reveals content on hover
+    // must add it on the anchored side, or the items shift out from under the
+    // cursor and flicker - see ToolsChip's risk line.
+    down,
     panelClass: "cwyc-panel cwyc-panel-composer" + (down ? " cwyc-panel-composer-down" : ""),
     panelStyle: maxHeight !== undefined ? { maxHeight } : undefined,
   };
@@ -435,6 +440,35 @@ export function ToolsChip({ store }: { store: ChatStore }) {
     if (!isRisky) setRiskDismissed(false);
   }, [isRisky]);
   const showRisk = (isRisky || hoverRisky) && !riskDismissed;
+  // Rendered on the panel's ANCHORED side so revealing it on hover never moves
+  // the menu items: above them when the panel opens upward (bottom-anchored),
+  // below them when it opens downward. Otherwise the hovered risky item slides
+  // out from under the cursor and flickers (dogfood 2026-07-15).
+  const riskLine = (
+    <div className="cwyc-risk-line" role="note">
+      <span className="cwyc-risk-line-text">
+        These tiers auto-run shell commands — including any hidden in untrusted
+        card content.{" "}
+        <button
+          type="button"
+          className="cwyc-risk-link"
+          data-testid="risk-modal-open"
+          onClick={() => setModalOpen(true)}
+        >
+          What&rsquo;s the risk?
+        </button>
+      </span>
+      <button
+        type="button"
+        className="cwyc-risk-dismiss"
+        aria-label="Dismiss warning"
+        title="Dismiss"
+        onClick={() => setRiskDismissed(true)}
+      >
+        ×
+      </button>
+    </div>
+  );
 
   return (
     <div className="cwyc-ctl" ref={ref}>
@@ -450,6 +484,7 @@ export function ToolsChip({ store }: { store: ChatStore }) {
       {open ? (
         <div className={panel.panelClass} style={panel.panelStyle} ref={panel.panelRef}>
           <div className="cwyc-panel-title">Agent tools</div>
+          {showRisk && !panel.down ? riskLine : null}
           {AGENT_TOOLS.map((tool) => {
             const risky = tool.id !== "sandbox";
             // Auto's safety classifier only runs on premium models; the CLI
@@ -485,31 +520,7 @@ export function ToolsChip({ store }: { store: ChatStore }) {
               </button>
             );
           })}
-          {showRisk ? (
-            <div className="cwyc-risk-line" role="note">
-              <span className="cwyc-risk-line-text">
-                These tiers auto-run shell commands — including any hidden in
-                untrusted card content.{" "}
-                <button
-                  type="button"
-                  className="cwyc-risk-link"
-                  data-testid="risk-modal-open"
-                  onClick={() => setModalOpen(true)}
-                >
-                  What&rsquo;s the risk?
-                </button>
-              </span>
-              <button
-                type="button"
-                className="cwyc-risk-dismiss"
-                aria-label="Dismiss warning"
-                title="Dismiss"
-                onClick={() => setRiskDismissed(true)}
-              >
-                ×
-              </button>
-            </div>
-          ) : null}
+          {showRisk && panel.down ? riskLine : null}
         </div>
       ) : null}
       {modalOpen ? <RiskModal onClose={() => setModalOpen(false)} /> : null}
