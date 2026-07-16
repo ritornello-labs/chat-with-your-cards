@@ -62,6 +62,8 @@ export interface ProposalFieldPayload {
  */
 export interface ProposalPayload {
   id: string;
+  revision?: number;
+  operation_digest?: string;
   kind: string;
   status: string;
   note_type: string;

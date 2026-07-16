@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@elvis-labs/interaction-ui": "file:vendor/elvis-labs-interaction-ui-0.1.0.tgz",
     "@assistant-ui/react": "0.14.24",
     "@codemirror/commands": "^6.10.4",
     "@codemirror/state": "^6.7.1",

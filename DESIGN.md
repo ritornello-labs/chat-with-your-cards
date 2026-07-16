@@ -197,6 +197,19 @@ The existing `ai-enhanced-learning` skill (`skills/anki-card-authoring/`) is the
 
 Flow: agent calls `propose_note` → ProposalManager validates (note type exists, deck exists or is creatable, required fields present, duplicate check via Anki's dupe detection) → proposal card renders in the chat stream with editable fields, deck picker, tag editor, Accept / Edit / Reject.
 
+**Shared interaction renderer (2026-07-15).** New-note proposal cards now adapt
+the local Proposal payload to the renderer-neutral upstream interaction
+protocol and render through the exact same packaged React component as the
+private front-end. The canonical package lives at
+`the private upstream package tree` in a private upstream repository;
+this repository vendors its built tarball rather than using a non-reproducible
+sibling `file:` path. Execution remains local and every collection mutation
+still passes through ProposalManager. Field edits no longer ride along with an
+accept click: Save creates a validated, re-previewed immutable revision, and
+Accept names that exact revision. Stale approvals fail closed. This first
+adapter deliberately covers `create`; edit/bulk/deck/skill proposal bodies
+stay on the existing renderer until their protocol operations are designed.
+
 **Editing proposals — the review UX is a flagship surface.** The bar is "Cursor-grade amazing", but the right interface differs because the artifact is a flashcard, not code:
 
 - **Field-level diffs on rendered text**: word-level inline highlights (deletions struck through, insertions marked) per field — not line-based code diffs. Unchanged fields collapsed.

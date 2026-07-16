@@ -12,6 +12,8 @@ flow is unit-testable against a fake collection.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import secrets
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable
@@ -101,6 +103,21 @@ class Proposal:
     samples: list[dict[str, Any]] = field(default_factory=list)
     items: list[dict[str, Any]] = field(default_factory=list)  # change_set entries
     open: bool = False  # change_set still collecting
+    revision: int = 1  # immutable review revision; edits create a new revision
+
+    def operation_digest(self) -> str:
+        operation = {
+            "type": "anki.note.create" if self.kind == "create" else f"anki.proposal.{self.kind}",
+            "deck": self.deck,
+            "note_type": self.note_type,
+            "fields": self.fields,
+            "tags": self.tags,
+            "note_id": self.note_id,
+            "op": self.op,
+            "op_args": self.op_args,
+        }
+        canonical = json.dumps(operation, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        return hashlib.sha256(canonical.encode()).hexdigest()
 
     def to_payload(self) -> dict[str, Any]:
         fields_payload = []
@@ -111,6 +128,8 @@ class Proposal:
             fields_payload.append(entry)
         return {
             "id": self.id,
+            "revision": self.revision,
+            "operation_digest": self.operation_digest(),
             "kind": self.kind,
             "status": self.status,
             "note_type": self.note_type,
@@ -307,6 +326,55 @@ class ProposalManager:
         ("Suggest change" + send). Restorable like any superseded card. A no-op
         if it was already resolved, so a stale click can't corrupt state."""
         self._maybe_supersede(args.get("id"))
+
+    def revise(self, msg: dict[str, Any]) -> None:
+        """Validate and preview a new immutable revision of a create proposal.
+
+        The old review revision is never accepted implicitly: the shared UI
+        must save edits first, receive the incremented revision, and then
+        approve that exact revision. Other proposal kinds keep their existing
+        review flow until their protocol adapters are implemented.
+        """
+        proposal = self._proposals.get(str(msg.get("id", "")))
+        if proposal is None or proposal.status != PENDING:
+            return
+        try:
+            expected_revision = int(msg.get("expected_revision", 0))
+        except (TypeError, ValueError):
+            expected_revision = 0
+        if expected_revision != proposal.revision:
+            self._push(
+                {
+                    "type": "proposal_error",
+                    "id": proposal.id,
+                    "message": f"stale proposal revision {expected_revision}; current revision is {proposal.revision}",
+                }
+            )
+            return
+        if proposal.kind != "create":
+            self._push(
+                {
+                    "type": "proposal_error",
+                    "id": proposal.id,
+                    "message": "saved revisions are currently available for new-note proposals only",
+                }
+            )
+            return
+        fields = {str(key): str(value) for key, value in (msg.get("fields") or {}).items()}
+        try:
+            col = self._col()
+            model = self._validate_note_type_and_fields(col, proposal.note_type, fields)
+            field_names = [field["name"] for field in model["flds"]]
+            first_name = field_names[0]
+            if not fields.get(first_name, "").strip():
+                raise ProposalError(f"first field {first_name!r} must not be empty")
+            proposal.fields = {name: fields.get(name, "") for name in field_names}
+            proposal.previews = self._render_create_preview(col, model, proposal)
+            proposal.revision += 1
+        except ProposalError as exc:
+            self._push({"type": "proposal_error", "id": proposal.id, "message": str(exc)})
+            return
+        self._push({"type": "proposal", "proposal": proposal.to_payload()})
 
     # ---- agent-facing submission (tool entry points) ----
 
@@ -1410,6 +1478,20 @@ class ProposalManager:
         proposal = self._proposals.get(str(msg.get("id", "")))
         if proposal is None or proposal.status != PENDING:
             return
+        if "revision" in msg:
+            try:
+                accepted_revision = int(msg.get("revision", 0))
+            except (TypeError, ValueError):
+                accepted_revision = 0
+            if accepted_revision != proposal.revision:
+                self._push(
+                    {
+                        "type": "proposal_error",
+                        "id": proposal.id,
+                        "message": f"stale proposal revision {msg.get('revision')}; current revision is {proposal.revision}",
+                    }
+                )
+                return
         if proposal.kind == "change_set" and proposal.open:
             self._push(
                 {

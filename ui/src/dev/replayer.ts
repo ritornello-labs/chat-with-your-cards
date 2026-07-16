@@ -48,6 +48,8 @@ function chopWords(text: string, rand: () => number): string[] {
   return out;
 }
 
+const devProposals = new Map<string, ProposalPayload>();
+
 function compile(steps: readonly Step[]): Array<[number, ChatEvent]> {
   const timeline: Array<[number, ChatEvent]> = [];
   const rand = Math.random;
@@ -83,6 +85,7 @@ function compile(steps: readonly Step[]): Array<[number, ChatEvent]> {
         { type: "tool_call_finished", call_id: callId, ok: step.ok, summary: step.result },
       ]);
     } else if (step.kind === "proposal") {
+      devProposals.set(step.proposal.id, step.proposal);
       timeline.push([delay(), { type: "proposal", proposal: step.proposal }]);
     } else if (step.kind === "error") {
       timeline.push([delay(), { type: "error", message: step.message }]);
@@ -97,6 +100,8 @@ function compile(steps: readonly Step[]): Array<[number, ChatEvent]> {
 
 function baseProposal(overrides: Partial<ProposalPayload> & Pick<ProposalPayload, "id" | "kind">): ProposalPayload {
   return {
+    revision: 1,
+    operation_digest: `dev:${overrides.id}:1`,
     status: "pending",
     note_type: "",
     deck: "",
@@ -578,6 +583,16 @@ export function installDevReplayer(): void {
           warnings: [],
         });
         break;
+      case "proposal_revise": {
+        const current = devProposals.get(String(msg.id));
+        if (!current) break;
+        const revision = Number(msg.expected_revision ?? current.revision ?? 1) + 1;
+        const fields = Object.entries((msg.fields ?? {}) as Record<string, string>).map(([name, value]) => ({ name, new: value }));
+        const revised = { ...current, revision, operation_digest: `dev:${current.id}:${revision}`, fields };
+        devProposals.set(current.id, revised);
+        window.chatUI?.dispatch({ type: "proposal", proposal: revised });
+        break;
+      }
       case "proposal_reject":
         window.chatUI?.dispatch({ type: "proposal_resolved", id: msg.id, status: "rejected" });
         break;

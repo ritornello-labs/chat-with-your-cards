@@ -494,6 +494,35 @@ class CreateFlowTests(unittest.TestCase):
         self.assertIn("mine", note.tags)
         self.assertEqual(col.decks.name(note.cards()[0].did), "Other")
 
+    def test_shared_review_saves_revision_before_exact_accept(self) -> None:
+        manager, col, pushed = make_manager()
+        result = manager.submit_create(dict(CREATE_ARGS))
+        proposal_id = result["proposal_id"]
+        original = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertEqual(original["revision"], 1)
+        self.assertEqual(len(original["operation_digest"]), 64)
+
+        manager.revise(
+            {
+                "id": proposal_id,
+                "expected_revision": 1,
+                "fields": {"Front": "Edited Q?", "Back": "Edited A."},
+            }
+        )
+        revised = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertEqual(revised["revision"], 2)
+        self.assertNotEqual(revised["operation_digest"], original["operation_digest"])
+
+        manager.accept({"id": proposal_id, "revision": 1})
+        self.assertEqual(col._notes, {})
+        self.assertIn("stale proposal revision", pushes_of(pushed, "proposal_error")[-1]["message"])
+
+        manager.accept({"id": proposal_id, "revision": 2})
+        resolved = pushes_of(pushed, "proposal_resolved")[-1]
+        note = col.get_note(resolved["note_id"])
+        self.assertEqual(note["Front"], "Edited Q?")
+        self.assertEqual(note["Back"], "Edited A.")
+
     def test_reject_and_double_decision_ignored(self) -> None:
         manager, col, pushed = make_manager()
         result = manager.submit_create(dict(CREATE_ARGS))

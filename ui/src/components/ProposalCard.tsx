@@ -1,5 +1,8 @@
 import { useMemo, useRef, useState } from "react";
+import { InteractionCard } from "@elvis-labs/interaction-ui";
+import "@elvis-labs/interaction-ui/styles.css";
 import type { ChatStore, ProposalCardData } from "../store";
+import { createProposalInteraction } from "../interactionAdapter";
 
 const KIND_LABELS: Record<string, string> = {
   create: "New note",
@@ -185,7 +188,25 @@ interface ProposalCardProps {
   store: ChatStore;
 }
 
-export function ProposalCard({ data, store }: ProposalCardProps) {
+function SharedCreateProposalCard({ data, store }: ProposalCardProps) {
+  const interaction = useMemo(() => createProposalInteraction(data), [data]);
+  const previews = asPreviews(data.previews);
+  return (
+    <InteractionCard
+      interaction={interaction}
+      className="cwyc-interaction-card"
+      error={data.errorMessage}
+      renderBlock={(block) => block.type === "card_preview" && previews ? <PreviewFlip previews={previews} /> : undefined}
+      onRevise={({ interactionId, expectedRevision, fields }) => store.reviseProposal(interactionId, expectedRevision, fields)}
+      onAction={({ interactionId, revision, actionId }) => {
+        if (actionId === "approve") store.acceptProposalRevision(interactionId, revision);
+        else if (actionId === "reject") store.rejectProposal(interactionId);
+      }}
+    />
+  );
+}
+
+function LegacyProposalCard({ data, store }: ProposalCardProps) {
   // Tolerate partial/legacy payloads: a replayed transcript or a schema drift
   // must never let `.map` on a missing array throw and blank the whole app
   // (the error boundary in App.tsx is the backstop; this is the near guard).
@@ -296,4 +317,8 @@ export function ProposalCard({ data, store }: ProposalCardProps) {
       ) : null}
     </div>
   );
+}
+
+export function ProposalCard(props: ProposalCardProps) {
+  return props.data.kind === "create" ? <SharedCreateProposalCard {...props} /> : <LegacyProposalCard {...props} />;
 }

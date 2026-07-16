@@ -171,12 +171,20 @@ necessarily mounted) that maps the `ChatEvent` stream onto assistant-ui's
 | `reset` | clears the transcript |
 | anything else | ignored, matching `app.js`'s `dispatch()` default case (forward-compatible) |
 
-Approve/Edit/Reject on the proposal card (`components/ProposalCard.tsx`) call
-`store.acceptProposal(id, fields, kind)` / `store.rejectProposal(id)`, which
-send exactly `{type:"proposal_accept", id, fields, accepted_fields?}` /
-`{type:"proposal_reject", id}` - the same shapes `app.js`'s
-`acceptProposal()`/`rejectProposal()` send, so `ProposalManager.accept()` /
-`.reject()` need no changes.
+New-note proposals are adapted to the renderer-neutral interaction protocol by
+`interactionAdapter.ts` and rendered by the vendored
+`@elvis-labs/interaction-ui` package. Editing is a two-step exact-revision
+flow: Save sends `{type:"proposal_revise", id, expected_revision, fields}`;
+ProposalManager validates and previews the fields, increments the revision,
+and pushes it back; Add note then sends `{type:"proposal_accept", id,
+revision}`. A stale revision is rejected before the Anki write chokepoint.
+Other proposal kinds retain the legacy React renderer and bridge commands
+until their protocol adapters exist.
+
+The canonical package source is `the private upstream package tree`
+in the `upstream` repository.
+CWYC commits the exact tarball under `ui/vendor/`, so this repository does not
+depend on a sibling checkout or a private registry.
 
 ### Impedance mismatches hit against assistant-ui's model
 

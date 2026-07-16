@@ -410,6 +410,7 @@ def _wire_bridge() -> None:
     proposals = state.proposals
     assert proposals is not None
     bridge.on("proposal_accept", proposals.accept)
+    bridge.on("proposal_revise", proposals.revise)
     bridge.on("proposal_reject", proposals.reject)
     bridge.on("proposal_supersede", proposals.supersede)
     bridge.on("proposal_revert", proposals.revert)

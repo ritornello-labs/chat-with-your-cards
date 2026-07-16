@@ -381,6 +381,14 @@ export class ChatStore {
     postCommand(cmd);
   }
 
+  acceptProposalRevision(id: string, revision: number): void {
+    postCommand({ type: "proposal_accept", id, revision });
+  }
+
+  reviseProposal(id: string, expectedRevision: number, fields: Record<string, string>): void {
+    postCommand({ type: "proposal_revise", id, expected_revision: expectedRevision, fields });
+  }
+
   rejectProposal(id: string): void {
     postCommand({ type: "proposal_reject", id });
   }
