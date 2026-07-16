@@ -188,7 +188,76 @@ def get_card_sources(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Inline images ride the chat as base64 data URIs, so keep them modest.
+SHOW_IMAGE_MAX_BYTES = 8_000_000
+
+
+def show_image(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    """Display a LOCAL image file inline in the user's chat.
+
+    The agent can produce images (a rendered PDF page, a generated chart) but
+    otherwise has no way to show them - it can only hand back a file path. This
+    reads the file, caps its size, and pushes it to the dock as an inline image
+    data part (see ToolContext.push_ui). png/jpg/gif/webp only; SVG is excluded
+    on purpose (it can carry script)."""
+    raw = str(args.get("path", "")).strip()
+    if not raw:
+        raise ValueError("show_image needs a `path` to a local image file")
+    path = os.path.expanduser(raw)
+    if not os.path.isfile(path):
+        raise ValueError(f"no file at {path}")
+    mime = _MIME_BY_EXT.get(os.path.splitext(path)[1].lower())
+    if mime is None:
+        raise ValueError(
+            f"unsupported image type '{os.path.splitext(path)[1]}' - "
+            "use png, jpg, gif, or webp"
+        )
+    size = os.path.getsize(path)
+    if size > SHOW_IMAGE_MAX_BYTES:
+        raise ValueError(
+            f"image is {size // 1024} KB; the inline cap is "
+            f"{SHOW_IMAGE_MAX_BYTES // 1024} KB (shrink it or lower the DPI)"
+        )
+    with open(path, "rb") as handle:
+        data = base64.b64encode(handle.read()).decode("ascii")
+    caption = str(args.get("caption", "")).strip() or os.path.basename(path)
+    ctx.push_ui(
+        {
+            "type": "inline_image",
+            "src": f"data:{mime};base64,{data}",
+            "caption": caption,
+            "bytes": size,
+        }
+    )
+    return {"status": "displayed", "caption": caption, "bytes": size}
+
+
 def register_media_tools(registry: ToolRegistry) -> None:
+    registry.register(
+        ToolSpec(
+            "show_image",
+            "Display a LOCAL image file inline in the user's chat (png/jpg/gif/"
+            "webp). Use this to actually SHOW the user a picture: a rendered "
+            "PDF or EPUB page, a chart/diagram you generated, a card's image. "
+            "Pass an absolute path and a short caption. The user sees the "
+            "image; you get back only a confirmation.",
+            {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute path to a local image file (png/jpg/gif/webp).",
+                    },
+                    "caption": {
+                        "type": "string",
+                        "description": "Short caption shown under the image.",
+                    },
+                },
+                "required": ["path"],
+            },
+            show_image,
+        )
+    )
     registry.register(
         ToolSpec(
             "get_card_sources",

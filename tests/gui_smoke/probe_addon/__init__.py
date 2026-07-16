@@ -1132,6 +1132,42 @@ def _run_checks() -> dict[str, Any]:
 
     check("control surface present (header + composer row)", _control_surface)
 
+    def _inline_image_data_uri_loads() -> dict[str, Any]:
+        """show_image renders images as base64 data: URIs (InlineImage in
+        Thread.tsx). The render path is preview-verified; the ONLY real-Anki
+        risk is QtWebEngine refusing to LOAD a data: image under Anki's CSP,
+        which a browser preview can't reveal (dogfood 2026-07-15). Probe that
+        in isolation - inject one <img> and read naturalWidth - so it can't
+        disturb the store/other checks."""
+        png = (
+            "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
+            "AAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+        )
+        _eval_js(
+            dock.web,
+            "(function(){var i=document.createElement('img');"
+            "i.id='__cwyc_img_probe';i.style.position='fixed';i.style.left='-9999px';"
+            "i.src='" + png + "';document.body.appendChild(i);return true;})();",
+            DOM_TIMEOUT_MS,
+            "inject data: image probe",
+        )
+        QTest.qWait(300)  # let QtWebEngine decode it
+        info = _eval_js(
+            dock.web,
+            "(function(){var i=document.getElementById('__cwyc_img_probe');"
+            "if(!i)return {missing:true};var r={complete:i.complete,"
+            "naturalWidth:i.naturalWidth};i.remove();return r;})();",
+            DOM_TIMEOUT_MS,
+            "data: image load state",
+        )
+        if not isinstance(info, dict) or not info.get("naturalWidth"):
+            raise AssertionError(
+                f"Anki webview did not load a data: image (CSP blocking data:?): {info}"
+            )
+        return info
+
+    check("data: URI images load in the Anki webview (show_image)", _inline_image_data_uri_loads)
+
     def _collapse_expand_cycle() -> dict[str, Any]:
         """Drive the shell round-trip through the real webview controls: the
         header's collapse chevron shrinks the dock to the rail (animated,

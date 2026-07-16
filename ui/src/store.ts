@@ -111,7 +111,19 @@ interface ErrorDataPart {
   readonly data: { message: string };
 }
 
-type AssistantPart = TextPart | ReasoningPart | ToolCallPart | ProposalDataPart | ErrorDataPart;
+interface ImageDataPart {
+  readonly type: "data";
+  readonly name: "image";
+  readonly data: { src: string; caption: string };
+}
+
+type AssistantPart =
+  | TextPart
+  | ReasoningPart
+  | ToolCallPart
+  | ProposalDataPart
+  | ErrorDataPart
+  | ImageDataPart;
 
 type MessageStatus =
   | { type: "running" }
@@ -538,6 +550,9 @@ export class ChatStore {
       case "proposal_error":
         this.errorProposal(event as ProposalErrorEvent);
         break;
+      case "inline_image":
+        this.appendImage(event as { src: string; caption?: string });
+        break;
       case "usage":
         this.setUsage(event as UsageEvent);
         break;
@@ -824,6 +839,18 @@ export class ChatStore {
       }
     }
     return null;
+  }
+
+  private appendImage(event: { src: string; caption?: string }): void {
+    if (!event.src) return;
+    const current = this.ensureCurrentAssistant();
+    const part: ImageDataPart = {
+      type: "data",
+      name: "image",
+      data: { src: event.src, caption: String(event.caption ?? "") },
+    };
+    this.updateMessage(current.id, (msg) => ({ ...msg, content: [...msg.content, part] }));
+    this.emit();
   }
 
   private upsertProposal(proposal: ProposalPayload): void {

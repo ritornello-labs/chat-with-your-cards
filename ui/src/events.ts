@@ -181,6 +181,14 @@ export interface ResetEvent {
   type: "reset";
 }
 
+/** An image the agent chose to show inline (show_image tool), as a data URI. */
+export interface InlineImageEvent {
+  type: "inline_image";
+  src: string;
+  caption: string;
+  bytes?: number;
+}
+
 export type KnownChatEvent =
   | TextDeltaEvent
   | ThinkingDeltaEvent
@@ -195,7 +203,8 @@ export type KnownChatEvent =
   | DoneEvent
   | CancelledEvent
   | ErrorEvent
-  | ResetEvent;
+  | ResetEvent
+  | InlineImageEvent;
 
 /** Any dict Python (or the dev replayer) pushes; unknown types are ignored. */
 export type ChatEvent = KnownChatEvent | { type: string; [key: string]: unknown };

@@ -29,6 +29,7 @@ type Step =
   | { kind: "think_tokens"; tokens: readonly number[] }
   | { kind: "tool"; tool: string; summary: string; result: string; ok: boolean; durationMs: number }
   | { kind: "proposal"; proposal: ProposalPayload }
+  | { kind: "image"; src: string; caption: string }
   | { kind: "error"; message: string };
 
 const DEMO_CSS =
@@ -87,6 +88,8 @@ function compile(steps: readonly Step[]): Array<[number, ChatEvent]> {
     } else if (step.kind === "proposal") {
       devProposals.set(step.proposal.id, step.proposal);
       timeline.push([delay(), { type: "proposal", proposal: step.proposal }]);
+    } else if (step.kind === "image") {
+      timeline.push([delay(), { type: "inline_image", src: step.src, caption: step.caption }]);
     } else if (step.kind === "error") {
       timeline.push([delay(), { type: "error", message: step.message }]);
       endedWithError = true;
@@ -253,9 +256,29 @@ const ERROR_SCRIPT: Step[] = [
   { kind: "error", message: "the backend process exited unexpectedly (exit code 1)" },
 ];
 
+// A self-contained SVG data URI so the dev path needs no assets (the real
+// show_image tool sends png/jpg/gif/webp; the renderer treats any src alike).
+const IMAGE_SCRIPT: Step[] = [
+  { kind: "text", text: "Here's that page rendered from the PDF:\n\n" },
+  {
+    kind: "image",
+    src:
+      "data:image/svg+xml;utf8," +
+      encodeURIComponent(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='260' height='150'>" +
+          "<rect width='260' height='150' rx='8' fill='#0e7c7b'/>" +
+          "<text x='130' y='82' font-size='18' fill='white' text-anchor='middle' " +
+          "font-family='sans-serif'>sample image</text></svg>"
+      ),
+    caption: "The Ultimate Docker Container Book, p. 276",
+  },
+  { kind: "text", text: "That's the page with the `docker network rm` example." },
+];
+
 function selectScript(userText: string): Step[] {
   const text = userText.toLowerCase();
   if (text.includes("error")) return ERROR_SCRIPT;
+  if (text.includes("image") || text.includes("picture")) return IMAGE_SCRIPT;
   if (text.includes("think") || text.includes("reason")) return REASONING_SCRIPT;
   if (text.includes("edit")) return editProposalScript();
   if (text.includes("propose") || text.includes("note") || text.includes("card")) return createProposalScript();

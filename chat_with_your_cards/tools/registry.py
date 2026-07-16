@@ -29,6 +29,8 @@ class ToolContext(Protocol):
     @property
     def learning(self) -> Any: ...  # learning.LearningStore or None
 
+    def push_ui(self, payload: dict[str, Any]) -> None: ...  # record + push to the dock
+
 
 ToolFunc = Callable[[ToolContext, dict[str, Any]], Any]
 

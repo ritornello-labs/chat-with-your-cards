@@ -115,6 +115,9 @@ class AddonState:
     shortcuts: list[Any] = field(default_factory=list)
     web_ready: bool = False
     config: dict[str, Any] = field(default_factory=dict)
+    # Record-and-push into the chat transcript + webview (set in _setup). Tools
+    # use it via _ToolCtx.push_ui to surface UI (e.g. show_image's inline image).
+    record_push: Any = None
 
 
 state = AddonState()
@@ -197,6 +200,8 @@ def _setup() -> None:
         if state.transcripts is not None:
             state.transcripts.record(payload)
         dock.bridge.push(payload)
+
+    state.record_push = recording_push
 
     from .learning import LearningStore
     from .skills import (
@@ -281,6 +286,12 @@ class _ToolCtx:
     @property
     def learning(self) -> Any:
         return state.learning
+
+    def push_ui(self, payload: dict[str, Any]) -> None:
+        # Tools run on the main thread (execute_tool marshals via run_on_main),
+        # so record + push straight through. No-op before setup wires it.
+        if state.record_push is not None:
+            state.record_push(payload)
 
 
 def _ensure_mcp() -> tuple[str, str]:

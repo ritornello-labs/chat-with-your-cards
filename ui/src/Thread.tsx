@@ -50,6 +50,9 @@ function AssistantMessage({ store }: { store: ChatStore }) {
                   </ErrorBoundary>
                 ),
                 error: ErrorBanner,
+                image: (props) => (
+                  <InlineImage {...(props as { data: { src: string; caption: string } })} />
+                ),
               },
             },
           }}
@@ -141,6 +144,17 @@ function StopIcon() {
     <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
       <rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor" />
     </svg>
+  );
+}
+
+/** An image the agent chose to show inline (show_image). The src is a
+ *  self-contained data: URI, so nothing loads over the network. */
+function InlineImage({ data }: { data: { src: string; caption: string } }) {
+  return (
+    <figure className="cwyc-inline-image" data-testid="inline-image">
+      <img src={data.src} alt={data.caption || "image"} loading="lazy" />
+      {data.caption ? <figcaption>{data.caption}</figcaption> : null}
+    </figure>
   );
 }
 

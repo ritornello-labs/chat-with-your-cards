@@ -679,6 +679,27 @@ body {
   display: flex;
 }
 
+/* Inline image the agent showed via show_image (a self-contained data: URI). */
+#cwyc-root .cwyc-inline-image {
+  margin: 4px 0 2px;
+  max-width: 100%;
+}
+#cwyc-root .cwyc-inline-image img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid var(--cwyc-border);
+  background: var(--cwyc-surface);
+}
+#cwyc-root .cwyc-inline-image figcaption {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--cwyc-fg-subtle);
+  text-align: center;
+}
+
 .cwyc-row-user {
   justify-content: flex-end;
 }
