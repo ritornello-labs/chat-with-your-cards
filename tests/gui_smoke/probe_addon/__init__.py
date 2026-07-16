@@ -1260,6 +1260,63 @@ def _run_checks() -> dict[str, Any]:
 
     check("widget sandbox holds (opaque origin + no-network CSP)", _widget_sandbox_holds)
 
+    def _mermaid_chunk_renders() -> dict[str, Any]:
+        """Mermaid ships as a SEPARATE runtime-fetched ES chunk
+        (web/next/mermaid.bundle.js; ui/src/mermaid.ts + vite.mermaid.config.ts,
+        2026-07-16), which only a real Anki session can certify: the dynamic
+        import() URL derives from document.currentScript.src of the stdHtml-
+        injected bundle, and the chunk must come back over Anki's media server
+        with a module-loadable response. Drive the REAL path end-to-end:
+        dispatch a streamed ```mermaid fence into the store exactly as Python
+        would, then wait for a sanitized SVG whose node labels survived
+        (htmlLabels:false regression guard). A chunk 404/MIME failure shows up
+        as the plain-code-block fallback, i.e. a timeout here."""
+        fence = "```mermaid\\nflowchart LR\\n  A[Alpha] --> B[Beta]\\n```\\n"
+        _eval_js(
+            dock.web,
+            "(function(){"
+            "window.chatUI.dispatch({type:'text_delta', text:'A diagram:\\n\\n'});"
+            f"window.chatUI.dispatch({{type:'text_delta', text:'{fence}'}});"
+            "window.chatUI.dispatch({type:'text_delta', text:'\\nDone.'});"
+            "window.chatUI.dispatch({type:'done'});"
+            "return true;})();",
+            DOM_TIMEOUT_MS,
+            "dispatch mermaid fence",
+        )
+
+        def _svg_rendered() -> bool:
+            state = _eval_js(
+                dock.web,
+                "(function(){var w=document.querySelector('.cwyc-mermaid');"
+                "if(!w)return 'no-wrapper';"
+                "var s=w.querySelector('svg');if(!s)return 'no-svg';"
+                "return (w.textContent||'');})();",
+                DOM_TIMEOUT_MS,
+                "mermaid render state",
+            )
+            return isinstance(state, str) and "Alpha" in state and "Beta" in state
+
+        _wait_until(_svg_rendered, STREAM_TIMEOUT_MS, "mermaid chunk to fetch and render SVG")
+        info = _eval_js(
+            dock.web,
+            "(function(){var w=document.querySelector('.cwyc-mermaid');"
+            "var s=w.querySelector('svg');"
+            "return {labels:(w.textContent||'').trim().slice(0,80),"
+            "scripts:w.querySelectorAll('script').length,"
+            "foreign:w.querySelectorAll('foreignObject').length,"
+            "svg:!!s};})();",
+            DOM_TIMEOUT_MS,
+            "mermaid sanitization state",
+        )
+        # DOMPurify SVG-profile invariants: no script, no foreignObject.
+        if not isinstance(info, dict) or not info.get("svg"):
+            raise AssertionError(f"mermaid SVG missing after wait: {info}")
+        if info.get("scripts") or info.get("foreign"):
+            raise AssertionError(f"UNSANITIZED mermaid output reached the DOM: {info}")
+        return info
+
+    check("mermaid chunk fetches and renders in real Anki", _mermaid_chunk_renders)
+
     def _collapse_expand_cycle() -> dict[str, Any]:
         """Drive the shell round-trip through the real webview controls: the
         header's collapse chevron shrinks the dock to the rail (animated,

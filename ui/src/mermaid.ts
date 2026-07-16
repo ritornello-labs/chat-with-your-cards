@@ -1,42 +1,21 @@
 /**
  * Mermaid diagram rendering for ```mermaid fences in assistant markdown.
  *
- * LAZY LOADING - CODE IS LAZY, THE CURRENT BUNDLE IS NOT (read before
- * touching vite.config.ts): `import("mermaid")` below is a genuine dynamic
- * import - mermaid's own module-level init/side effects do not run until
- * loadMermaid() is first called, i.e. until a message actually contains a
- * closed ```mermaid fence (see isFenceClosed()/renderMermaidCode() below).
- *
- * BUT under the current vite.config.ts, that dynamic import does NOT become
- * a separately-fetched network chunk the way it would in a normal (ESM,
- * code-splitting) Vite app build. vite.config.ts builds this UI as a single
- * self-contained IIFE by deliberate design (its own header comment: "no
- * code-splitting, no CDN/network fetches at runtime", one fixed bundle.js
- * path that dock.py points AnkiWebView.stdHtml() at). Rollup cannot emit a
- * second, separately-loadable chunk for an IIFE/classic-script output - it
- * has no runtime module loader to fetch one - so `import("mermaid")` here
- * gets statically inlined into bundle.js at build time, same as a regular
- * import would. Measured: bundle.js grew from 952,527 bytes (committed
- * baseline, `git show HEAD:chat_with_your_cards/web/next/bundle.js | wc -c`)
- * to ~4.59 MB after adding this file, almost entirely mermaid + its layout
- * engine (d3/dagre-ish internals) - i.e. every dock load now pays that
- * download/parse/compile cost whether or not the conversation ever uses a
- * mermaid fence.
- *
- * This was NOT fixed here because doing so for real requires either (a)
- * editing vite.config.ts to change the build's module format/loading
- * convention - out of this change's file-ownership scope, and a decision
- * that affects dock.py's loading contract, not something to make
- * unilaterally - or (b) standing up a second, separately-built ES module
- * chunk plus a runtime-resolved absolute-URL `import()` (e.g. via
- * `document.currentScript.src`, since a classic script has no
- * `import.meta.url`) - a real architecture addition whose runtime behavior
- * (base-URL resolution, the addon's web-export route serving an
- * unregistered-but-regex-matched sibling file) could not be verified against
- * an actual Anki/QtWebEngine session from here. Flagged for the
- * orchestrator/vite.config.ts owner as a follow-up rather than guessed at.
- * The feature itself is fully correct and safe either way - this only
- * affects bundle size/parse cost, not correctness or security.
+ * LAZY LOADING - TRULY LAZY (2026-07-16): mermaid ships as a SEPARATE,
+ * separately-built ES module chunk (web/next/mermaid.bundle.js, built by
+ * vite.mermaid.config.ts from src/mermaid-chunk.ts as the second pass of
+ * `npm run build`) that loadMermaid() fetches with a runtime dynamic
+ * import() the first time a closed ```mermaid fence needs rendering. The
+ * main bundle stays a single classic-script IIFE (vite.config.ts, which
+ * Rollup cannot code-split) at its pre-mermaid ~1MB; the dev-only
+ * `import("mermaid")` branch is dead-code-eliminated from builds via the
+ * statically-replaced import.meta.env.DEV. URL resolution: a classic script
+ * has no import.meta.url, so the chunk URL derives from
+ * document.currentScript.src captured at bundle evaluation (see
+ * bundleScriptSrc below); Anki's web-export route (web/.*\.(css|js),
+ * __init__.py) serves the sibling file with no Python changes. A failed
+ * chunk fetch degrades to the plain code block via the normal error path.
+ * Verified end-to-end in real Anki by the GUI smoke's mermaid check.
  *
  * STREAMING SAFETY: renderMarkdown (markdown.ts) runs on every streamed text
  * delta, so a ```mermaid fence is fed to marked in a partial state on every
@@ -81,12 +60,55 @@ export type MermaidCacheEntry = { status: "ok"; svg: string } | { status: "error
 const cache = new Map<string, MermaidCacheEntry>();
 const inFlight = new Map<string, Promise<MermaidCacheEntry>>();
 
-let mermaidLoad: Promise<typeof import("mermaid")> | null = null;
+/** What both load paths resolve to: mermaid's default export under `default`
+ * (the npm package in dev, mermaid-chunk.ts's re-export in production). */
+type MermaidModule = { default: (typeof import("mermaid"))["default"] };
+
+let mermaidLoad: Promise<MermaidModule> | null = null;
 let configured = false;
 let renderSeq = 0;
 
-function loadMermaid(): Promise<typeof import("mermaid")> {
-  if (!mermaidLoad) mermaidLoad = import("mermaid");
+/**
+ * Captured at module-evaluation time, which for the production IIFE is while
+ * the <script src=".../web/next/bundle.js"> tag dock.py's stdHtml() injected
+ * is executing - document.currentScript is only non-null during that window,
+ * so this cannot be computed lazily inside loadMermaid(). Null in dev (Vite
+ * serves real ES modules; currentScript is null there) and in any non-DOM
+ * context.
+ */
+const bundleScriptSrc: string | null =
+  typeof document !== "undefined" &&
+  document.currentScript instanceof HTMLScriptElement &&
+  document.currentScript.src
+    ? document.currentScript.src
+    : null;
+
+function loadMermaid(): Promise<MermaidModule> {
+  if (!mermaidLoad) {
+    if (import.meta.env.DEV) {
+      // Dev server: normal package import, Vite serves it as ES modules.
+      // Statically replaced with `false` in builds, so Rollup dead-code-
+      // eliminates this branch and mermaid does NOT get inlined into the
+      // IIFE bundle (verified by bundle size; see mermaid-chunk.ts).
+      mermaidLoad = import("mermaid");
+    } else {
+      // Production: fetch the separately-built ES chunk that sits next to
+      // the running bundle (same media-served directory, so Anki's
+      // web-export route covers it). A classic script may call import();
+      // only import.meta.url is unavailable, hence bundleScriptSrc above.
+      // Built as a .replace() over the script src (relative fallback for a
+      // bundle loaded without one) rather than a ternary with a literal arm:
+      // rolldown const-folds a literal import() specifier and fails the
+      // build trying to resolve it, @vite-ignore notwithstanding. If the
+      // fetch fails outright, renderMermaidAndCache's catch turns it into
+      // the plain-code-block fallback - never a throw.
+      const url = (bundleScriptSrc ?? "./bundle.js").replace(
+        /bundle\.js(\?.*)?$/,
+        "mermaid.bundle.js"
+      );
+      mermaidLoad = import(/* @vite-ignore */ url) as Promise<MermaidModule>;
+    }
+  }
   return mermaidLoad;
 }
 
