@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Any, Callable
 
@@ -21,6 +22,19 @@ from .backends.claude_cli import ClaudeCliBackend, find_claude_cli
 from .context import build_card_block, extract_card_info, wrap_user_message
 
 BACKEND_ENV = "CWYC_BACKEND"
+
+
+def _setup_platform() -> str:
+    """Coarse platform id for the onboarding setup card (task #19): picks
+    which install one-liner the UI shows. sys.platform is "darwin" (macOS),
+    "linux" (Linux, incl. WSL), "win32"/"cygwin" (Windows) - anything else
+    (BSDs, etc.) falls back to "linux" since the curl one-liner works there
+    too, rather than showing an "unknown" platform with no instructions."""
+    if sys.platform == "darwin":
+        return "darwin"
+    if sys.platform.startswith("win") or sys.platform == "cygwin":
+        return "windows"
+    return "linux"
 
 
 def _qt_schedule(delay_ms: int, callback: Callable[[], None]) -> None:
@@ -105,14 +119,12 @@ class ChatController:
             self.backend_kind = "scripted"
             if not self._backend_notice_sent:
                 self._backend_notice_sent = True
-                self._push(
-                    {
-                        "type": "notice",
-                        "text": "Claude Code CLI not found — using the built-in "
-                        "demo backend. Install Claude Code or set "
-                        "claude_cli_path in the add-on config.",
-                    }
-                )
+                # A structured event (task #19), not a one-line notice: the UI
+                # renders a full setup card (install + sign-in steps + a
+                # no-restart "Re-check" button) instead of a message the user
+                # has no obvious action for. Superseded the old plain-notice
+                # fallback so the two don't show redundantly.
+                self._push({"type": "setup_needed", "platform": _setup_platform()})
             return ScriptedBackend(_qt_schedule)
 
         url, token = self._ensure_mcp()
@@ -156,6 +168,43 @@ class ChatController:
         prewarm = getattr(self._session, "prewarm", None)
         if prewarm is not None:
             prewarm()
+
+    def recheck_backend(self) -> bool:
+        """The setup card's "Re-check" button (task #19): re-run CLI discovery
+        with NO Anki restart required. find_claude_cli is just shutil.which +
+        a few Path.exists() calls (see backends/claude_cli.py) - cheap enough
+        to run straight on the main thread, unlike the doctor panel's
+        `--version` subprocesses.
+
+        On success: tear down whatever demo session/backend ensure_ready()
+        already built (the dock pre-warms on every focus, so by the time the
+        setup card is showing, a ScriptedBackend session is very likely
+        already live) and rebuild for real, so the user's very next message
+        goes to the real Claude Code - no restart, no new chat needed. Also
+        resets the notice-once flag so a future CLI loss (or a still-missing
+        find on a later retry) can surface again.
+        """
+        cli_path = find_claude_cli(str(self._config.get("claude_cli_path", "")))
+        if cli_path is None:
+            self._push(
+                {
+                    "type": "notice",
+                    "text": "Still can't find Claude Code. If you just installed it, "
+                    "open a new terminal (or restart Anki) so it picks up the updated "
+                    "PATH, then try Re-check again. Running `claude --version` in a "
+                    "terminal confirms it's installed.",
+                }
+            )
+            return False
+        if self._session is not None:
+            self._session.close()
+            self._session = None
+        self._backend = None
+        self._backend_notice_sent = False
+        self.ensure_ready()
+        self._push({"type": "notice", "text": "Claude Code found — you're all set."})
+        self._push({"type": "setup_resolved"})
+        return True
 
     # ---- chat actions ----
 

@@ -38,6 +38,9 @@
  *   cancelled              -> current assistant message -> status incomplete/cancelled; isRunning=false
  *   error                  -> appends a {type:"data", name:"error"} part, then behaves like cancelled/error
  *   reset                  -> clears the transcript (Python-initiated, e.g. new chat / history load)
+ *   setup_needed           -> NOT a message part; sets ui.setup (rendered as a card ONLY on an
+ *                           empty thread - see Thread.tsx), read on-demand like ui.dock/ui.settings
+ *   setup_resolved         -> clears ui.setup (the setup card's "Re-check" succeeded)
  *   (unknown type)          -> ignored, matching app.js dispatch()'s forward-compatible default case
  */
 
@@ -265,6 +268,18 @@ export interface SettingsState {
   readonly widgetRendering: boolean;
 }
 
+/**
+ * First-run onboarding (task #19, events.ts SetupNeededEvent): non-null while
+ * the setup card should be offered. Persists across `reset()` (new chat /
+ * history load) like the rest of `ui.*` chrome - it reflects a standing
+ * environment fact (Claude Code isn't found), not per-chat state, so the
+ * card correctly reappears on the next empty thread rather than needing
+ * Python to re-push it.
+ */
+export interface SetupState {
+  readonly platform: string; // "darwin" | "linux" | "windows"
+}
+
 export interface UiState {
   readonly agent: AgentState;
   readonly openTarget: "terminal" | "desktop";
@@ -275,6 +290,7 @@ export interface UiState {
   readonly notice: { text: string; seq: number } | null;
   readonly dock: DockUiState | null; // null = host has not reported yet
   readonly settings: SettingsState | null; // null = not pushed yet
+  readonly setup: SetupState | null; // null = no onboarding needed (or resolved)
 }
 
 export const PERMISSION_MODES: readonly { id: string; label: string; hint: string }[] = [
@@ -297,6 +313,7 @@ const DEFAULT_UI_STATE: UiState = {
   notice: null,
   dock: null,
   settings: null,
+  setup: null,
 };
 
 export interface ChatState {
@@ -510,6 +527,14 @@ export class ChatStore {
 
   runDoctor(): void {
     postCommand({ type: "run_doctor" });
+  }
+
+  /** The setup card's "Re-check" button (task #19): asks Python to re-run
+   *  CLI discovery with no Anki restart. Not optimistic - the card stays up
+   *  until a "setup_resolved" push (success) or a fresh "notice" (still
+   *  missing) comes back. */
+  recheckBackend(): void {
+    postCommand({ type: "recheck_backend" });
   }
 
   /**
@@ -739,6 +764,17 @@ export class ChatStore {
           ...this.ui,
           notice: { text: String((event as { text?: string }).text ?? ""), seq: this.noticeSeq },
         };
+        this.emit();
+        break;
+      }
+      case "setup_needed": {
+        const platform = String((event as { platform?: string }).platform ?? "linux");
+        this.ui = { ...this.ui, setup: { platform } };
+        this.emit();
+        break;
+      }
+      case "setup_resolved": {
+        this.ui = { ...this.ui, setup: null };
         this.emit();
         break;
       }

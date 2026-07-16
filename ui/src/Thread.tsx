@@ -11,6 +11,7 @@ import { TextPart } from "./components/TextPart";
 import { ModeChip, ModelPicker, PinsButton, ToolsChip } from "./components/ComposerControls";
 import { VimComposer } from "./components/VimComposer";
 import { WidgetCard, WidgetOfferChip } from "./components/WidgetCard";
+import { SetupCard } from "./components/SetupCard";
 
 function UserMessage() {
   return (
@@ -169,11 +170,16 @@ function InlineImage({ data }: { data: { src: string; caption: string } }) {
 }
 
 export function Thread({ store }: { store: ChatStore }) {
+  const { ui } = useChatState(store);
   return (
     <ThreadPrimitive.Root className="cwyc-thread">
       <ThreadPrimitive.Viewport className="cwyc-viewport">
         <ThreadPrimitive.Empty>
-          <div className="cwyc-empty">Ask about this card, or anything in your collection.</div>
+          {ui.setup ? (
+            <SetupCard platform={ui.setup.platform} store={store} />
+          ) : (
+            <div className="cwyc-empty">Ask about this card, or anything in your collection.</div>
+          )}
         </ThreadPrimitive.Empty>
         <ThreadPrimitive.Messages>
           {({ message }) => (message.role === "user" ? <UserMessage /> : <AssistantMessage store={store} />)}

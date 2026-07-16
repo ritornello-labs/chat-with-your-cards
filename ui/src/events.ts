@@ -212,6 +212,29 @@ export interface WidgetOfferEvent {
   title: string;
 }
 
+/**
+ * First-run onboarding (task #19): pushed by controller.py's _build_backend
+ * the first time it falls back to the demo backend because Claude Code
+ * couldn't be found (find_claude_cli() returned None). `platform` is
+ * "darwin" | "linux" | "windows" (sys.platform, mapped) and picks which
+ * install one-liner the setup card shows. Superseded the old plain "notice"
+ * fallback - see controller.py.
+ */
+export interface SetupNeededEvent {
+  type: "setup_needed";
+  platform: string;
+}
+
+/**
+ * Pushed by ChatController.recheck_backend() when the "Re-check" button's
+ * retry finds the CLI: dismisses the setup card. No Anki restart involved -
+ * the backend/session are rebuilt in-process (DESIGN.md section 9's
+ * "no restart" contract, same as new_chat()).
+ */
+export interface SetupResolvedEvent {
+  type: "setup_resolved";
+}
+
 export type KnownChatEvent =
   | TextDeltaEvent
   | ThinkingDeltaEvent
@@ -229,7 +252,9 @@ export type KnownChatEvent =
   | ResetEvent
   | InlineImageEvent
   | InlineWidgetEvent
-  | WidgetOfferEvent;
+  | WidgetOfferEvent
+  | SetupNeededEvent
+  | SetupResolvedEvent;
 
 /** Any dict Python (or the dev replayer) pushes; unknown types are ignored. */
 export type ChatEvent = KnownChatEvent | { type: string; [key: string]: unknown };

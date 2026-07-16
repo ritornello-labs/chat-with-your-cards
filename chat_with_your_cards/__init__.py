@@ -445,6 +445,7 @@ def _wire_bridge() -> None:
     bridge.on("list_history", lambda _msg: controller.push_history_list())
     bridge.on("load_history", lambda msg: controller.load_history(str(msg.get("id", ""))))
     bridge.on("run_doctor", lambda _msg: _run_doctor())
+    bridge.on("recheck_backend", lambda _msg: _recheck_backend())
     bridge.on("start_skill_review", lambda _msg: _start_skill_review())
     bridge.on(
         "tool_approval_response",
@@ -894,6 +895,15 @@ def _refresh_deck_ui() -> None:
             mw.overview.refresh()
     except Exception:
         pass  # cosmetic refresh; never let it break the write
+
+
+def _recheck_backend() -> None:
+    """The setup card's "Re-check" button (task #19): result (found/still
+    missing) is discarded here - ChatController.recheck_backend() already
+    pushes whichever of setup_resolved/notice fits, so there is nothing left
+    for this thin bridge wrapper to do with the bool."""
+    if state.controller is not None:
+        state.controller.recheck_backend()
 
 
 def _run_doctor() -> None:

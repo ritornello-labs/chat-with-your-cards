@@ -371,7 +371,7 @@ const WELCOME_SCRIPT: Step[] = [
     kind: "text",
     text:
       "Hi! This is the assistant-ui scaffold running against the scripted dev replayer.\n\nTry typing " +
-      "**tool**, **propose**, **edit**, **think**, **long**, **widget**, **image**, or **error** to see each " +
+      "**tool**, **propose**, **edit**, **think**, **long**, **widget**, **image**, **setup**, or **error** to see each " +
       "event path, or just send anything else for the default reply.",
   },
 ];
@@ -664,8 +664,31 @@ export function installDevReplayer(): void {
         });
         break;
       }
-      case "send":
-        scheduleAll(compile(selectScript(String(msg.text ?? ""))));
+      case "send": {
+        const text = String(msg.text ?? "");
+        // "setup" previews the first-run onboarding card (task #19) instead
+        // of running a normal scripted turn: the real card only ever shows
+        // on an EMPTY thread (Thread.tsx gates it inside ThreadPrimitive.Empty),
+        // so clear the optimistic user/assistant messages sendUserMessage()
+        // already added before pushing setup_needed onto the now-empty thread.
+        if (text.trim().toLowerCase() === "setup") {
+          cancelPending();
+          window.chatUI?.dispatch({ type: "reset" });
+          window.chatUI?.dispatch({ type: "setup_needed", platform: "darwin" });
+          break;
+        }
+        scheduleAll(compile(selectScript(text)));
+        break;
+      }
+      case "recheck_backend":
+        // Dev always "finds" the CLI on the first Re-check click, mirroring
+        // the real success path: notice + setup_resolved (dismisses the
+        // card). Fire on a short delay so the button's "Checking…" state is
+        // visible for a beat, same as a real filesystem check would feel.
+        window.setTimeout(() => {
+          window.chatUI?.dispatch({ type: "notice", text: "Claude Code found — you're all set." });
+          window.chatUI?.dispatch({ type: "setup_resolved" });
+        }, 250);
         break;
       case "cancel":
         cancelPending();
