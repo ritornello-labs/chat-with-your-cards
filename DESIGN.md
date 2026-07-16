@@ -229,6 +229,42 @@ Accept names that exact revision. Stale approvals fail closed. This first
 adapter deliberately covers `create`; edit/bulk/deck/skill proposal bodies
 stay on the existing renderer until their protocol operations are designed.
 
+**Interaction-ui posture — keep, freeze, then swap to modular packages
+(decided 2026-07-16).** Clarified after the broker discussion: what this repo
+consumes is a *component library*, NOT the upstream broker — the
+broker protocol (semantic operations, executors, lifecycle, transport) is not
+in CWYC and must never be imported here. Decisions:
+
+1. **Keep the vendored renderer, frozen.** The pinned tarball stays exactly
+   as-is (no upgrades tracking upstream needs) until the upstream split below
+   lands. Do not extend CWYC's use of it in the meantime.
+2. **Upstream splits into layered packages** (work happens in the
+   interaction/infra repo, not here): `interaction-schema` — the block
+   vocabulary (text/key_value/field_set/diff/card_preview/warning/evidence/
+   progress/result/form) as pure types + JSON Schema + validators, zero deps,
+   no React, no broker concepts, versioned block trees; `interaction-ui-react`
+   — presentational components over a validated schema tree, props in /
+   `onAction` callbacks out, all identifiers (revision, digest) opaque and
+   echoed back, NO policy (revision-binding *enforcement* stays in our
+   Python); the broker client stays a third package CWYC never depends on.
+3. **`interactionAdapter.ts` stays in this repo.** The Proposal.to_payload()
+   → block-tree mapping is app policy. This is what keeps future
+   agent-integration optional: adopting the broker later = swap the adapter's
+   input, zero UI rework.
+4. **Consumption: GitHub, not public npm.** Committed tarballs of the modular
+   packages (hermetic, no network/auth, and consistent with the sfw
+   private-registry limitation) or git-tag semver deps; public npm only as a
+   deliberate future open-sourcing step (schema package first, provenance +
+   2FA), not as a transport convenience. End users are unaffected either way
+   — they get the committed static bundle.
+5. **When the split lands:** CWYC swaps the tarball for `interaction-ui-react`
+   in one commit, keeps the adapter, and the GUI smoke's proposal-check
+   testids get fixed in the same pass (the check has been red since 1c73311 —
+   stale `proposal-card` selectors). Task #21 (playable audio in proposal
+   previews) builds after that; whether audio-in-preview becomes a
+   `card_preview` schema feature or CWYC-local wrapping is decided when #21
+   is specced.
+
 **Editing proposals — the review UX is a flagship surface.** The bar is "Cursor-grade amazing", but the right interface differs because the artifact is a flashcard, not code:
 
 - **Field-level diffs on rendered text**: word-level inline highlights (deletions struck through, insertions marked) per field — not line-based code diffs. Unchanged fields collapsed.
