@@ -566,15 +566,24 @@ body {
   background: var(--cwyc-accent-soft);
 }
 
-/* The ember is the rail's identity: calm amber at rest, breathing while a
-   reply is streaming (so a collapsed dock still shows life at a glance). */
+/* The ember is the rail's status light, not decoration: faint at rest (the
+   accent-colored version read as "new reply" even when there was none -
+   dogfood 2026-07-16), breathing while a reply is streaming, and lit steady
+   when a reply finished while collapsed and hasn't been read yet. */
 .cwyc-rail-ember {
   flex: 0 0 auto;
   width: 9px;
   height: 9px;
   border-radius: 50%;
+  background: var(--cwyc-fg-faint);
+  opacity: 0.55;
+}
+
+.cwyc-rail-ember-live,
+.cwyc-rail-ember-unread {
   background: var(--cwyc-accent);
   box-shadow: 0 0 5px 0 var(--cwyc-accent-ring);
+  opacity: 1;
 }
 
 .cwyc-rail-ember-live {

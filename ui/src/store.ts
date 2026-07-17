@@ -319,6 +319,7 @@ const DEFAULT_UI_STATE: UiState = {
 export interface ChatState {
   readonly messages: readonly ThreadMessageLike[];
   readonly isRunning: boolean;
+  readonly hasUnread: boolean; // a reply finished while the dock was collapsed, not yet expanded
   readonly usage: UsageSnapshot | null;
   readonly ui: UiState;
 }
@@ -354,6 +355,7 @@ function toThreadMessageLike(msg: StoreMessage): ThreadMessageLike {
 export class ChatStore {
   private messages: StoreMessage[] = [];
   private isRunning = false;
+  private hasUnread = false;
   private usage: UsageSnapshot | null = null;
   private ui: UiState = DEFAULT_UI_STATE;
   private noticeSeq = 0;
@@ -378,6 +380,7 @@ export class ChatStore {
     return {
       messages: this.messages.map(toThreadMessageLike),
       isRunning: this.isRunning,
+      hasUnread: this.hasUnread,
       usage: this.usage,
       ui: this.ui,
     };
@@ -706,6 +709,8 @@ export class ChatStore {
         };
         const wasExpanded = this.ui.dock?.expanded ?? true;
         const nowExpanded = Boolean(dock.expanded);
+        // Expanding is how a reply gets read: the unread ember goes out.
+        if (nowExpanded) this.hasUnread = false;
         this.ui = {
           ...this.ui,
           dock: {
@@ -1065,6 +1070,11 @@ export class ChatStore {
     }
     this.currentAssistantId = null;
     this.isRunning = false;
+    // A reply that lands while the dock is collapsed is one the user hasn't
+    // seen: light the rail ember until they expand. Cancelled turns are the
+    // user's own doing, so nothing new awaits them.
+    const cancelled = status.type === "incomplete" && status.reason === "cancelled";
+    if (!cancelled && this.ui.dock?.expanded === false) this.hasUnread = true;
     this.emit();
   }
 
@@ -1072,6 +1082,7 @@ export class ChatStore {
     this.messages = [];
     this.currentAssistantId = null;
     this.isRunning = false;
+    this.hasUnread = false;
     this.usage = null;
     this.emit();
   }

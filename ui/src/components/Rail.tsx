@@ -4,15 +4,21 @@ import type { ChatStore } from "../store";
 /**
  * The collapsed dock: a slim, always-visible rail that IS the add-on's
  * presence when the chat is put away. One generous click target (the whole
- * rail) expands it. Identity carriers: the ember (breathing while a reply is
- * streaming, calm otherwise) and the vertical wordmark; the chevron at the
- * bottom points away from the dock edge, i.e. the direction the panel will
- * grow. Rendered as an overlay layer inside .cwyc-app; visibility is driven
- * by the host's dock_state pushes (see styles.css "dock shell" section).
+ * rail) expands it. Identity carriers: the ember (faint at rest, breathing
+ * while a reply is streaming, lit while a finished reply waits unread) and
+ * the vertical wordmark; the chevron at the bottom points away from the dock
+ * edge, i.e. the direction the panel will grow. Rendered as an overlay layer
+ * inside .cwyc-app; visibility is driven by the host's dock_state pushes
+ * (see styles.css "dock shell" section).
  */
 export function Rail({ store }: { store: ChatStore }) {
-  const { isRunning, ui } = useChatState(store);
+  const { isRunning, hasUnread, ui } = useChatState(store);
   const side = ui.dock?.side ?? "right";
+  const emberState = isRunning
+    ? " cwyc-rail-ember-live"
+    : hasUnread
+      ? " cwyc-rail-ember-unread"
+      : "";
   return (
     <button
       type="button"
@@ -22,10 +28,7 @@ export function Rail({ store }: { store: ChatStore }) {
       aria-label="Open chat"
       onClick={() => store.setDockExpanded(true)}
     >
-      <span
-        className={"cwyc-rail-ember" + (isRunning ? " cwyc-rail-ember-live" : "")}
-        aria-hidden="true"
-      />
+      <span className={"cwyc-rail-ember" + emberState} aria-hidden="true" />
       <span className="cwyc-rail-word" aria-hidden="true">
         Chat with your cards
       </span>
