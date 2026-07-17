@@ -1769,18 +1769,28 @@ def _run_checks() -> dict[str, Any]:
     check("collapsing the dock closes any open menu", _collapse_closes_open_menu)
 
     def _proposal_round_trip() -> dict[str, Any]:
-        """Scripted propose -> proposal card (data-testid=proposal-card) ->
-        approve (data-testid=proposal-approve) -> real note in the collection,
-        and the card flips to the resolved/Accepted state in the DOM."""
+        """Scripted propose -> interaction card -> approve -> real note in the
+        collection, and the card flips to the resolved read-only state.
+
+        Selector history: `create` proposals render through the shared
+        interaction renderer since 1c73311 (data-testid=interaction-card,
+        action buttons by data-action-id, badge in .eui-status) - this check
+        was red from then until the interaction-ui-react package swap
+        (2026-07-16) because it still probed the pre-1c73311
+        `proposal-card`/`proposal-approve` testids. Status labels come from
+        CWYC's own adapter now (interactionAdapter.ts BADGES): "Pending
+        review" while actionable, "Completed" once accepted; resolved-ness =
+        the host passes no actions, so the footer (and every
+        [data-action-id]) disappears."""
         _send_message(dock.web, PROPOSE_MESSAGE)
 
         def _card_rendered() -> bool:
             return bool(
                 _eval_js(
                     dock.web,
-                    "document.querySelectorAll('[data-testid=proposal-card]').length",
+                    "document.querySelectorAll('[data-testid=interaction-card]').length",
                     DOM_TIMEOUT_MS,
-                    "proposal card count",
+                    "interaction card count",
                 )
             )
 
@@ -1788,22 +1798,25 @@ def _run_checks() -> dict[str, Any]:
         card = _eval_js(
             dock.web,
             "(function() {"
-            "  var p = document.querySelector('[data-testid=proposal-card]');"
+            "  var p = document.querySelector('[data-testid=interaction-card]');"
             "  return {"
-            "    kind: p.querySelector('.cwyc-proposal-kind').textContent,"
-            "    status: p.querySelector('.cwyc-proposal-status').textContent,"
-            "    fields: p.querySelectorAll('.cwyc-field').length,"
-            "    approve: p.querySelectorAll('[data-testid=proposal-approve]').length,"
-            "    edit: p.querySelectorAll('[data-testid=proposal-edit]').length,"
-            "    reject: p.querySelectorAll('[data-testid=proposal-reject]').length,"
+            "    title: (p.querySelector('h2') || {}).textContent,"
+            "    eyebrow: (p.querySelector('.eui-eyebrow') || {}).textContent,"
+            "    status: (p.querySelector('.eui-status') || {}).textContent,"
+            "    fields: p.querySelectorAll('.eui-field').length,"
+            "    approve: p.querySelectorAll('[data-action-id=approve]').length,"
+            "    edit: p.querySelectorAll('[data-action-id=revise]').length,"
+            "    reject: p.querySelectorAll('[data-action-id=reject]').length,"
             "    preview_tabs: p.querySelectorAll('.cwyc-preview-tab').length"
             "  };"
             "})();",
             DOM_TIMEOUT_MS,
             "proposal card state",
         )
-        if card["kind"] != "New note" or card["fields"] < 2 or card["approve"] != 1:
+        if card["title"] != "Create Anki note" or card["fields"] < 2 or card["approve"] != 1:
             raise AssertionError(f"proposal card malformed: {card}")
+        if card["status"] != "Pending review":
+            raise AssertionError(f"unexpected pending badge: {card}")
         if card["edit"] != 1 or card["reject"] != 1:
             raise AssertionError(f"proposal card missing edit/reject controls: {card}")
         if card["preview_tabs"] != 2:
@@ -1812,7 +1825,7 @@ def _run_checks() -> dict[str, Any]:
         before_ids = set(mw.col.find_notes('tag:"ai-created"'))
         _eval_js(
             dock.web,
-            "(function() { document.querySelector('[data-testid=proposal-approve]').click(); "
+            "(function() { document.querySelector('[data-action-id=approve]').click(); "
             "return true; })();",
             DOM_TIMEOUT_MS,
             "proposal approve click",
@@ -1828,54 +1841,36 @@ def _run_checks() -> dict[str, Any]:
         if session_tag not in note.tags:
             raise AssertionError(f"session tag missing: {note.tags}")
 
-        # The card must flip to the resolved/Accepted state: status text
-        # "Accepted", the resolved CSS class applied, and the pending action
-        # buttons (approve/reject/edit) gone. This is strictly stronger than the
-        # classic check's "status == Accepted && ledger visible": the classic
-        # UI's ledger strip / revert button were a classic-only surface (the new
-        # UI has no ledger strip - a documented, intentional parity gap), so we
-        # assert the accept BUTTONS disappeared and the resolved class landed
-        # instead, which proves the same accepted transition without depending
-        # on a UI element that no longer exists.
-        def _resolved_ok() -> bool:
-            r = _eval_js(
+        # The card must flip to the resolved read-only state: badge
+        # "Completed" (the adapter's accepted label, same string the old
+        # combined renderer showed) and EVERY action button gone - the host
+        # passes an empty actions list once the proposal leaves `pending`, so
+        # the renderer drops the whole footer. That proves the same accepted
+        # transition the classic check asserted, on the surface that actually
+        # exists now.
+        def _resolved_state() -> Any:
+            return _eval_js(
                 dock.web,
                 "(function() {"
-                "  var p = document.querySelector('[data-testid=proposal-card]');"
+                "  var p = document.querySelector('[data-testid=interaction-card]');"
                 "  if (!p) return null;"
                 "  return {"
-                "    status: p.querySelector('.cwyc-proposal-status').textContent,"
-                "    approve: p.querySelectorAll('[data-testid=proposal-approve]').length,"
-                "    reject: p.querySelectorAll('[data-testid=proposal-reject]').length,"
-                "    resolved_class: p.classList.contains('cwyc-proposal-resolved')"
+                "    status: (p.querySelector('.eui-status') || {}).textContent,"
+                "    actions: p.querySelectorAll('[data-action-id]').length"
                 "  };"
                 "})();",
                 DOM_TIMEOUT_MS,
                 "resolved proposal state",
             )
-            return bool(r and r.get("status") == "Accepted" and r.get("resolved_class"))
 
-        _wait_until(_resolved_ok, DOM_TIMEOUT_MS, "proposal card to resolve to Accepted")
-        resolved = _eval_js(
-            dock.web,
-            "(function() {"
-            "  var p = document.querySelector('[data-testid=proposal-card]');"
-            "  return {"
-            "    status: p.querySelector('.cwyc-proposal-status').textContent,"
-            "    approve: p.querySelectorAll('[data-testid=proposal-approve]').length,"
-            "    reject: p.querySelectorAll('[data-testid=proposal-reject]').length,"
-            "    resolved_class: p.classList.contains('cwyc-proposal-resolved')"
-            "  };"
-            "})();",
-            DOM_TIMEOUT_MS,
-            "resolved proposal state",
-        )
-        if resolved["status"] != "Accepted" or not resolved["resolved_class"]:
+        def _resolved_ok() -> bool:
+            r = _resolved_state()
+            return bool(r and r.get("status") == "Completed" and r.get("actions") == 0)
+
+        _wait_until(_resolved_ok, DOM_TIMEOUT_MS, "proposal card to resolve to Completed")
+        resolved = _resolved_state()
+        if not resolved or resolved["status"] != "Completed" or resolved["actions"] != 0:
             raise AssertionError(f"proposal did not resolve in the UI: {resolved}")
-        if resolved["approve"] != 0 or resolved["reject"] != 0:
-            raise AssertionError(
-                f"accept/reject controls still present after resolve: {resolved}"
-            )
         return {"note_id": note_id, "card": card, "resolved": resolved}
 
     proposal_info = check("proposal accept round-trip", _proposal_round_trip)

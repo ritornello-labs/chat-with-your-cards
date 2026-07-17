@@ -263,7 +263,14 @@ in CWYC and must never be imported here. Decisions:
    stale `proposal-card` selectors). Task #21 (playable audio in proposal
    previews) builds after that; whether audio-in-preview becomes a
    `card_preview` schema feature or CWYC-local wrapping is decided when #21
-   is specced.
+   is specced. **Done 2026-07-16:** upstream split landed (`upstream`
+   `interaction-schema` 1.0.0 + `interaction-ui-react` 0.2.0, broker
+   client separate; `card_preview` grandfathered as an alias of
+   `x-anki.card_preview` behind the new extension namespace); CWYC swapped in
+   one commit — adapter now emits `InteractionPresentation` (host-owned
+   badge labels preserving the old status strings, actions only while
+   pending, opaque revision/digest echoed and converted to the bridge's
+   number in ProposalCard), probe rewritten to the interaction-card DOM.
 
 **Editing proposals — the review UX is a flagship surface.** The bar is "Cursor-grade amazing", but the right interface differs because the artifact is a flashcard, not code:
 

@@ -171,20 +171,33 @@ necessarily mounted) that maps the `ChatEvent` stream onto assistant-ui's
 | `reset` | clears the transcript |
 | anything else | ignored, matching `app.js`'s `dispatch()` default case (forward-compatible) |
 
-New-note proposals are adapted to the renderer-neutral interaction protocol by
-`interactionAdapter.ts` and rendered by the vendored
-`@elvis-labs/interaction-ui` package. Editing is a two-step exact-revision
-flow: Save sends `{type:"proposal_revise", id, expected_revision, fields}`;
-ProposalManager validates and previews the fields, increments the revision,
-and pushes it back; Add note then sends `{type:"proposal_accept", id,
-revision}`. A stale revision is rejected before the Anki write chokepoint.
-Other proposal kinds retain the legacy React renderer and bridge commands
-until their protocol adapters exist.
+New-note proposals are adapted by `interactionAdapter.ts` to the interaction
+*presentation standard* — an `InteractionPresentation` from the vendored
+`@elvis-labs/interaction-schema` package — and rendered by the vendored
+`@elvis-labs/interaction-ui-react` package (the 2026-07-16 split of the old
+combined `@elvis-labs/interaction-ui` 0.1.0; visuals unchanged). The renderer
+is presentation-only: it treats `revision`/`digest`/ids as opaque tokens and
+echoes them byte-for-byte; the adapter owns status→badge labels and offers
+actions only while a proposal is `pending`; `ProposalCard.tsx` converts the
+echoed revision back to the bridge's number exactly at the boundary. CWYC
+imports no broker/lifecycle code — the Driver broker client is a third,
+separate module this repository never depends on.
 
-The canonical package source is `the private upstream package tree`
-in the `upstream` repository.
-CWYC commits the exact tarball under `ui/vendor/`, so this repository does not
-depend on a sibling checkout or a private registry.
+Editing is a two-step exact-revision flow: Save revision sends
+`{type:"proposal_revise", id, expected_revision, fields}`; ProposalManager
+validates and previews the fields, increments the revision, and pushes it
+back; Add note then sends `{type:"proposal_accept", id, revision}`. A stale
+revision is rejected before the Anki write chokepoint. Other proposal kinds
+retain the legacy React renderer and bridge commands until their
+presentation adapters exist.
+
+The canonical package sources are
+`the private upstream package tree` and
+`.../interaction-ui-react` in the `upstream` repository (see its
+`its planning docs` for the split's design and report). CWYC
+commits the exact `npm pack` tarballs under `ui/vendor/`, so this repository
+does not depend on a sibling checkout or a private registry — deliberately
+kept off public npm (DESIGN.md "Interaction-ui posture").
 
 ### Impedance mismatches hit against assistant-ui's model
 

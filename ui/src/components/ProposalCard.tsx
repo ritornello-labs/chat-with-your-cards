@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
-import { InteractionCard } from "@elvis-labs/interaction-ui";
-import "@elvis-labs/interaction-ui/styles.css";
+import { InteractionCard } from "@elvis-labs/interaction-ui-react";
+import "@elvis-labs/interaction-ui-react/styles.css";
 import type { ChatStore, ProposalCardData } from "../store";
 import { createProposalInteraction } from "../interactionAdapter";
 
@@ -197,9 +197,12 @@ function SharedCreateProposalCard({ data, store }: ProposalCardProps) {
       className="cwyc-interaction-card"
       error={data.errorMessage}
       renderBlock={(block) => block.type === "card_preview" && previews ? <PreviewFlip previews={previews} /> : undefined}
-      onRevise={({ interactionId, expectedRevision, fields }) => store.reviseProposal(interactionId, expectedRevision, fields)}
+      // The renderer echoes `revision` as an OPAQUE string token (schema
+      // contract); the bridge protocol speaks numbers, so Number() exactly at
+      // this boundary - the same place the Mini App converts for its broker.
+      onRevise={({ interactionId, revision, fields }) => store.reviseProposal(interactionId, Number(revision), fields)}
       onAction={({ interactionId, revision, actionId }) => {
-        if (actionId === "approve") store.acceptProposalRevision(interactionId, revision);
+        if (actionId === "approve") store.acceptProposalRevision(interactionId, Number(revision));
         else if (actionId === "reject") store.rejectProposal(interactionId);
       }}
     />
