@@ -273,7 +273,8 @@ in CWYC and must never be imported here. Decisions:
    number in ProposalCard), probe rewritten to the interaction-card DOM.
 
 **Proposal media — staged audio with accept-time import (task #21, Python
-half landed 2026-07-16; decision: option B, schema-level preview).**
+half landed 2026-07-16; preview half landed 2026-07-18; decision: option B,
+schema-level preview).**
 `propose_note` accepts `media: [{path, filename?}]` (audio only: mp3/wav/ogg/
 opus/m4a/flac, ≤8MB each, ≤4 per proposal) so the agent can attach e.g. a TTS
 mp3 it generated in full agent-tools mode. Files are validated and copied
@@ -289,12 +290,24 @@ Staging is freed on successful import; deliberately NOT on reject/supersede
 abandoned dirs. Create-kind only for now, matching the interaction adapter's
 coverage. The PREVIEW half is deliberately schema-level (user decision
 2026-07-16: battle-test the contract in the standard — sole-user standard,
-freely revisable): `card_preview` grows a media attachment list in
-`interaction-schema` 1.1 and `interaction-ui-react` 0.3 renders the player
-strip; CWYC's adapter maps `proposal.media` into the block when those
-tarballs land. Until then the payload rides along unrendered (unknown keys
-are ignored by the current renderer) and `[sound:]` markers show as literal
-text in the preview HTML.
+freely revisable): `card_preview` grew an optional `media: MediaAttachment[]`
+list in `interaction-schema` 1.1.0 (`src` validator-enforced to be a `data:`
+URI; `SUPPORTED_PRESENTATION_VERSIONS = ["1.0","1.1"]` so 1.0 trees still
+validate) and `interaction-ui-react` 0.3.0 renders an `.eui-media` player
+strip (audio `controls`, `preload=metadata`, aria-labeled, no autoplay, with
+a defensive re-check skipping hostile/malformed entries). **Landed
+2026-07-18** (`upstream` schema 23 tests / renderer 19
+tests): CWYC vendored the 1.1.0/0.3.0 tarballs and its adapter (`version:
+"1.1"`) maps `proposal.media` onto the preview block, guarding non-`data:`
+src at the first trusted layer. Verified end-to-end — browser preview
+decodes the strip's WAV (`duration > 0`), and the GUI smoke stages a real
+tone through `submit_create` → the strip renders and QtWebEngine actually
+decodes it → approve imports it into `collection.media` with the `[sound:]`
+marker intact and frees the staging dir. (Shipping the Python producer also
+surfaced that `media_staging.py` was never added to the workbench
+`[tool.anki-addon-workbench].include` list, so the packaged smoke add-on
+crashed on init until 2026-07-18 — now covered by the media round-trip
+check.)
 
 **Editing proposals — the review UX is a flagship surface.** The bar is "Cursor-grade amazing", but the right interface differs because the artifact is a flashcard, not code:
 

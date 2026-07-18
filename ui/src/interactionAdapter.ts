@@ -1,5 +1,24 @@
-import type { InteractionPresentation } from "@elvis-labs/interaction-schema";
+import type { InteractionPresentation, MediaAttachment } from "@elvis-labs/interaction-schema";
 import type { ProposalPayload } from "./events";
+
+/**
+ * Staged audio riding the proposal payload (proposals.py Proposal.media,
+ * task #21) -> schema-1.1 MediaAttachment. Python already emits the exact
+ * shape; this filter is belt-and-braces (the schema validator and renderer
+ * both re-check), keeping non-data: src out at the first trusted layer.
+ */
+function mediaAttachments(proposal: ProposalPayload): MediaAttachment[] {
+  const media = (proposal as { media?: unknown }).media;
+  if (!Array.isArray(media)) return [];
+  return media.filter(
+    (item): item is MediaAttachment =>
+      !!item &&
+      typeof item === "object" &&
+      (item as { kind?: unknown }).kind === "audio" &&
+      typeof (item as { src?: unknown }).src === "string" &&
+      (item as { src: string }).src.startsWith("data:")
+  );
+}
 
 /**
  * Status -> badge mapping. The label strings are exactly what the old
@@ -41,13 +60,26 @@ export function createProposalInteraction(proposal: ProposalPayload): Interactio
     },
     { type: "field_set", fields: proposal.fields ?? [] },
   ];
-  if (proposal.previews) blocks.splice(1, 0, { type: "card_preview", ref: `cwyc:${proposal.id}:${revision}` });
+  // Media (schema 1.1) rides the preview block; the renderer draws the
+  // player strip as block chrome ALONGSIDE our renderBlock-injected flip
+  // card, so a proposal with audio but no renderable preview still needs
+  // the block to exist for the strip to have a home.
+  const media = mediaAttachments(proposal);
+  if (proposal.previews || media.length > 0) {
+    blocks.splice(1, 0, {
+      type: "card_preview",
+      ref: `cwyc:${proposal.id}:${revision}`,
+      ...(media.length > 0 ? { media } : {}),
+    });
+  }
   blocks.push(
     ...(proposal.warnings ?? []).map((text) => ({ type: "warning" as const, text, severity: "warning" }))
   );
   const pending = proposal.status === "pending";
   return {
-    version: "1.0",
+    // 1.1 = 1.0 + optional card-preview media; emitted unconditionally (an
+    // additive version is valid with or without the new field).
+    version: "1.1",
     interactionId: proposal.id,
     revision: String(revision),
     digest: proposal.operation_digest ?? `legacy:${proposal.id}:${revision}`,

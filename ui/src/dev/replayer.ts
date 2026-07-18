@@ -139,6 +139,40 @@ function nextProposalId(prefix: string): string {
   return `${prefix}${proposalCounter}`;
 }
 
+/** A genuinely playable 0.3s 440Hz beep (8-bit PCM WAV) built at runtime, so
+ *  the proposal demo's schema-1.1 media strip plays real audio with no asset
+ *  files. Deterministic - same bytes every call. */
+function demoWavDataUri(): string {
+  const rate = 8000;
+  const n = Math.floor(rate * 0.3);
+  const bytes = new Uint8Array(44 + n);
+  const view = new DataView(bytes.buffer);
+  const ascii = (offset: number, text: string) => {
+    for (let i = 0; i < text.length; i++) bytes[offset + i] = text.charCodeAt(i);
+  };
+  ascii(0, "RIFF");
+  view.setUint32(4, 36 + n, true);
+  ascii(8, "WAVE");
+  ascii(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // mono
+  view.setUint32(24, rate, true);
+  view.setUint32(28, rate, true); // byte rate (8-bit mono)
+  view.setUint16(32, 1, true);
+  view.setUint16(34, 8, true);
+  ascii(36, "data");
+  view.setUint32(40, n, true);
+  for (let i = 0; i < n; i++) {
+    bytes[44 + i] = 128 + Math.round(100 * Math.sin((2 * Math.PI * 440 * i) / rate));
+  }
+  let bin = "";
+  bytes.forEach((b) => {
+    bin += String.fromCharCode(b);
+  });
+  return "data:audio/wav;base64," + btoa(bin);
+}
+
 function createProposalScript(): Step[] {
   const id = nextProposalId("p");
   const front = "Analysis: why does the quantifier order in the epsilon-delta definition matter?";
@@ -162,6 +196,16 @@ function createProposalScript(): Step[] {
         rationale: "You said the quantifier order was the confusing part; this isolates it as one recall step.",
         warnings: ["deck 'Math::Analysis' does not exist yet; it will be created"],
         previews: { before: null, after: { question: front, answer: front + "<hr id=answer>" + back, css: DEMO_CSS } },
+        media: [
+          {
+            id: "m-demo-1",
+            kind: "audio",
+            name: "epsilon-delta.wav",
+            mime: "audio/wav",
+            bytes: 2444,
+            src: demoWavDataUri(),
+          },
+        ],
       }),
     },
     { kind: "text", text: "Accept it as-is, edit the fields first, or reject it." },

@@ -81,6 +81,18 @@ export interface ProposalPayload {
   title: string;
   count: number;
   samples: unknown[];
+  /** Staged audio attachments (proposals.py Proposal.media, task #21):
+   *  playable data: URIs for the review card's schema-1.1 player strip.
+   *  final_name appears after accept-time import (rename tracking). */
+  media?: {
+    id: string;
+    kind: string;
+    name: string;
+    mime: string;
+    src: string;
+    bytes?: number;
+    final_name?: string;
+  }[];
   items: unknown[];
   open: boolean;
 }

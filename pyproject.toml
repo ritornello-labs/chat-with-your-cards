@@ -40,6 +40,7 @@ include = [
     "keys.py",
     "transcripts.py",
     "proposals.py",
+    "media_staging.py",
     "contract.py",
     "invariants.py",
     "learning.py",

@@ -1875,6 +1875,108 @@ def _run_checks() -> dict[str, Any]:
 
     proposal_info = check("proposal accept round-trip", _proposal_round_trip)
 
+    def _proposal_media_round_trip() -> dict[str, Any]:
+        """Task #21 end-to-end in real Anki: a REAL wav staged through
+        ProposalManager.submit_create's media arg -> the schema-1.1 player
+        strip renders on the review card (.eui-media audio, data: src) and
+        QtWebEngine actually DECODES it (duration > 0 - the one claim only a
+        real webview can prove) -> approve through the real button -> the
+        file lands in collection.media and the note's field keeps its
+        [sound:] marker. Synthesizes the wav with the stdlib so the probe
+        needs no fixture assets."""
+        import io
+        import math
+        import struct
+        import tempfile
+        import wave
+
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(8000)
+            frames = b"".join(
+                struct.pack("<h", int(12000 * math.sin(2 * math.pi * 440 * i / 8000)))
+                for i in range(1600)  # 0.2s of A4
+            )
+            wav.writeframes(frames)
+        tone_path = os.path.join(tempfile.gettempdir(), "cwyc-probe-tone.wav")
+        with open(tone_path, "wb") as handle:
+            handle.write(buf.getvalue())
+
+        result = state.proposals.submit_create(
+            {
+                "note_type": "Basic",
+                "deck": "Default",
+                "fields": {
+                    "Front": "probe audio [sound:cwyc-probe-tone.wav]",
+                    "Back": "hears a beep",
+                },
+                "rationale": "gui-smoke media round-trip",
+                "media": [{"path": tone_path, "filename": "cwyc-probe-tone.wav"}],
+            }
+        )
+        if result.get("status") != "pending_user_review":
+            raise AssertionError(f"media proposal did not stage: {result}")
+        pid = result["proposal_id"]
+
+        def _strip_state() -> Any:
+            return _eval_js(
+                dock.web,
+                "(function() {"
+                "  var cards = document.querySelectorAll('[data-testid=interaction-card]');"
+                "  var p = cards[cards.length - 1];"
+                "  if (!p) return null;"
+                "  var a = p.querySelector('.eui-media audio');"
+                "  if (!a) return {audio: 0};"
+                "  return {audio: 1, src: (a.getAttribute('src') || '').slice(0, 15),"
+                "          duration: a.duration || 0, label: a.getAttribute('aria-label')};"
+                "})();",
+                DOM_TIMEOUT_MS,
+                "media strip state",
+            )
+
+        def _strip_decodable() -> bool:
+            s = _strip_state()
+            return bool(s and s.get("audio") and s.get("duration", 0) > 0)
+
+        _wait_until(_strip_decodable, STREAM_TIMEOUT_MS, "player strip with decodable audio")
+        strip = _strip_state()
+        if not str(strip.get("src", "")).startswith("data:audio/"):
+            raise AssertionError(f"player src is not a data: URI: {strip}")
+        if strip.get("label") != "cwyc-probe-tone.wav":
+            raise AssertionError(f"player accessibility label wrong: {strip}")
+
+        _eval_js(
+            dock.web,
+            "(function() {"
+            "  var cards = document.querySelectorAll('[data-testid=interaction-card]');"
+            "  cards[cards.length - 1].querySelector('[data-action-id=approve]').click();"
+            "  return true; })();",
+            DOM_TIMEOUT_MS,
+            "media proposal approve click",
+        )
+
+        def _media_imported() -> bool:
+            return bool(mw.col.media.have("cwyc-probe-tone.wav"))
+
+        _wait_until(_media_imported, DOM_TIMEOUT_MS, "audio to land in collection.media")
+        found = mw.col.find_notes('"probe audio"')
+        if len(found) != 1:
+            raise AssertionError(f"media note not found: {found}")
+        note = mw.col.get_note(found[0])
+        if "[sound:cwyc-probe-tone.wav]" not in note["Front"]:
+            raise AssertionError(f"sound marker missing/rewritten unexpectedly: {note['Front']}")
+        from chat_with_your_cards import USER_FILES as _uf
+
+        staging_dir = _uf / "staging" / pid
+        if staging_dir.exists():
+            raise AssertionError("staging dir not freed after import")
+        return {"strip": strip, "note_id": int(found[0])}
+
+    check("proposal media: staged wav -> player strip -> collection.media",
+          _proposal_media_round_trip)
+
     def _hover_geometry_stable() -> dict[str, Any]:
         """Hovering a header button must change ONLY its background - never
         padding, font, size, or radius. A geometry change on hover shrinks the
