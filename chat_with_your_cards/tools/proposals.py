@@ -84,6 +84,32 @@ def register_proposal_tools(registry: ToolRegistry) -> None:
                         "accepted yet, pass that proposal_id so the old card is set "
                         "aside in favor of this one.",
                     },
+                    "media": {
+                        "type": "array",
+                        "description": "Audio files to attach (e.g. TTS you "
+                        "generated): each is staged now, playable on the review "
+                        "card, and imported into the collection's media folder "
+                        "only when the user accepts. Reference each file in a "
+                        "field as [sound:filename] - unreferenced attachments "
+                        "are flagged on the card. mp3/wav/ogg/opus/m4a/flac, "
+                        "max 4 files.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "path": {
+                                    "type": "string",
+                                    "description": "Absolute local path to the audio file",
+                                },
+                                "filename": {
+                                    "type": "string",
+                                    "description": "Name to import as (defaults to the "
+                                    "file's basename); use this exact name in the "
+                                    "[sound:...] marker",
+                                },
+                            },
+                            "required": ["path"],
+                        },
+                    },
                 },
                 "required": ["fields"],
             },

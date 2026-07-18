@@ -275,8 +275,25 @@ class FakeDB:
             raise
 
 
+class FakeMedia:
+    """col.media stand-in for staged-media imports (task #21): records
+    add_file calls and can simulate Anki's rename-on-content-collision."""
+
+    def __init__(self) -> None:
+        self.added: list[str] = []
+        self.rename_map: dict[str, str] = {}  # basename -> final name
+
+    def add_file(self, path: str) -> str:
+        self.added.append(path)
+        import os as _os
+
+        base = _os.path.basename(path)
+        return self.rename_map.get(base, base)
+
+
 class FakeCol:
     def __init__(self) -> None:
+        self.media = FakeMedia()
         self.models = FakeModels([BASIC])
         self.decks = FakeDecks(["Default"], col=self)
         self.sched = FakeSched(self)
@@ -423,6 +440,7 @@ def make_manager(
     apply_skill=None,
     apply_skill_create=None,
     list_skill_names=None,
+    media_staging=None,
 ):
     col = FakeCol()
     pushed: list[dict[str, Any]] = []
@@ -442,6 +460,7 @@ def make_manager(
         apply_skill=apply_skill,
         apply_skill_create=apply_skill_create,
         list_skill_names=list_skill_names,
+        media_staging=media_staging,
     )
     return manager, col, pushed
 
@@ -457,6 +476,111 @@ CREATE_ARGS = {
     "fields": {"Front": "Q?", "Back": "A."},
     "rationale": "test",
 }
+
+
+class MediaProposalTests(unittest.TestCase):
+    """Staged audio riding a create proposal (task #21)."""
+
+    def setUp(self) -> None:
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.base = Path(self._tmp.name)
+        from chat_with_your_cards.media_staging import MediaStaging
+
+        self.staging = MediaStaging(self.base / "staging")
+
+    def _audio(self, name: str = "nihao.mp3") -> Path:
+        path = self.base / name
+        path.write_bytes(b"\xff\xfbfake-mp3-bytes")
+        return path
+
+    def _args_with_media(self, **media_item: Any) -> dict[str, Any]:
+        args = dict(CREATE_ARGS)
+        args["fields"] = {"Front": "你好 [sound:nihao.mp3]", "Back": "hello"}
+        args["media"] = [dict(media_item)]
+        return args
+
+    def test_submit_stages_and_payload_carries_playable_media(self) -> None:
+        manager, col, pushed = make_manager(media_staging=self.staging)
+        result = manager.submit_create(self._args_with_media(path=str(self._audio())))
+        self.assertEqual(result["status"], "pending_user_review")
+        (proposal,) = pushes_of(pushed, "proposal")
+        media = proposal["proposal"]["media"]
+        self.assertEqual(len(media), 1)
+        self.assertEqual(media[0]["name"], "nihao.mp3")
+        self.assertTrue(media[0]["src"].startswith("data:audio/mpeg;base64,"))
+        # referenced by the Front marker, so no unreferenced warning
+        self.assertFalse(
+            [w for w in result["warnings"] if "not referenced" in w], result["warnings"]
+        )
+
+    def test_unreferenced_attachment_warns(self) -> None:
+        manager, col, pushed = make_manager(media_staging=self.staging)
+        args = self._args_with_media(path=str(self._audio("other.mp3")))
+        result = manager.submit_create(args)
+        self.assertTrue([w for w in result["warnings"] if "not referenced" in w])
+
+    def test_media_without_staging_support_is_a_clear_error(self) -> None:
+        manager, col, pushed = make_manager()  # no media_staging injected
+        with self.assertRaises(ProposalError):
+            manager.submit_create(self._args_with_media(path=str(self._audio())))
+
+    def test_accept_imports_and_discards_staging(self) -> None:
+        manager, col, pushed = make_manager(media_staging=self.staging)
+        result = manager.submit_create(self._args_with_media(path=str(self._audio())))
+        manager.accept({"id": result["proposal_id"]})
+        (resolved,) = pushes_of(pushed, "proposal_resolved")
+        self.assertEqual(resolved["status"], "accepted")
+        self.assertEqual(len(col.media.added), 1)
+        note = col.get_note(resolved["note_id"])
+        self.assertIn("[sound:nihao.mp3]", note["Front"])
+        # staging dir freed after import
+        self.assertFalse((self.base / "staging" / result["proposal_id"]).exists())
+
+    def test_accept_rename_rewrites_markers(self) -> None:
+        manager, col, pushed = make_manager(media_staging=self.staging)
+        col.media.rename_map["nihao.mp3"] = "nihao-2.mp3"
+        result = manager.submit_create(self._args_with_media(path=str(self._audio())))
+        manager.accept({"id": result["proposal_id"]})
+        (resolved,) = pushes_of(pushed, "proposal_resolved")
+        note = col.get_note(resolved["note_id"])
+        self.assertIn("[sound:nihao-2.mp3]", note["Front"])
+        self.assertNotIn("[sound:nihao.mp3]", note["Front"])
+        self.assertTrue([w for w in resolved["warnings"] if "renamed on import" in w])
+
+    def test_reject_then_restore_then_accept_still_imports(self) -> None:
+        # Staging must survive reject/supersede because restore() can bring
+        # the proposal back to pending (the regression this guards).
+        manager, col, pushed = make_manager(media_staging=self.staging)
+        result = manager.submit_create(self._args_with_media(path=str(self._audio())))
+        pid = result["proposal_id"]
+        manager.reject({"id": pid})
+        self.assertTrue((self.base / "staging" / pid).exists())
+        manager.restore({"id": pid})
+        manager.accept({"id": pid})
+        self.assertEqual(len(col.media.added), 1)
+
+    def test_trusted_writes_auto_apply_imports_media(self) -> None:
+        manager, col, pushed = make_manager(
+            config={"permission_mode": "trusted-writes"},
+            media_staging=self.staging,
+        )
+        result = manager.submit_create(self._args_with_media(path=str(self._audio())))
+        self.assertEqual(result["status"], "created")
+        self.assertEqual(len(col.media.added), 1)
+        note = col.get_note(result["note_id"])
+        self.assertIn("[sound:nihao.mp3]", note["Front"])
+
+    def test_bad_media_is_tool_error_and_nothing_staged(self) -> None:
+        manager, col, pushed = make_manager(media_staging=self.staging)
+        bad = self.base / "evil.svg"
+        bad.write_text("<svg/>")
+        with self.assertRaises(ProposalError):
+            manager.submit_create(self._args_with_media(path=str(bad)))
+        self.assertEqual(pushes_of(pushed, "proposal"), [])
+        self.assertFalse(list((self.base / "staging").glob("*")))
 
 
 class CreateFlowTests(unittest.TestCase):

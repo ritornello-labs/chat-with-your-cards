@@ -239,6 +239,7 @@ def _setup() -> None:
         after_deck_change=_refresh_deck_ui,
         apply_skill_create=_apply_new_skill,
         list_skill_names=_agent_skill_names,
+        media_staging=_build_media_staging(),
     )
 
     def system_prompt() -> str:
@@ -767,6 +768,14 @@ def _apply_skill_update(proposal: Any) -> list[str]:
             f"user_files/learning/skill-backups/{backup.name}"
         ]
     return []
+
+
+def _build_media_staging() -> Any:
+    """Staged proposal media (task #21) lives under user_files/ so it survives
+    Anki restarts for still-pending proposals and is upgrade-safe."""
+    from .media_staging import MediaStaging
+
+    return MediaStaging(USER_FILES / "staging")
 
 
 def _agent_skill_names() -> set[str]:

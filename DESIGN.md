@@ -272,6 +272,30 @@ in CWYC and must never be imported here. Decisions:
    pending, opaque revision/digest echoed and converted to the bridge's
    number in ProposalCard), probe rewritten to the interaction-card DOM.
 
+**Proposal media — staged audio with accept-time import (task #21, Python
+half landed 2026-07-16; decision: option B, schema-level preview).**
+`propose_note` accepts `media: [{path, filename?}]` (audio only: mp3/wav/ogg/
+opus/m4a/flac, ≤8MB each, ≤4 per proposal) so the agent can attach e.g. a TTS
+mp3 it generated in full agent-tools mode. Files are validated and copied
+into `user_files/staging/<proposal-id>/` at PROPOSE time (`media_staging.py`)
+— the agent's /tmp file may be gone by review time — and the proposal payload
+carries self-contained `data:` URIs (`media` entries: id/kind/name/mime/
+bytes/src) for a playable review-card preview. On ACCEPT, `_apply_create`
+imports each file via `col.media.add_file` (Anki's own de-dup/rename API) and
+rewrites `[sound:old]` → `[sound:final]` markers across fields BEFORE the
+note is written; renames are surfaced as a warning on the resolved card.
+Staging is freed on successful import; deliberately NOT on reject/supersede
+(restore() can bring those back to pending) — a 7-day startup sweep collects
+abandoned dirs. Create-kind only for now, matching the interaction adapter's
+coverage. The PREVIEW half is deliberately schema-level (user decision
+2026-07-16: battle-test the contract in the standard — sole-user standard,
+freely revisable): `card_preview` grows a media attachment list in
+`interaction-schema` 1.1 and `interaction-ui-react` 0.3 renders the player
+strip; CWYC's adapter maps `proposal.media` into the block when those
+tarballs land. Until then the payload rides along unrendered (unknown keys
+are ignored by the current renderer) and `[sound:]` markers show as literal
+text in the preview HTML.
+
 **Editing proposals — the review UX is a flagship surface.** The bar is "Cursor-grade amazing", but the right interface differs because the artifact is a flashcard, not code:
 
 - **Field-level diffs on rendered text**: word-level inline highlights (deletions struck through, insertions marked) per field — not line-based code diffs. Unchanged fields collapsed.

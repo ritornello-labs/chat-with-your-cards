@@ -114,6 +114,12 @@ class Proposal:
     items: list[dict[str, Any]] = field(default_factory=list)  # change_set entries
     open: bool = False  # change_set still collecting
     revision: int = 1  # immutable review revision; edits create a new revision
+    # Staged media attachments (task #21; media_staging.py): payload dicts
+    # {id, kind, name, mime, bytes, src} where src is a self-contained data:
+    # URI for the review card's playable preview. Files live in the staging
+    # dir until accept (imported via col.media.add_file) or reject/supersede
+    # (discarded). create-kind only for now.
+    media: list[dict[str, Any]] = field(default_factory=list)
 
     def operation_digest(self) -> str:
         operation = {
@@ -157,6 +163,7 @@ class Proposal:
             "title": self.title,
             "count": self.count,
             "samples": self.samples,
+            "media": self.media,
             "items": [
                 {
                     "note_id": item["note_id"],
@@ -210,6 +217,7 @@ class ProposalManager:
         after_deck_change: Callable[[], None] | None = None,
         apply_skill_create: Callable[["Proposal"], list[str]] | None = None,
         list_skill_names: Callable[[], set[str]] | None = None,
+        media_staging: Any | None = None,
     ) -> None:
         self._get_col = get_col
         self._push = push
@@ -255,6 +263,17 @@ class ProposalManager:
         # card is even shown. None (e.g. in tests that don't care) means no
         # collision is ever reported.
         self._list_skill_names = list_skill_names
+        # Staged media for create proposals (task #21; media_staging.py).
+        # None (tests that don't care / minimal setups) disables the media
+        # arg on propose_note with a clear error instead of silent drops.
+        self._media = media_staging
+        if self._media is not None:
+            # Clear staging dirs abandoned by crashes/never-resolved
+            # proposals; bounded work at startup, best-effort.
+            try:
+                self._media.sweep()
+            except OSError:
+                pass
         self._proposals: dict[str, Proposal] = {}
         self._ledger: list[LedgerEntry] = []
         self._counter = 0
@@ -339,6 +358,10 @@ class ProposalManager:
         prev = self._proposals.get(str(supersedes or ""))
         if prev is not None and prev.status == PENDING:
             prev.status = SUPERSEDED
+            # Staged media is deliberately NOT discarded here (nor on reject):
+            # restore() can bring this proposal back to pending, and its accept
+            # would then need the files. Staging is freed on successful import
+            # (accept) or by the startup sweep for proposals that never resolve.
             self._push(
                 {"type": "proposal_resolved", "id": prev.id, "status": SUPERSEDED}
             )
@@ -454,6 +477,9 @@ class ProposalManager:
             rationale=rationale,
             warnings=warnings,
         )
+        media_items = list(args.get("media") or [])
+        if media_items:
+            self._stage_media(proposal, media_items)
         proposal.previews = self._render_create_preview(col, model, proposal)
 
         if self._trusted_enabled() and self._budget_take(1):
@@ -2696,7 +2722,74 @@ class ProposalManager:
         except Exception:
             return False
 
+    # ---- staged media (task #21; media_staging.py) ----
+
+    def _stage_media(self, proposal: Proposal, items: list[dict[str, Any]]) -> None:
+        """Validate + copy the agent's audio files into the proposal's staging
+        dir and attach playable data-URI payload entries to the proposal.
+        Raises ProposalError (surfaced as the tool error) on any problem -
+        all-or-nothing, nothing half-staged."""
+        from .media_staging import MediaError, sound_markers
+
+        if self._media is None:
+            raise ProposalError(
+                "media attachments are not available in this session"
+            )
+        try:
+            staged = self._media.stage(proposal.id, items)
+        except MediaError as exc:
+            raise ProposalError(str(exc)) from None
+        proposal.media = [item.to_payload() for item in staged]
+        # Cross-check [sound:...] markers against what was staged: not errors
+        # (the field may reference media already in the collection), but the
+        # mismatches the agent most plausibly made by accident are surfaced
+        # on the review card.
+        referenced = sound_markers(proposal.fields)
+        for item in staged:
+            if item.filename not in referenced:
+                proposal.warnings.append(
+                    f"attached audio {item.filename!r} is not referenced by any "
+                    "field ([sound:...] marker missing) - it would be imported "
+                    "but never played"
+                )
+
+    def _import_staged_media(self, col: Any, proposal: Proposal) -> None:
+        """On accept: import staged files through col.media.add_file (Anki's
+        own API - it de-duplicates and renames on content collision) and
+        rewrite [sound:] markers to the final names. Idempotent: entries that
+        already carry final_name (a re-add after undo) are skipped."""
+        from .media_staging import rewrite_sound_markers
+
+        if not proposal.media or self._media is None:
+            return
+        renames: dict[str, str] = {}
+        for entry in proposal.media:
+            if entry.get("final_name"):
+                continue  # already imported (re-add path)
+            staged_path = self._media.staged_path(proposal.id, entry["name"])
+            if not staged_path.is_file():
+                proposal.warnings.append(
+                    f"staged audio {entry['name']!r} is gone (cleaned up?); "
+                    "the note was created without importing it"
+                )
+                continue
+            final = str(col.media.add_file(str(staged_path)))
+            entry["final_name"] = final
+            if final != entry["name"]:
+                renames[entry["name"]] = final
+        if renames:
+            proposal.fields = rewrite_sound_markers(proposal.fields, renames)
+            proposal.warnings.append(
+                "audio renamed on import (name already taken in your media "
+                "folder): "
+                + ", ".join(f"{old} -> {new}" for old, new in renames.items())
+            )
+        self._media.discard(proposal.id)
+
     def _apply_create(self, col: Any, model: Any, proposal: Proposal) -> int:
+        # Media first: markers must point at their FINAL collection names
+        # before the note's fields are written.
+        self._import_staged_media(col, proposal)
         precheck = self._precheck_create(proposal)
 
         def execute(col: Any, before: invariants.Snapshot) -> _WriteResult:
