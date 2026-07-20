@@ -601,6 +601,11 @@ needs is FSRS-native. Build this before anything semantic.
   since. Run as a desktop batch a few days before the big card is due;
   update the big card's stored reference set as needed. Believed
   tractable and inexpensive per the user's experience with search agents.
+  Scaling this to a **full-collection dependency-graph backfill** (and
+  eventually to other users' collections) is designed and costed in
+  [`GRAPH_BACKFILL.md`](GRAPH_BACKFILL.md): naive pairwise LLM checking is
+  ~$100k+; embeddings-blocking + per-note neighborhood judging is
+  ~$50–300 one-time and ~1¢ per new note.
 
 The big card **stores references to its related cards by both `nid` and
 `guid`** — `nid` for fast local lookup (survives retag/move), `guid` to
