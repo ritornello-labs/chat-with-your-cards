@@ -43,6 +43,7 @@ include = [
     "media_staging.py",
     "contract.py",
     "invariants.py",
+    "grading.py",
     "learning.py",
     "skills.py",
     "stats.py",

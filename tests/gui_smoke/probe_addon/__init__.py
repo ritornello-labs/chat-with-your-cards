@@ -846,6 +846,169 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
         _deck_ops_flow,
     )
 
+    def _native_grading_flow() -> dict[str, Any]:
+        # Prove the arbitrary-card grading path against Anki's real 25.09 Rust
+        # scheduler.  The key regression is preview filtered decks: native
+        # Grade Now/Again alone repeats the preview and does NOT lapse the
+        # underlying card, while grading.fail_cards_now exits only that card's
+        # preview and then records a real Again without rebuilding the deck.
+        col = mw.col
+        grading = importlib.import_module(f"{ADDON_PACKAGE}.grading")
+
+        def _review_card(front: str) -> tuple[int, int]:
+            nid = _new_note(front, deck="ZZProbeGrading")
+            cid = int(col.get_note(nid).cards()[0].id)
+            col.sched.set_due_date([cid], "30")
+            return nid, cid
+
+        def _filtered(name: str, card_ids: list[int], *, resched: bool) -> int:
+            did = int(col.decks.new_filtered(name))
+            deck = col.decks.get(did)
+            search = " or ".join(f"cid:{cid}" for cid in card_ids)
+            deck["terms"] = [[search, 100, 5]]
+            deck["resched"] = resched
+            col.decks.save(deck)
+            col.sched.rebuild_filtered_deck(did)
+            return did
+
+        # Establish why the preview branch exists using the unwrapped native
+        # operation first.
+        _, naive_cid = _review_card("grade preview naive")
+        naive_did = _filtered("ZZProbeGradeNaive", [naive_cid], resched=False)
+        naive_before = col.get_card(naive_cid)
+        naive_reps = int(naive_before.reps)
+        naive_lapses = int(naive_before.lapses)
+        naive_revlogs = int(
+            col.db.scalar("select count() from revlog where cid = ?", naive_cid)
+        )
+        col._backend.grade_now(
+            card_ids=[naive_cid], rating=grading.GradeRating.AGAIN
+        )
+        naive_after = col.get_card(naive_cid)
+        if int(naive_after.did) != naive_did or int(naive_after.reps) != naive_reps:
+            raise AssertionError("preview Grade Now/Again unexpectedly changed real scheduling")
+        if int(naive_after.lapses) != naive_lapses:
+            raise AssertionError("preview Grade Now/Again unexpectedly added a lapse")
+        naive_revlogs_after = int(
+            col.db.scalar("select count() from revlog where cid = ?", naive_cid)
+        )
+        if naive_revlogs_after != naive_revlogs + 1:
+            raise AssertionError("preview Grade Now/Again did not log its preview answer")
+
+        # Normal future-due review + event cursor idempotency.
+        normal_nid, normal_cid = _review_card("grade future normal")
+        normal_guid = str(col.get_note(normal_nid).guid)
+        normal_before = col.get_card(normal_cid)
+        normal_reps = int(normal_before.reps)
+        event = grading.GradingEventRef("gui-smoke-stream", 1, "gui-smoke-event-1")
+        target = grading.GradingTarget(normal_cid, normal_guid)
+        first = grading.fail_cards_now(col, [target], event=event)
+        retry = grading.fail_cards_now(col, [target], event=event)
+        if first.already_applied or not retry.already_applied:
+            raise AssertionError("grading event cursor did not make the retry a no-op")
+        if int(col.get_card(normal_cid).reps) != normal_reps + 1:
+            raise AssertionError("future-due card did not receive exactly one real answer")
+
+        # Preview filtered target: its companion must remain byte-for-byte in
+        # the deck; no empty/rebuild operation is allowed to reshuffle it.
+        _, preview_cid = _review_card("grade preview target")
+        _, companion_cid = _review_card("grade preview companion")
+        preview_did = _filtered(
+            "ZZProbeGradePreview", [preview_cid, companion_cid], resched=False
+        )
+        companion_before = col.get_card(companion_cid)
+        companion_state = (
+            int(companion_before.did),
+            int(companion_before.odid),
+            int(companion_before.queue),
+            int(companion_before.due),
+            int(companion_before.reps),
+        )
+        preview_before = col.get_card(preview_cid)
+        preview_reps = int(preview_before.reps)
+        preview_logs = int(
+            col.db.scalar("select count() from revlog where cid = ?", preview_cid)
+        )
+        preview_result = grading.fail_cards_now(col, [preview_cid])
+        preview_after = col.get_card(preview_cid)
+        companion_after = col.get_card(companion_cid)
+        if preview_result.preview_exits != (preview_cid,):
+            raise AssertionError(f"preview branch was not reported: {preview_result}")
+        if (int(preview_after.did), int(preview_after.odid)) != (
+            int(col.decks.id_for_name("ZZProbeGrading")),
+            0,
+        ):
+            raise AssertionError("preview target did not return to its normal home deck")
+        if int(preview_after.reps) != preview_reps + 1:
+            raise AssertionError("preview target did not receive one real Again")
+        preview_logs_after = int(
+            col.db.scalar("select count() from revlog where cid = ?", preview_cid)
+        )
+        if preview_logs_after != preview_logs + 2:
+            raise AssertionError("preview target should have one preview exit + one real Again")
+        if (
+            int(companion_after.did),
+            int(companion_after.odid),
+            int(companion_after.queue),
+            int(companion_after.due),
+            int(companion_after.reps),
+        ) != companion_state:
+            raise AssertionError("preview companion changed; the deck was likely rebuilt")
+        if int(companion_after.did) != preview_did:
+            raise AssertionError("preview companion left its filtered deck")
+
+        # Rescheduling filtered cards are already real reviews; one native
+        # Again is enough, whether the resulting relearning state remains in
+        # the filtered deck or returns home under the active deck preset.
+        _, resched_cid = _review_card("grade rescheduling filtered")
+        resched_did = _filtered("ZZProbeGradeResched", [resched_cid], resched=True)
+        resched_before = col.get_card(resched_cid)
+        resched_reps = int(resched_before.reps)
+        resched_logs = int(
+            col.db.scalar("select count() from revlog where cid = ?", resched_cid)
+        )
+        resched_result = grading.fail_cards_now(col, [resched_cid])
+        resched_after = col.get_card(resched_cid)
+        if resched_result.rescheduling_filtered != (resched_cid,):
+            raise AssertionError("rescheduling filtered branch was not reported")
+        if int(resched_after.reps) != resched_reps + 1:
+            raise AssertionError("rescheduling filtered card did not receive one Again")
+        resched_logs_after = int(
+            col.db.scalar("select count() from revlog where cid = ?", resched_cid)
+        )
+        if resched_logs_after != resched_logs + 1:
+            raise AssertionError("rescheduling filtered card wrote the wrong revlog count")
+        if int(resched_after.odid) and int(resched_after.did) != resched_did:
+            raise AssertionError("rescheduling filtered card has inconsistent did/odid")
+
+        # Explicit suspension is durable policy, so record the failure and
+        # restore suspension with Anki's native operation.
+        _, suspended_cid = _review_card("grade suspended")
+        col.sched.suspend_cards([suspended_cid])
+        suspended_before = col.get_card(suspended_cid)
+        suspended_reps = int(suspended_before.reps)
+        suspended_result = grading.fail_cards_now(col, [suspended_cid])
+        suspended_after = col.get_card(suspended_cid)
+        if suspended_result.restored_suspended != (suspended_cid,):
+            raise AssertionError("suspension restore was not reported")
+        if int(suspended_after.queue) != -1:
+            raise AssertionError("grading unexpectedly unsuspended an explicit suspension")
+        if int(suspended_after.reps) != suspended_reps + 1:
+            raise AssertionError("suspended card did not record the real failure")
+
+        return {
+            "normal": normal_cid,
+            "preview": preview_cid,
+            "preview_companion": companion_cid,
+            "rescheduling": resched_cid,
+            "suspended": suspended_cid,
+        }
+
+    check(
+        "native arbitrary-card grading: normal/filtered/suspended/idempotent",
+        _native_grading_flow,
+    )
+
     def _reviewer_refresh() -> dict[str, Any]:
         # Highest-value real-Anki path: edit the note under review and confirm
         # the reviewer re-renders in place (private _showQuestion API).
@@ -978,6 +1141,19 @@ def _run_checks() -> dict[str, Any]:
             raise AssertionError(f"webview ready ping never arrived; page state: {diagnostics}")
 
     check("webview ready ping received", _web_ready)
+
+    # Focused, opt-in lane for collection/scheduler work.  It keeps the same
+    # real disposable Anki profile and add-on load, but skips unrelated dock
+    # animation/hover assertions that can be timing-sensitive on the host.
+    # The normal smoke never sets this and still runs the complete suite.
+    if os.environ.get("CWYC_SMOKE_COLLECTION_ONLY"):
+        _collection_flow_checks(state, check)
+        return {
+            "ok": True,
+            "checks": checks,
+            "collection_only": True,
+            "anki_version": getattr(mw, "appVersion", None),
+        }
 
     def _toggle_expands_dock() -> None:
         # expand_target(), not MIN_DOCK_WIDTH: in a small window the target

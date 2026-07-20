@@ -647,9 +647,27 @@ never.
 ### 17.6 Rescheduling: mostly FSRS-native, one thing to avoid
 
 1. **Fail the atomics the LLM judged wrong** = record honest **Again**
-   ratings on those cards. FSRS-legit (the exact button the user would
-   press). Applied via the collection API with Anki closed (the same
-   lib-with-Anki-closed primitive used for filtered decks).
+   ratings through Anki's native Browser **Grade Now** backend operation
+   (`col._backend.grade_now`). It is specifically built to answer arbitrary
+   cards outside today's queue: Anki derives the current scheduling state,
+   records the revlog, and lets the active scheduler/FSRS choose the next
+   state. No direct card-row or due-date writes. Implemented in
+   `chat_with_your_cards/grading.py` (2026-07-20), with two filtered-deck
+   branches proven against real Anki 25.09:
+   - a rescheduling filtered deck already represents real reviews, so one
+     native **Again** is correct;
+   - in a non-rescheduling/preview filtered deck, native **Again** only repeats
+     the preview and does *not* lapse the underlying card. Empty+rebuild is
+     rejected because a limited/random filter can gather a different set.
+     Instead, native **Easy** finishes only the target card's preview and
+     returns it home, followed by native **Again** there. This intentionally
+     records one filtered/cram exit revlog plus one real Again revlog while
+     leaving unrelated companion cards and all other deck membership untouched.
+     Normal native answer side effects (for example sibling burying
+     and leech suspension) are deliberately preserved.
+   Explicit suspension is durable policy: record the failure, then reapply
+   suspension through Anki's native scheduler operation. A transient burial is
+   consumed by Grade Now, matching Anki's Browser behavior.
 2. **Short-interval re-drilling** = *free.* An Again drops the card into
    FSRS relearning steps automatically — that IS "practice a few times at
    short intervals, then graduate." No custom interval logic.
@@ -684,11 +702,19 @@ device, good on another before syncing" case is benign last-writer-wins
 on that single card, with both reviews logged — no data loss, no forced
 full sync.
 
-Residual discipline that still matters: the apply path is **keyed to a
-grading-event id + collection revision** and **idempotent** (a re-run
-must never double-fail a card). The reconciler add-on surfaces any
-divergence between the server's recorded events, the add-on's applied
-state, and the actual collection.
+Residual discipline that still matters: the apply path is idempotent. The
+server assigns each collection stream a stable id plus contiguous monotonic
+sequence numbers; the collection stores one tiny namespaced cursor
+(`cwycGradingCursorV1`: stream id + sequence + latest event id). The cursor
+and scheduler answers commit in the **same SQLite transaction**, so a crash
+followed by delivery retry cannot double-fail a card, gaps fail closed, and
+collection config stays within Anki's "few kilobytes" guidance instead of
+retaining an unbounded UUID set. Production targets also carry the note GUID;
+the add-on verifies it against the resolved local card before answering, so a
+stale graph/remap cannot grade an unrelated card. An explicit Anki Undo leaves
+the non-undoable cursor in place: that is a human override, not permission for
+the reconciler to apply the event again. The reconciler surfaces any divergence
+between the server's recorded events, the cursor, and the actual collection.
 
 ### 17.8 Progress bubble — desktop-only, add-on-rendered
 
@@ -754,8 +780,8 @@ for no gain).
 - Grading-contract schema and per-card bespoke logic — fall out of the
   seed transcripts.
 - Exact gate-policy thresholds — empirical, tune by use.
-- Precise keying/idempotency of the apply path and the reconciler's
-  divergence UX.
+- Reconciler divergence UX (event keying/idempotency is settled by the
+  collection-stream cursor in §17.7).
 - **Server deployment in the VPN** — approach known, mostly execution:
   TLS via Tailscale MagicDNS certs (or Caddy + a domain); CORS is a
   one-line header. Offline is *not* a design item — SotA grading needs
