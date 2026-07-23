@@ -7,7 +7,10 @@ Filtered Decks/Stats, and Browsing/Searching/Maintenance/Preferences/Syncing —
 cross-checked against the live tool registry and the proposal layer, so the
 "already covered" claims reflect code rather than tool names.
 
-This is a backlog, not a plan. Nothing here is committed to.
+Every theme below is filed in the working backlog (2026-07-23). This document
+stays the durable record — the sourcing, the risk notes and the reasoning — so
+it is worth updating here first when something is built or reprioritised.
+Nothing here is committed to a schedule.
 
 Prompted by a dogfood failure: asked to *"remove the red flag from that card"*,
 the agent correctly answered that it had no flag tool at all.
