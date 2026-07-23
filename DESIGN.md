@@ -6,6 +6,8 @@ An Anki add-on that presents a collapsible, gorgeous chat dock/sidebar where the
 
 This document is the plan. It records the recommended architecture, the decisions still open, and the known flaws/risks so implementation can start without re-deriving them.
 
+Companion documents: **`CAPABILITY_GAPS.md`** — what Anki can do that we cannot, audited against the official manual and priority-ordered (the backlog of missing tools); `SAFETY.md`; `COMPLIANCE.md`.
+
 ---
 
 ## 1. Product summary
@@ -370,6 +372,33 @@ announced inline (a silent cut would hide the very line being debugged). The
 tool description tells the agent it can now inspect rendering. Note this is a
 read-only widening: templates are still never written by the agent — note-type
 edits remain outside the proposal flow's scope.
+
+**Open a proposal in a large preview window (SPEC — not built; route decided
+2026-07-23).** The in-card preview is a small fixed square; a complex card needs
+room. Add a button on the proposal card that opens the proposed card — created
+*or* edited, before it is applied — in a big resizable window. Two routes were
+considered:
+
+- **(A) Subclass Anki's own `aqt.browser.previewer.Previewer`.** It is an
+  abstract `QDialog` taking `(parent: Browser | None, mw, on_close)`, so it is
+  subclassable from the dock. But its render path assumes the card's note is in
+  the database: `_render_scheduled` calls `question(reload=True)`,
+  `_update_flag_and_mark_icons` calls `note(reload=True)`, and `_state_and_mod`
+  calls `note.load()`. A *create* proposal has no note yet, so all three break,
+  and fixing it means overriding the long private `_render_scheduled`.
+- **(B) Our own resizable dialog** — an `AnkiWebView` rendering the
+  question/answer/CSS `proposals.py::_render_ephemeral` already computes and
+  already ships to the review card.
+
+**Decision: B.** The user raised the real counter-argument — B risks *subtle
+divergence* from how Anki itself renders, whereas A would inherit Anki's exact
+rendering — and judged A's fragility across Anki updates the worse problem.
+Mitigation: we render through the real templates via `note.ephemeral_card()`,
+the same call Anki's own card-layout screen uses, so divergence is confined to
+window *chrome* (replay-audio buttons, both-sides toggle, geometry persistence),
+which we add ourselves. Needs: a Python dialog, a bridge command, a UI button,
+and the usual main-thread marshalling. If divergence ever does bite, the
+fallback is to revisit A with the three DB touchpoints overridden.
 
 **Template & note-type writing (task #33, SPEC — not built).** Today the agent
 can *read* card templates (#30) but never write them: proposal kinds cover
