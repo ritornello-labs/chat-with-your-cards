@@ -55,6 +55,17 @@ def build_card_block(info: dict[str, Any]) -> str:
             + f"with card id {info['card_id']} to actually view them when the "
             + "visual matters."
         )
+    # Same shape as the images nudge above: the block shows field VALUES, and
+    # an agent that only sees those will confidently report that a card has no
+    # <iframe>/embed when the template is what contains it (dogfood
+    # 2026-07-23). Point at the tool that closes the gap, every turn.
+    lines.append(
+        "Rendering: the fields above are VALUES, not the card template that "
+        f"renders them. Call get_note_type with {info['note_type']!r} to read "
+        "the front/back template source and CSS — do that before answering "
+        "anything about how this card displays (embeds, conditional sections, "
+        "styling), instead of asking the user to paste it."
+    )
     clues = extract_field_prefixes(list(info["fields"].values()))
     if clues:
         lines.append(

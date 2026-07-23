@@ -62,6 +62,15 @@ class ContextTest(unittest.TestCase):
         self.assertTrue(block.startswith("<current-card>"))
         self.assertTrue(block.endswith("</current-card>"))
 
+    def test_card_block_points_at_the_template_source(self) -> None:
+        """The block lists field VALUES; without a pointer to the template an
+        agent confidently reports that a card has no <iframe> when the template
+        is what contains it (dogfood 2026-07-23)."""
+        block = build_card_block(CARD_INFO)
+        self.assertIn("get_note_type", block)
+        self.assertIn(CARD_INFO["note_type"], block)
+        self.assertIn("template", block.lower())
+
     def test_prefix_extraction(self) -> None:
         self.assertEqual(
             ["Analysis"],
