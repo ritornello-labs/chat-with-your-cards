@@ -21,6 +21,9 @@ MAX_SEARCH_LIMIT = 100
 # note type can't flood the context, and truncation is always announced (a
 # silent cut would hide the very line being debugged).
 MAX_TEMPLATE_CHARS = 20_000
+# Ceiling for an explicit `max_chars` override. The default keeps a routine
+# read cheap; this bounds how much one call can ever return.
+HARD_MAX_TEMPLATE_CHARS = 200_000
 
 _TAG_STRIP = re.compile(r"<[^>]+>")
 
@@ -156,21 +159,36 @@ def list_note_types(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     return {"note_types": models}
 
 
-def _template_source(text: str) -> str:
-    """Card-template / CSS source, verbatim but bounded."""
+def _template_source(text: str, limit: int, offset: int = 0) -> str:
+    """Card-template / CSS source, verbatim but bounded. Truncation always
+    says how to read the REST from here - telling the agent to open Anki
+    would be a dead end, since opening Anki is the one thing it cannot do."""
     text = str(text or "")
-    if len(text) <= MAX_TEMPLATE_CHARS:
-        return text
-    return text[:MAX_TEMPLATE_CHARS] + (
-        f"\n<!-- TRUNCATED by chat-with-your-cards: {len(text) - MAX_TEMPLATE_CHARS} "
-        "more characters; open the note type in Anki to see the rest -->"
-    )
+    total = len(text)
+    window = text[offset : offset + limit]
+    notes = []
+    if offset:
+        notes.append(f"offset {offset} of {total}")
+    remaining = total - (offset + len(window))
+    if remaining > 0:
+        notes.append(
+            f"{remaining} more characters - call get_note_type again with "
+            f"offset={offset + len(window)} (and max_chars up to "
+            f"{HARD_MAX_TEMPLATE_CHARS}) to continue"
+        )
+    if not notes:
+        return window
+    return window + "\n<!-- chat-with-your-cards: " + "; ".join(notes) + " -->"
 
 
 def get_note_type(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     model = ctx.col.models.by_name(str(args["name"]))
     if model is None:
         raise ValueError(f"note type not found: {args['name']!r}")
+    # The agent can widen the window (up to a hard ceiling) or page through a
+    # pathological template, so nothing is permanently out of reach.
+    limit = max(1, min(int(args.get("max_chars", MAX_TEMPLATE_CHARS)), HARD_MAX_TEMPLATE_CHARS))
+    offset = max(0, int(args.get("offset", 0)))
     return {
         "name": model["name"],
         "fields": [f["name"] for f in model["flds"]],
@@ -182,12 +200,12 @@ def get_note_type(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
         "templates": [
             {
                 "name": t["name"],
-                "qfmt": _template_source(t.get("qfmt", "")),
-                "afmt": _template_source(t.get("afmt", "")),
+                "qfmt": _template_source(t.get("qfmt", ""), limit, offset),
+                "afmt": _template_source(t.get("afmt", ""), limit, offset),
             }
             for t in model["tmpls"]
         ],
-        "css": _template_source(model.get("css", "")),
+        "css": _template_source(model.get("css", ""), limit, offset),
     }
 
 
@@ -342,7 +360,21 @@ def build_registry() -> ToolRegistry:
             "embedded <iframe>/<img>, styling - not just which fields exist.",
             {
                 "type": "object",
-                "properties": {"name": {"type": "string"}},
+                "properties": {
+                    "name": {"type": "string"},
+                    "max_chars": {
+                        "type": "integer",
+                        "description": "Widen the per-string source window "
+                        f"(default {MAX_TEMPLATE_CHARS}, max "
+                        f"{HARD_MAX_TEMPLATE_CHARS}).",
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "Start reading each source string here; "
+                        "use the offset named in a truncation note to page "
+                        "through a long template or stylesheet.",
+                    },
+                },
                 "required": ["name"],
             },
             get_note_type,

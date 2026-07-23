@@ -262,8 +262,38 @@ class GetNoteTypeTemplatesTest(unittest.TestCase):
         huge = "x" * (MAX_TEMPLATE_CHARS + 500)
         result = get_note_type(self._Ctx(self._model(afmt=huge)), {"name": "River"})
         afmt = result["templates"][0]["afmt"]
-        self.assertIn("TRUNCATED", afmt)
         self.assertIn("500 more characters", afmt)
+        # The note must say how to read the rest FROM HERE - "open it in Anki"
+        # is a dead end for the agent.
+        self.assertIn(f"offset={MAX_TEMPLATE_CHARS}", afmt)
+
+    def test_offset_and_max_chars_reach_the_rest(self) -> None:
+        from chat_with_your_cards.tools.collection import MAX_TEMPLATE_CHARS, get_note_type
+
+        tail = "THE-END"
+        huge = "x" * (MAX_TEMPLATE_CHARS + 500) + tail
+        ctx = self._Ctx(self._model(afmt=huge))
+        # Page 2 via the offset the truncation note named.
+        page2 = get_note_type(ctx, {"name": "River", "offset": MAX_TEMPLATE_CHARS})
+        self.assertIn(tail, page2["templates"][0]["afmt"])
+        # Or widen the window in one call.
+        whole = get_note_type(ctx, {"name": "River", "max_chars": len(huge) + 10})
+        self.assertIn(tail, whole["templates"][0]["afmt"])
+        self.assertNotIn("more characters", whole["templates"][0]["afmt"])
+
+    def test_max_chars_is_clamped_to_the_hard_ceiling(self) -> None:
+        from chat_with_your_cards.tools.collection import (
+            HARD_MAX_TEMPLATE_CHARS,
+            get_note_type,
+        )
+
+        huge = "x" * (HARD_MAX_TEMPLATE_CHARS + 5_000)
+        result = get_note_type(
+            self._Ctx(self._model(afmt=huge)), {"name": "River", "max_chars": 10_000_000}
+        )
+        afmt = result["templates"][0]["afmt"]
+        self.assertLess(len(afmt), HARD_MAX_TEMPLATE_CHARS + 500)
+        self.assertIn("more characters", afmt)
 
     def test_missing_note_type_is_an_error(self) -> None:
         from chat_with_your_cards.tools.collection import get_note_type
