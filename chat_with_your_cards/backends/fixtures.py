@@ -43,6 +43,26 @@ DEFAULT_SCRIPT: list[Step] = [
     },
 ]
 
+PUBLIC_EXPLAIN_SCRIPT: list[Step] = [
+    {
+        "kind": "text",
+        "markdown": (
+            "The difference is **when delta gets chosen**.\n\n"
+            "- With ordinary continuity, you first choose a point `x`, then you may "
+            "pick a delta that works near that point.\n"
+            "- With uniform continuity, you must pick **one delta before anyone "
+            "chooses the point**. That same window has to work everywhere.\n\n"
+            "A useful picture is a landscape viewed through a fixed-width frame. "
+            "Pointwise continuity lets you resize the frame whenever you move. "
+            "Uniform continuity asks whether one frame width works across the whole "
+            "landscape.\n\n"
+            "Compactness matters because it lets finitely many local windows cover "
+            "the space; the smallest of their deltas is still positive and works "
+            "globally."
+        ),
+    },
+]
+
 TOOL_SCRIPT: list[Step] = [
     {
         "kind": "thinking",
@@ -72,6 +92,40 @@ TOOL_SCRIPT: list[Step] = [
             "- *Analysis: one-sided limits* - the left/right refinement\n\n"
             "The continuity card is probably the best follow-up to review together with "
             "this one, since it reuses the epsilon-delta template verbatim."
+        ),
+    },
+]
+
+PREREQUISITE_SCRIPT: list[Step] = [
+    {
+        "kind": "thinking",
+        "estimated_tokens": [55, 120, 210],
+    },
+    {
+        "kind": "text",
+        "markdown": "I’ll trace the concepts this card depends on in your collection.\n\n",
+    },
+    {
+        "kind": "tool",
+        "tool": "mcp__anki__search_notes",
+        "summary": (
+            '{"query": "deck:\\"CWYC Demo::*\\" '
+            '(tag:continuity OR tag:compactness)"}'
+        ),
+        "result": "4 notes",
+        "ok": True,
+        "duration_ms": 760,
+    },
+    {
+        "kind": "text",
+        "markdown": (
+            "The missing bridge is **compactness**. I’d review these in order:\n\n"
+            "1. *Continuity at a point: the epsilon–delta game*\n"
+            "2. *Open covers and finite subcovers*\n"
+            "3. *Heine–Cantor: continuous on compact implies uniformly continuous*\n\n"
+            "Your current card asks why one delta can work everywhere. The third card "
+            "answers exactly that: compactness turns all the local neighborhoods into "
+            "a finite subcover, so their finitely many deltas have a positive minimum."
         ),
     },
 ]
@@ -144,17 +198,64 @@ PROPOSE_SCRIPT: list[Step] = [
     },
 ]
 
+PUBLIC_PROPOSE_SCRIPT: list[Step] = [
+    {
+        "kind": "text",
+        "markdown": (
+            "Your confusion is about the **quantifier order**, so I’d isolate that "
+            "instead of making the current card longer. Here is a focused companion card:\n\n"
+        ),
+    },
+    {
+        "kind": "propose",
+        "proposal_kind": "create",
+        "payload": {
+            "note_type": "Basic",
+            "deck": "CWYC Demo::Current",
+            "tags": ["analysis", "continuity", "ai-proposed"],
+            "fields": {
+                "Front": "Uniform continuity: which quantifier moves?",
+                "Back": (
+                    "The same δ must work for every point in the domain. "
+                    "Pointwise continuity may choose a different δ at "
+                    "each point."
+                ),
+            },
+            "rationale": (
+                "This separates the quantifier change from the compactness proof, "
+                "making each card test one idea."
+            ),
+        },
+    },
+    {
+        "kind": "text",
+        "markdown": (
+            "Nothing has been written yet. You can edit either field, inspect the deck "
+            "and tags, then accept or reject the proposal."
+        ),
+    },
+]
+
 SCRIPTS: dict[str, list[Step]] = {
     "default": DEFAULT_SCRIPT,
+    "public_explain": PUBLIC_EXPLAIN_SCRIPT,
     "tool": TOOL_SCRIPT,
+    "prerequisite": PREREQUISITE_SCRIPT,
     "long": LONG_SCRIPT,
     "propose": PROPOSE_SCRIPT,
+    "public_propose": PUBLIC_PROPOSE_SCRIPT,
 }
 
 
 def select_script(user_text: str) -> list[Step]:
     """Pick a canned script from keywords in the user message (deterministic)."""
     lowered = user_text.lower()
+    if "plain language" in lowered:
+        return PUBLIC_EXPLAIN_SCRIPT
+    if "turn my confusion" in lowered:
+        return PUBLIC_PROPOSE_SCRIPT
+    if "prerequisite" in lowered or "before this" in lowered:
+        return PREREQUISITE_SCRIPT
     if "propose" in lowered or "create a note" in lowered or "make a card" in lowered:
         return PROPOSE_SCRIPT
     if "tool" in lowered:

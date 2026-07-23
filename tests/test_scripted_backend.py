@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from chat_with_your_cards.backends import (  # noqa: E402
     ChatEvent,
     Done,
+    ProposalRequest,
     ScriptedBackend,
     TextDelta,
     ThinkingDelta,
@@ -94,6 +95,32 @@ class ScriptedBackendTest(unittest.TestCase):
         self.assertTrue(all(d.estimated_tokens for d in thinking))
         first_other = next(e for e in events if not isinstance(e, ThinkingDelta))
         self.assertLess(events.index(thinking[-1]), events.index(first_other))
+
+    def test_public_prerequisite_story_searches_collection(self) -> None:
+        scheduler, session = self._session()
+        events: list[ChatEvent] = []
+        session.send("Which prerequisite cards should I review before this?", collect(events))
+        scheduler.run_all()
+
+        started = [e for e in events if isinstance(e, ToolCallStarted)]
+        text = "".join(e.text for e in events if isinstance(e, TextDelta))
+        self.assertEqual("mcp__anki__search_notes", started[0].tool)
+        self.assertIn("compactness", text)
+        self.assertIn("Heine", text)
+
+    def test_public_proposal_story_leaves_a_reviewable_create_request(self) -> None:
+        scheduler, session = self._session()
+        events: list[ChatEvent] = []
+        session.send(
+            "Turn my confusion about the quantifiers into a focused card",
+            collect(events),
+        )
+        scheduler.run_all()
+
+        proposals = [e for e in events if isinstance(e, ProposalRequest)]
+        self.assertEqual(1, len(proposals))
+        self.assertEqual("create", proposals[0].kind)
+        self.assertIn("which quantifier moves", proposals[0].payload["fields"]["Front"])
 
     def test_cancel_stops_emission_and_no_done(self) -> None:
         scheduler, session = self._session()

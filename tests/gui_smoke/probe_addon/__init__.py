@@ -41,6 +41,9 @@ DOM_TIMEOUT_MS = 5_000
 
 DEMO_MESSAGE = "please run a tool demo"
 PROPOSE_MESSAGE = "propose a note about this"
+PUBLIC_EXPLAIN_MESSAGE = "Explain this card in plain language"
+PUBLIC_RELATED_MESSAGE = "Which prerequisite cards should I review before this?"
+PUBLIC_PROPOSE_MESSAGE = "Turn my confusion about the quantifiers into a focused card"
 
 
 def _wait_until(predicate: Callable[[], bool], timeout_ms: int, description: str) -> None:
@@ -2269,10 +2272,178 @@ def _hover_grab(result: dict[str, Any], light_path: Path, testid: str) -> None:
         result[f"hover_{testid}"] = str(hover_path)
 
 
+def _stage_public_demo_collection() -> dict[str, Any]:
+    """Build the synthetic collection used by the public user-story captures."""
+    assert mw is not None
+    current_deck = "CWYC Demo::Current"
+    related_deck = "CWYC Demo::Related"
+    current_nid = _new_note(
+        "Why does uniform continuity require one delta that works everywhere?",
+        tags=["analysis", "continuity", "quantifiers"],
+        deck=current_deck,
+        back=(
+            "Pointwise continuity may choose a different delta at each point. "
+            "Uniform continuity chooses delta before the point, so that one "
+            "delta must work across the whole domain."
+        ),
+    )
+    related = [
+        (
+            "Continuity at a point: the epsilon–delta game",
+            "For every epsilon and every chosen point, there exists a delta.",
+            ["analysis", "continuity"],
+        ),
+        (
+            "Open covers and finite subcovers",
+            "A space is compact when every open cover has a finite subcover.",
+            ["analysis", "compactness"],
+        ),
+        (
+            "Heine–Cantor theorem",
+            "A continuous function on a compact space is uniformly continuous.",
+            ["analysis", "continuity", "compactness"],
+        ),
+        (
+            "Why (0, 1) is not compact",
+            "The cover (1/n, 1) has no finite subcover of the interval.",
+            ["analysis", "compactness"],
+        ),
+    ]
+    related_ids = [
+        _new_note(front, tags=tags, deck=related_deck, back=back)
+        for front, back, tags in related
+    ]
+
+    mw.col.decks.select(mw.col.decks.id(current_deck))
+    mw.reset()
+    mw.onOverview()
+    QTest.qWait(250)
+    mw.moveToState("review")
+    _wait_until(
+        lambda: getattr(mw, "state", "") == "review"
+        and getattr(getattr(mw, "reviewer", None), "card", None) is not None,
+        3_000,
+        "synthetic current card to open in reviewer",
+    )
+    reviewer = getattr(mw, "reviewer", None)
+    card = getattr(reviewer, "card", None) if reviewer else None
+    if card is None or int(card.nid) != current_nid:
+        raise AssertionError("could not open the synthetic current card in the reviewer")
+    reviewer._showQuestion()
+    reviewer.web.repaint()
+    mw.repaint()
+    QTest.qWait(800)
+
+    mw.resize(1280, 760)
+    QTest.qWait(250)
+    return {
+        "current_note": current_nid,
+        "related_notes": related_ids,
+        "current_deck": current_deck,
+        "related_deck": related_deck,
+        "anki_state": mw.state,
+    }
+
+
+def _frame_public_story(web: Any, *, bottom: bool) -> None:
+    _eval_js(
+        web,
+        "(function() {"
+        "  var vp = document.querySelector('.cwyc-viewport');"
+        "  if (!vp) vp = document.querySelector('[class*=viewport]');"
+        "  if (vp) {"
+        + (
+            "    var card = document.querySelector('[data-testid=proposal-card]');"
+            "    if (card) {"
+            "      var cr = card.getBoundingClientRect();"
+            "      var vr = vp.getBoundingClientRect();"
+            "      vp.scrollTop += cr.top - vr.top - 120;"
+            "    } else { vp.scrollTop = vp.scrollHeight; }"
+            if bottom
+            else "    vp.scrollTop = 0;"
+        )
+        + "  }"
+        "  return true;"
+        "})();",
+        DOM_TIMEOUT_MS,
+        "frame public screenshot transcript",
+    )
+    QTest.qWait(350)
+
+
+def _capture_public_story(
+    controller: Any,
+    web: Any,
+    *,
+    message: str,
+    path: Path,
+    bottom: bool = False,
+) -> None:
+    controller.new_chat()
+    controller.push_context_chip()
+    _send_message(web, message)
+    _wait_until(
+        lambda: not controller.streaming
+        and any(type(event).__name__ == "Done" for event in controller.event_log),
+        STREAM_TIMEOUT_MS,
+        f"public story stream for {path.name}",
+    )
+    QTest.qWait(300)
+    _frame_public_story(web, bottom=bottom)
+    if not mw.grab().save(str(path), "PNG"):
+        raise RuntimeError(f"failed to save public story screenshot to {path}")
+
+
+def _save_public_story_screenshots(result: dict[str, Any], light_path: Path) -> None:
+    addon = importlib.import_module(ADDON_PACKAGE)
+    dock = addon.state.dock
+    dock.set_expanded(True, animate=False)
+    _wait_until(lambda: dock.expanded and dock._anim is None, 3_000, "public dock expand")
+    collection = _stage_public_demo_collection()
+    # Earlier destructive tests intentionally surface notices. Let the UI's
+    # six-second notice timer expire before taking publicity captures.
+    QTest.qWait(6_500)
+    light_path.parent.mkdir(parents=True, exist_ok=True)
+
+    explain_path = light_path.with_name(light_path.stem + "-explain.png")
+    proposal_path = light_path.with_name(light_path.stem + "-proposal.png")
+    _capture_public_story(
+        addon.state.controller,
+        dock.web,
+        message=PUBLIC_EXPLAIN_MESSAGE,
+        path=explain_path,
+    )
+    _capture_public_story(
+        addon.state.controller,
+        dock.web,
+        message=PUBLIC_RELATED_MESSAGE,
+        path=light_path,
+    )
+    _capture_public_story(
+        addon.state.controller,
+        dock.web,
+        message=PUBLIC_PROPOSE_MESSAGE,
+        path=proposal_path,
+        bottom=True,
+    )
+    result["public_demo_collection"] = collection
+    result["screenshot_explain"] = str(explain_path)
+    result["screenshot"] = str(light_path)
+    result["screenshot_proposal"] = str(proposal_path)
+
+
 def _save_screenshots(result: dict[str, Any]) -> None:
     path = os.environ.get("ANKI_ADDON_WORKBENCH_SCREENSHOT")
     if not path or mw is None:
         return
+
+    # README/publicity captures recreate three user stories in a synthetic
+    # collection after the destructive smoke assertions finish. The early
+    # return avoids producing diagnostic dark/rail variants of the final story.
+    if os.environ.get("CWYC_PUBLIC_SCREENSHOT"):
+        _save_public_story_screenshots(result, Path(path))
+        return
+
     light_path = Path(path)
     light_path.parent.mkdir(parents=True, exist_ok=True)
     QTest.qWait(200)

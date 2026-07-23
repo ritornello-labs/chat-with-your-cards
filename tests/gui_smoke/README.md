@@ -18,12 +18,27 @@ Builds the workbench-generated `Dockerfile` (Anki launcher + Xvfb) and runs
 the smoke inside it. Regenerate the Dockerfile after workbench upgrades with
 `uv run --group dev anki-workbench dockerfile --out tests/gui_smoke/Dockerfile`.
 
-## macOS host (visible — avoid during normal work)
+For the stable README/demo captures, set `CWYC_PUBLIC_SCREENSHOT=1` and pass an
+explicit screenshot path. After the assertions finish, the probe creates a
+synthetic continuity/compactness collection, opens its current card in the
+reviewer, and recreates the three public user stories. Diagnostic error states
+from destructive tests never leak into the public images:
+
+    CWYC_PUBLIC_SCREENSHOT=1 uv run --group dev \
+      anki-workbench smoke --timeout 120 \
+      --screenshot docs/images/chat-with-your-cards.png
+
+The command writes the related-card story to the requested path plus
+`chat-with-your-cards-explain.png` and
+`chat-with-your-cards-proposal.png` beside it.
+
+## macOS host
 
     make test-gui-smoke
 
-Launches a real, visible disposable Anki that takes focus on macOS. Only use
-when Docker is unavailable and a visible window is acceptable.
+With `anki-addon-workbench` 0.4.2 or newer, this launches a disposable Anki in
+stealth mode: it avoids activation and parks the window almost entirely
+off-screen. Pass `--foreground` only for an intentionally visible run.
 
 ## Fast UI iteration without Anki
 

@@ -17,7 +17,18 @@ from chat_with_your_cards.backends.scripted import compile_script  # noqa: E402
 
 class FixtureScriptsTest(unittest.TestCase):
     def test_expected_scripts_exist(self) -> None:
-        self.assertEqual({"default", "tool", "long", "propose"}, set(SCRIPTS))
+        self.assertEqual(
+            {
+                "default",
+                "public_explain",
+                "tool",
+                "prerequisite",
+                "long",
+                "propose",
+                "public_propose",
+            },
+            set(SCRIPTS),
+        )
 
     def test_every_script_compiles_to_valid_timeline(self) -> None:
         for name, steps in SCRIPTS.items():
