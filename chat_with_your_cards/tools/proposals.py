@@ -129,7 +129,10 @@ def register_proposal_tools(registry: ToolRegistry) -> None:
                     "note_id": {"type": "integer"},
                     "field_changes": {
                         "type": "object",
-                        "description": "Field name -> full new value",
+                        "description": "Field name -> full new value. NOTE: this "
+                        "argument is `field_changes`, not `fields` (that is "
+                        "propose_note's argument). Pass a real object, not a "
+                        "JSON-encoded string.",
                         "additionalProperties": {"type": "string"},
                     },
                     "add_tags": {"type": "array", "items": {"type": "string"}},

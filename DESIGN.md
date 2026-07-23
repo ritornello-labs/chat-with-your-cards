@@ -334,6 +334,27 @@ textarea in place on click, and a Save/Discard footer appears only once the
 draft diverges (the "revise"-intent action is no longer rendered). The
 before/after diff still shows until a field is opened.
 
+**Proposal-tool argument handling (task #29, 2026-07-23).** A dogfood edit
+("strip this `<a>` wrapper back to a bare URL") failed twice with *"no
+effective changes: all proposed values match the note"* — and the message was
+false: nothing had been compared. The agent had passed `fields` (which is
+`propose_note`'s argument) instead of `field_changes`, with the value as a
+JSON-*encoded string*. The schema has no `additionalProperties: false` and
+`field_changes` is not required, so the key was silently dropped, `changes`
+came out empty, and the empty branch reported a no-op. The agent believed the
+message, invented a "the tool compares fields by their visible text" theory,
+and abandoned a valid edit — a good example of a misleading error costing far
+more than the underlying slip. Three fixes: (a) the empty case now
+distinguishes *"no field changes provided"* from *"all proposed values match
+the note"*; (b) unknown top-level arguments are rejected naming the valid
+keys, and `fields` is accepted as an explicit **alias** for `field_changes` on
+edit (the confusion is natural, so absorb it rather than punish it); (c)
+`_coerce_field_map` parses a JSON-string field map for both create and edit
+instead of dying on `.items()`, and errors clearly on anything else. Note the
+comparison itself was never the problem: `submit_edit` compares **raw** field
+strings, so markup-only edits (same visible text, different HTML) always
+counted as changes — now covered by a regression test.
+
 **Composer attachments & multimodal input (task #28, SPEC — not built).**
 Two distinct capabilities the user asked for, deliberately separated because
 they touch different layers:

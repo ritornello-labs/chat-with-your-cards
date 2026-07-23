@@ -810,8 +810,90 @@ class EditFlowTests(unittest.TestCase):
     def test_noop_changes_rejected(self) -> None:
         manager, col, pushed = make_manager()
         nid = self._created_note(manager, col, pushed)
-        with self.assertRaises(ProposalError):
+        with self.assertRaises(ProposalError) as ctx:
             manager.submit_edit({"note_id": nid, "field_changes": {"Front": "Q?"}})
+        self.assertIn("match the note", str(ctx.exception))
+
+    # ---- argument handling (dogfood 2026-07-23) ----
+
+    def test_missing_field_changes_is_not_reported_as_a_noop(self) -> None:
+        """The reported bug: an absent/misnamed field map was silently dropped
+        and surfaced as "all proposed values match the note" - which is false,
+        nothing was ever compared. That talked the agent out of a valid edit."""
+        manager, col, pushed = make_manager()
+        nid = self._created_note(manager, col, pushed)
+        with self.assertRaises(ProposalError) as ctx:
+            manager.submit_edit({"note_id": nid, "rationale": "no changes attached"})
+        message = str(ctx.exception)
+        self.assertIn("no field changes provided", message)
+        self.assertNotIn("match the note", message)
+
+    def test_fields_accepted_as_alias_for_field_changes(self) -> None:
+        # propose_note (create) takes `fields`, so reaching for it on edit is
+        # the natural slip; accept it rather than dropping the edit.
+        manager, col, pushed = make_manager()
+        nid = self._created_note(manager, col, pushed)
+        result = manager.submit_edit({"note_id": nid, "fields": {"Front": "Q2?"}})
+        self.assertEqual(result["status"], "pending_user_review")
+        proposal = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertEqual({f["name"]: f["new"] for f in proposal["fields"]}["Front"], "Q2?")
+
+    def test_stringified_json_field_map_is_parsed(self) -> None:
+        # Models routinely stringify nested JSON; that must not die on .items().
+        manager, col, pushed = make_manager()
+        nid = self._created_note(manager, col, pushed)
+        result = manager.submit_edit({"note_id": nid, "field_changes": '{"Front": "Q3?"}'})
+        self.assertEqual(result["status"], "pending_user_review")
+        proposal = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertEqual({f["name"]: f["new"] for f in proposal["fields"]}["Front"], "Q3?")
+
+    def test_reported_failure_shape_fields_alias_plus_stringified_json(self) -> None:
+        """Verbatim shape of the reported failure: `fields` (not
+        `field_changes`) carrying a JSON-ENCODED STRING. Both slips at once,
+        which used to be swallowed into "all proposed values match the note"."""
+        manager, col, pushed = make_manager()
+        nid = self._created_note(manager, col, pushed)
+        url = "https://en.wikipedia.org/wiki/S%C3%A3o_Francisco_River"
+        result = manager.submit_edit(
+            {
+                "note_id": nid,
+                "fields": '{"Front": "' + url + '"}',
+                "rationale": "strip the HTML anchor wrapping to a bare URL",
+            }
+        )
+        self.assertEqual(result["status"], "pending_user_review")
+        proposal = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertEqual({f["name"]: f["new"] for f in proposal["fields"]}["Front"], url)
+
+    def test_non_json_string_field_map_is_a_clear_error(self) -> None:
+        manager, col, pushed = make_manager()
+        nid = self._created_note(manager, col, pushed)
+        with self.assertRaises(ProposalError) as ctx:
+            manager.submit_edit({"note_id": nid, "field_changes": "Front=Q?"})
+        self.assertIn("field_changes", str(ctx.exception))
+
+    def test_unknown_argument_is_rejected_naming_valid_keys(self) -> None:
+        manager, col, pushed = make_manager()
+        nid = self._created_note(manager, col, pushed)
+        with self.assertRaises(ProposalError) as ctx:
+            manager.submit_edit({"note_id": nid, "field_change": {"Front": "x"}})
+        message = str(ctx.exception)
+        self.assertIn("field_change", message)  # the typo is named
+        self.assertIn("field_changes", message)  # ...and the valid key offered
+
+    def test_markup_only_change_is_a_real_change(self) -> None:
+        """The original report: <a href=URL>URL</a> -> bare URL. Identical
+        visible text, different markup (and different rendering) - it must be
+        treated as a change, not a no-op."""
+        manager, col, pushed = make_manager()
+        nid = self._created_note(manager, col, pushed)
+        url = "https://en.wikipedia.org/wiki/S%C3%A3o_Francisco_River"
+        first = manager.submit_edit(
+            {"note_id": nid, "field_changes": {"Front": f'<a href="{url}">{url}</a>'}}
+        )
+        manager.accept({"id": first["proposal_id"]})
+        second = manager.submit_edit({"note_id": nid, "field_changes": {"Front": url}})
+        self.assertEqual(second["status"], "pending_user_review")
 
     def test_edit_accept_applies_selected_fields_and_tags(self) -> None:
         manager, col, pushed = make_manager()

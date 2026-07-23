@@ -37,6 +37,30 @@ MAX_SKILL_NAME_CHARS = 64
 MAX_SKILL_DESCRIPTION_CHARS = 1024
 MAX_SKILL_MARKDOWN_CHARS = 50_000
 
+# Accepted top-level arguments per proposal tool. Unknown keys are rejected
+# rather than silently dropped: a misnamed `fields` on an edit used to vanish
+# and surface as a bogus "all proposed values match the note" (dogfood
+# 2026-07-23), which talked the agent out of a valid edit. `fields` is listed
+# for edit because it is accepted there as an alias for `field_changes`.
+_EDIT_ARGS = {
+    "note_id",
+    "field_changes",
+    "fields",
+    "add_tags",
+    "remove_tags",
+    "rationale",
+    "supersedes",
+}
+_CREATE_ARGS = {
+    "note_type",
+    "deck",
+    "tags",
+    "fields",
+    "rationale",
+    "media",
+    "supersedes",
+}
+
 PENDING = "pending"
 ACCEPTED = "accepted"
 
@@ -433,11 +457,16 @@ class ProposalManager:
 
     def submit_create(self, args: dict[str, Any]) -> dict[str, Any]:
         col = self._col()
+        unknown_args = sorted(set(args) - _CREATE_ARGS)
+        if unknown_args:
+            raise ProposalError(
+                f"unknown argument(s) {unknown_args}; valid: {sorted(_CREATE_ARGS)}"
+            )
         pins = self.pins
         note_type = str(args.get("note_type", "")).strip()
         deck = str(args.get("deck", "")).strip()
         tags = [str(t).strip() for t in (args.get("tags") or []) if str(t).strip()]
-        fields = {str(k): str(v) for k, v in (args.get("fields") or {}).items()}
+        fields = _coerce_field_map(args.get("fields"), "fields")
         rationale = str(args.get("rationale", ""))
         warnings: list[str] = []
 
@@ -548,8 +577,21 @@ class ProposalManager:
 
     def submit_edit(self, args: dict[str, Any]) -> dict[str, Any]:
         col = self._col()
+        unknown_args = sorted(set(args) - _EDIT_ARGS)
+        if unknown_args:
+            raise ProposalError(
+                f"unknown argument(s) {unknown_args}; valid: {sorted(_EDIT_ARGS)}"
+            )
         note_id = int(args.get("note_id", 0))
-        changes = {str(k): str(v) for k, v in (args.get("field_changes") or {}).items()}
+        # `fields` is accepted as an alias for `field_changes`: propose_note
+        # (create) takes `fields`, so reaching for the same name on edit is the
+        # natural slip - and silently dropping it produced a bogus "all
+        # proposed values match the note" (dogfood 2026-07-23).
+        raw_changes = args.get("field_changes")
+        if raw_changes is None:
+            raw_changes = args.get("fields")
+        submitted = _coerce_field_map(raw_changes, "field_changes")
+        changes = dict(submitted)
         add_tags = [str(t).strip() for t in (args.get("add_tags") or []) if str(t).strip()]
         remove_tags = [
             str(t).strip() for t in (args.get("remove_tags") or []) if str(t).strip()
@@ -568,6 +610,14 @@ class ProposalManager:
             )
         changes = {k: v for k, v in changes.items() if v != current[k]}
         if not changes and not add_tags and not remove_tags:
+            # Two very different failures; conflating them sent the agent
+            # chasing a phantom "the tool compares by text" theory.
+            if not submitted:
+                raise ProposalError(
+                    "no field changes provided: pass `field_changes` as an object "
+                    "mapping field name -> full new value (add_tags/remove_tags "
+                    "also count as changes)"
+                )
             raise ProposalError("no effective changes: all proposed values match the note")
 
         deck = ""
@@ -2994,6 +3044,32 @@ def _render_ephemeral(
         }
     except Exception:
         return None
+
+
+def _coerce_field_map(value: Any, key: str) -> dict[str, str]:
+    """Field maps arrive as {name: value}, but models routinely stringify
+    nested JSON (`"{\\"Front\\": \\"...\\"}"`). Accept that spelling instead of
+    dying on `.items()` with an AttributeError the agent can't act on; anything
+    genuinely wrong becomes a clear tool error naming the argument."""
+    if value is None:
+        return {}
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return {}
+        try:
+            value = json.loads(text)
+        except ValueError:
+            raise ProposalError(
+                f"`{key}` must be an object mapping field name -> full new value; "
+                "got a string that is not JSON"
+            ) from None
+    if not isinstance(value, dict):
+        raise ProposalError(
+            f"`{key}` must be an object mapping field name -> full new value; "
+            f"got {type(value).__name__}"
+        )
+    return {str(k): str(v) for k, v in value.items()}
 
 
 def _short_label(text: str, limit: int = 60) -> str:
