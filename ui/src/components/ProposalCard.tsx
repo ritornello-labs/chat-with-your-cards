@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { InteractionCard, wordDiff } from "@elvis-labs/interaction-ui-react";
 import "@elvis-labs/interaction-ui-react/styles.css";
 import type { ChatStore, ProposalCardData } from "../store";
@@ -113,22 +113,27 @@ function PreviewFlip({ previews }: { previews: PreviewsPayload }) {
   // allow-scripts), so the card HTML cannot run code; same-origin only lets
   // *us* reach the document to save/restore scrollTop. (dogfood 2026-07-11)
   const scrollPos = useRef<[number, number]>([0, 0]);
-  const wireScrollPersistence = (index: 0 | 1) => (frame: HTMLIFrameElement | null) => {
-    if (!frame) return;
-    frame.onload = () => {
-      const doc = frame.contentDocument;
-      if (!doc) return;
-      const el = doc.scrollingElement ?? doc.documentElement;
-      el.scrollTop = scrollPos.current[index];
-      doc.addEventListener(
-        "scroll",
-        () => {
-          scrollPos.current[index] = el.scrollTop;
-        },
-        { passive: true }
-      );
-    };
-  };
+  // Stable ref callbacks: an inline one changes identity every render, so
+  // React detaches (ref(null)) and re-attaches on each re-render for no gain.
+  const wireScrollPersistence = useCallback(
+    (index: 0 | 1) => (frame: HTMLIFrameElement | null) => {
+      if (!frame) return;
+      frame.onload = () => {
+        const doc = frame.contentDocument;
+        if (!doc) return;
+        const el = doc.scrollingElement ?? doc.documentElement;
+        el.scrollTop = scrollPos.current[index];
+        doc.addEventListener(
+          "scroll",
+          () => {
+            scrollPos.current[index] = el.scrollTop;
+          },
+          { passive: true }
+        );
+      };
+    },
+    []
+  );
   if (!faces) return null;
   const flipped = flippedOverride ?? faces.defaultFlipped;
 

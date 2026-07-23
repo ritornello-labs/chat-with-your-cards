@@ -1,7 +1,8 @@
+import { useMemo } from "react";
 import type { KeyboardEvent } from "react";
 import { ComposerPrimitive, MessagePrimitive, ThreadPrimitive } from "@assistant-ui/react";
 import { useChatState } from "./ChatRuntimeProvider";
-import type { ChatStore } from "./store";
+import type { ChatStore, ProposalCardData } from "./store";
 import { ProposalCard } from "./components/ProposalCard";
 import { ToolCallCard } from "./components/ToolCallCard";
 import { ReasoningBlock } from "./components/ReasoningBlock";
@@ -24,50 +25,64 @@ function UserMessage() {
 }
 
 function AssistantMessage({ store }: { store: ChatStore }) {
+  // MUST be memoized on a stable key. assistant-ui uses each entry below as a
+  // JSX element TYPE, so a fresh arrow identity is a different component type
+  // and React UNMOUNTS + remounts the whole part subtree instead of updating
+  // it. That destroyed the proposal card's preview <iframe> and re-fetched its
+  // images from Anki's media server — visible as a flicker whenever the
+  // pointer crossed between the Anki window and the dock (assistant-ui's
+  // MessagePrimitive.Root tracks per-message hover, and that state change
+  // re-rendered this component). It also fired on every streamed token.
+  // `store` is a single long-lived instance, so this memo effectively never
+  // recomputes. (dogfood 2026-07-23)
+  const components = useMemo(
+    () => ({
+      Text: TextPart,
+      Reasoning: ReasoningBlock,
+      tools: { Fallback: ToolCallCard },
+      data: {
+        by_name: {
+          // A malformed proposal must degrade to a one-liner, not blank
+          // the dock (dogfood 2026-07-12). resetKey = proposal id so a
+          // fresh card retries rather than staying failed.
+          proposal: (props: { data?: unknown }) => (
+            <ErrorBoundary
+              resetKey={(props.data as { id?: string } | undefined)?.id}
+              fallback={
+                <div className="cwyc-proposal cwyc-proposal-resolved" data-testid="proposal-card">
+                  <div className="cwyc-proposal-warning">
+                    This proposal card couldn’t be displayed.
+                  </div>
+                </div>
+              }
+            >
+              {/* data/store are all ProposalCard needs (see its props doc). */}
+              <ProposalCard data={props.data as ProposalCardData} store={store} />
+            </ErrorBoundary>
+          ),
+          error: ErrorBanner,
+          image: (props: Record<string, unknown>) => (
+            <InlineImage {...(props as { data: { src: string; caption: string } })} />
+          ),
+          widget: (props: Record<string, unknown>) => (
+            <WidgetCard {...(props as { data: { html: string; title: string } })} />
+          ),
+          widget_offer: (props: Record<string, unknown>) => (
+            <WidgetOfferChip
+              {...(props as { data: { id: string; title: string; resolved: boolean } })}
+              store={store}
+            />
+          ),
+        },
+      },
+    }),
+    [store],
+  );
+
   return (
     <MessagePrimitive.Root className="cwyc-row cwyc-row-assistant" data-testid="assistant-message">
       <div className="cwyc-msg cwyc-msg-assistant">
-        <MessagePrimitive.Parts
-          components={{
-            Text: TextPart,
-            Reasoning: ReasoningBlock,
-            tools: { Fallback: ToolCallCard },
-            data: {
-              by_name: {
-                // A malformed proposal must degrade to a one-liner, not blank
-                // the dock (dogfood 2026-07-12). resetKey = proposal id so a
-                // fresh card retries rather than staying failed.
-                proposal: (props) => (
-                  <ErrorBoundary
-                    resetKey={(props as { data?: { id?: string } }).data?.id}
-                    fallback={
-                      <div className="cwyc-proposal cwyc-proposal-resolved" data-testid="proposal-card">
-                        <div className="cwyc-proposal-warning">
-                          This proposal card couldn’t be displayed.
-                        </div>
-                      </div>
-                    }
-                  >
-                    <ProposalCard {...props} store={store} />
-                  </ErrorBoundary>
-                ),
-                error: ErrorBanner,
-                image: (props) => (
-                  <InlineImage {...(props as { data: { src: string; caption: string } })} />
-                ),
-                widget: (props) => (
-                  <WidgetCard {...(props as { data: { html: string; title: string } })} />
-                ),
-                widget_offer: (props) => (
-                  <WidgetOfferChip
-                    {...(props as { data: { id: string; title: string; resolved: boolean } })}
-                    store={store}
-                  />
-                ),
-              },
-            },
-          }}
-        />
+        <MessagePrimitive.Parts components={components} />
       </div>
     </MessagePrimitive.Root>
   );
