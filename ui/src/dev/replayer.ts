@@ -206,6 +206,18 @@ function createProposalScript(): Step[] {
             src: demoWavDataUri(),
           },
         ],
+        // task #25: a [sound:...] ref to media already in the collection,
+        // resolved server-side to a data: URI - draws on the same strip.
+        preview_media: [
+          {
+            id: "pv-demo-1",
+            kind: "audio",
+            name: "existing-tone.wav",
+            mime: "audio/wav",
+            bytes: 2444,
+            src: demoWavDataUri(),
+          },
+        ],
       }),
     },
     { kind: "text", text: "Accept it as-is, edit the fields first, or reject it." },

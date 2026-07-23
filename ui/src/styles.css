@@ -1423,7 +1423,7 @@ body {
 }
 
 .cwyc-flip {
-  perspective: 900px;
+  position: relative;
   height: 150px;
 }
 
@@ -1431,27 +1431,45 @@ body {
   position: relative;
   width: 100%;
   height: 100%;
-  transform-style: preserve-3d;
-  transition: transform 350ms ease;
 }
 
-.cwyc-flip-inner.cwyc-flipped {
-  transform: rotateY(180deg);
-}
-
+/* Face switch is a 2D opacity crossfade, deliberately NOT a 3D flip. A
+   nested <iframe> inside a `perspective`/`preserve-3d`/`rotateY` subtree
+   gets its wheel/drag events swallowed by the compositor layer, so the
+   preview's own scrollbar (e.g. a wide map) paints but won't move. Keeping
+   the transform 2D-only lets the active iframe scroll normally.
+   (dogfood 2026-07-23) */
 .cwyc-flip-face {
   position: absolute;
   inset: 0;
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
   border: 1px solid var(--cwyc-border);
   border-radius: 7px;
   overflow: hidden;
   background: #ffffff;
+  opacity: 0;
+  z-index: 1;
+  pointer-events: none;
+  transition: opacity 250ms ease;
 }
 
-.cwyc-flip-face-back {
-  transform: rotateY(180deg);
+/* Front is visible by default; the .cwyc-flipped state (set by PreviewFlip)
+   swaps which face is active. */
+.cwyc-flip-face:not(.cwyc-flip-face-back) {
+  opacity: 1;
+  z-index: 2;
+  pointer-events: auto;
+}
+
+.cwyc-flipped .cwyc-flip-face:not(.cwyc-flip-face-back) {
+  opacity: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.cwyc-flipped .cwyc-flip-face-back {
+  opacity: 1;
+  z-index: 2;
+  pointer-events: auto;
 }
 
 .cwyc-flip-face > iframe {

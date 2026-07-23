@@ -582,6 +582,59 @@ class MediaProposalTests(unittest.TestCase):
         self.assertEqual(pushes_of(pushed, "proposal"), [])
         self.assertFalse(list((self.base / "staging").glob("*")))
 
+    # ---- preview_media: [sound:...] refs to EXISTING collection media (task #25) ----
+
+    def _col_media_dir(self, col: Any) -> Path:
+        """Point the fake col.media at a real dir and return it."""
+        mediadir = self.base / "col-media"
+        mediadir.mkdir(exist_ok=True)
+        col.media.dir = lambda: str(mediadir)  # type: ignore[method-assign]
+        return mediadir
+
+    def test_existing_sound_resolves_to_preview_media(self) -> None:
+        manager, col, pushed = make_manager()
+        mediadir = self._col_media_dir(col)
+        (mediadir / "existing.ogg").write_bytes(b"OggS-fake-audio")
+        args = dict(CREATE_ARGS)
+        args["fields"] = {"Front": "广东 [sound:existing.ogg]", "Back": "Guangdong"}
+        manager.submit_create(args)
+        (proposal,) = pushes_of(pushed, "proposal")
+        preview = proposal["proposal"]["preview_media"]
+        self.assertEqual(len(preview), 1)
+        self.assertEqual(preview[0]["name"], "existing.ogg")
+        self.assertEqual(preview[0]["mime"], "audio/ogg")
+        self.assertTrue(preview[0]["src"].startswith("data:audio/ogg;base64,"))
+        # Reused media is NEVER imported on accept, so it stays out of `media`.
+        self.assertEqual(proposal["proposal"]["media"], [])
+
+    def test_preview_media_skips_staged_missing_and_non_audio(self) -> None:
+        manager, col, pushed = make_manager(media_staging=self.staging)
+        mediadir = self._col_media_dir(col)
+        (mediadir / "there.ogg").write_bytes(b"OggS-there")
+        (mediadir / "pic.png").write_bytes(b"PNGDATA")  # non-audio [sound:] -> no player
+        args = dict(CREATE_ARGS)
+        args["fields"] = {
+            "Front": "x [sound:nihao.mp3][sound:there.ogg][sound:missing.mp3][sound:pic.png]",
+            "Back": "b",
+        }
+        args["media"] = [{"path": str(self._audio()), "filename": "nihao.mp3"}]
+        manager.submit_create(args)
+        (proposal,) = pushes_of(pushed, "proposal")
+        names = [m["name"] for m in proposal["proposal"]["preview_media"]]
+        # nihao.mp3 is staged (its own strip), missing.mp3 is absent, pic.png
+        # is not audio -> only there.ogg resolves.
+        self.assertEqual(names, ["there.ogg"])
+
+    def test_preview_media_rejects_path_traversal_names(self) -> None:
+        manager, col, pushed = make_manager()
+        self._col_media_dir(col)  # sets col.media.dir()
+        (self.base / "secret.ogg").write_bytes(b"OggS-secret")  # a sibling of the media dir
+        args = dict(CREATE_ARGS)
+        args["fields"] = {"Front": "x [sound:../secret.ogg]", "Back": "b"}
+        manager.submit_create(args)
+        (proposal,) = pushes_of(pushed, "proposal")
+        self.assertEqual(proposal["proposal"]["preview_media"], [])
+
 
 class CreateFlowTests(unittest.TestCase):
     def test_submit_then_accept_creates_tagged_note(self) -> None:

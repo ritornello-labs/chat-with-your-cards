@@ -120,6 +120,12 @@ class Proposal:
     # dir until accept (imported via col.media.add_file) or reject/supersede
     # (discarded). create-kind only for now.
     media: list[dict[str, Any]] = field(default_factory=list)
+    # Preview-only audio: [sound:...] markers in `fields` that resolve to media
+    # ALREADY in the collection, rendered as playable data: URIs so the review
+    # card can replay them (same player strip as `media`). Distinct from
+    # `media` because these are never imported on accept - they already live in
+    # collection.media - so _import_staged_media must not touch them.
+    preview_media: list[dict[str, Any]] = field(default_factory=list)
 
     def operation_digest(self) -> str:
         operation = {
@@ -164,6 +170,7 @@ class Proposal:
             "count": self.count,
             "samples": self.samples,
             "media": self.media,
+            "preview_media": self.preview_media,
             "items": [
                 {
                     "note_id": item["note_id"],
@@ -415,6 +422,7 @@ class ProposalManager:
                 raise ProposalError(f"first field {first_name!r} must not be empty")
             proposal.fields = {name: fields.get(name, "") for name in field_names}
             proposal.previews = self._render_create_preview(col, model, proposal)
+            self._attach_preview_media(col, proposal)
             proposal.revision += 1
         except ProposalError as exc:
             self._push({"type": "proposal_error", "id": proposal.id, "message": str(exc)})
@@ -481,6 +489,7 @@ class ProposalManager:
         if media_items:
             self._stage_media(proposal, media_items)
         proposal.previews = self._render_create_preview(col, model, proposal)
+        self._attach_preview_media(col, proposal)
 
         if self._trusted_enabled() and self._budget_take(1):
             note_id = self._apply_create(col, model, proposal)
@@ -2752,6 +2761,62 @@ class ProposalManager:
                     "field ([sound:...] marker missing) - it would be imported "
                     "but never played"
                 )
+
+    def _attach_preview_media(self, col: Any, proposal: Proposal) -> None:
+        """Resolve [sound:...] markers pointing at media ALREADY in the
+        collection into playable data: URIs for the review card's player
+        strip. Preview-only and best-effort: skips anything not present, not
+        audio, oversized, or already covered by a staged attachment (which has
+        its own strip entry). Never imported on accept - these files already
+        live in collection.media - so they stay out of `proposal.media`."""
+        import base64
+        import os
+        from pathlib import Path
+
+        from .media_staging import (
+            AUDIO_MIME_BY_EXT,
+            MAX_MEDIA_FILE_BYTES,
+            _FILENAME_RE,
+            sound_markers,
+        )
+
+        proposal.preview_media = []
+        media = getattr(col, "media", None)
+        if media is None:
+            return
+        try:
+            media_dir = Path(media.dir())
+        except Exception:
+            return
+        staged_names = {str(entry.get("name", "")).lower() for entry in proposal.media}
+        for name in sorted(sound_markers(proposal.fields)):
+            if name.lower() in staged_names:
+                continue  # the staged-media strip already plays this one
+            if not _FILENAME_RE.match(name):
+                continue  # separators/brackets - not a bare media filename
+            mime = AUDIO_MIME_BY_EXT.get(os.path.splitext(name)[1].lower())
+            if mime is None:
+                continue  # non-audio [sound:] (unusual) - no player for it
+            path = media_dir / name
+            try:
+                if not path.is_file():
+                    continue
+                size = path.stat().st_size
+                if size == 0 or size > MAX_MEDIA_FILE_BYTES:
+                    continue
+                data = base64.b64encode(path.read_bytes()).decode("ascii")
+            except OSError:
+                continue
+            proposal.preview_media.append(
+                {
+                    "id": f"pv-{hashlib.sha256(name.encode()).hexdigest()[:8]}",
+                    "kind": "audio",
+                    "name": name,
+                    "mime": mime,
+                    "bytes": size,
+                    "src": f"data:{mime};base64,{data}",
+                }
+            )
 
     def _import_staged_media(self, col: Any, proposal: Proposal) -> None:
         """On accept: import staged files through col.media.add_file (Anki's

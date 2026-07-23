@@ -1,23 +1,30 @@
 import type { InteractionPresentation, MediaAttachment } from "@elvis-labs/interaction-schema";
 import type { ProposalPayload } from "./events";
 
+function isAudioDataAttachment(item: unknown): item is MediaAttachment {
+  return (
+    !!item &&
+    typeof item === "object" &&
+    (item as { kind?: unknown }).kind === "audio" &&
+    typeof (item as { src?: unknown }).src === "string" &&
+    (item as { src: string }).src.startsWith("data:")
+  );
+}
+
 /**
- * Staged audio riding the proposal payload (proposals.py Proposal.media,
- * task #21) -> schema-1.1 MediaAttachment. Python already emits the exact
- * shape; this filter is belt-and-braces (the schema validator and renderer
- * both re-check), keeping non-data: src out at the first trusted layer.
+ * Audio riding the proposal payload -> schema-1.1 MediaAttachment[]. Two
+ * sources, both drawn as the same player strip: `media` (task #21, newly
+ * staged files awaiting import) and `preview_media` (task #25, [sound:...]
+ * refs to media already in the collection, resolved to data: URIs so reused
+ * audio is replayable too). Python emits the exact shape; this filter is
+ * belt-and-braces (the schema validator and renderer both re-check), keeping
+ * non-data: src out at the first trusted layer.
  */
 function mediaAttachments(proposal: ProposalPayload): MediaAttachment[] {
-  const media = (proposal as { media?: unknown }).media;
-  if (!Array.isArray(media)) return [];
-  return media.filter(
-    (item): item is MediaAttachment =>
-      !!item &&
-      typeof item === "object" &&
-      (item as { kind?: unknown }).kind === "audio" &&
-      typeof (item as { src?: unknown }).src === "string" &&
-      (item as { src: string }).src.startsWith("data:")
-  );
+  const staged = (proposal as { media?: unknown }).media;
+  const preview = (proposal as { preview_media?: unknown }).preview_media;
+  const all = [...(Array.isArray(staged) ? staged : []), ...(Array.isArray(preview) ? preview : [])];
+  return all.filter(isAudioDataAttachment);
 }
 
 /**
@@ -88,9 +95,11 @@ export function createProposalInteraction(proposal: ProposalPayload): Interactio
     summary: proposal.rationale,
     badge: BADGES[proposal.status] ?? { label: "Failed", tone: "negative" },
     blocks,
+    // No "revise"/Edit action: the renderer is click-to-edit (click a field
+    // to edit it in place; a Save action appears once the draft diverges),
+    // so an explicit Edit button would be dead chrome.
     actions: pending
       ? [
-          { id: "revise", intent: "revise", label: "Edit" },
           { id: "reject", intent: "reject", label: "Reject" },
           { id: "approve", intent: "approve", label: "Add note" },
         ]

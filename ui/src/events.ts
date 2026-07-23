@@ -93,6 +93,18 @@ export interface ProposalPayload {
     bytes?: number;
     final_name?: string;
   }[];
+  /** Preview-only audio (proposals.py Proposal.preview_media): [sound:...]
+   *  markers resolving to media ALREADY in the collection, as data: URIs for
+   *  the same player strip. Never imported on accept (already in the
+   *  collection), so it carries no final_name. */
+  preview_media?: {
+    id: string;
+    kind: string;
+    name: string;
+    mime: string;
+    src: string;
+    bytes?: number;
+  }[];
   items: unknown[];
   open: boolean;
 }

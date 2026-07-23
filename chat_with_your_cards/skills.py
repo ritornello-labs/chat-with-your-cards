@@ -42,7 +42,14 @@ def materialize_conventions_skill(user_files: Path, prompt: str) -> str | None:
     return text
 
 
-def materialize_conventions_agent_skill(agent_home: Path, text: str | None) -> Path | None:
+CONVENTIONS_STUB_BODY = """\
+No user-specific note conventions are configured yet. Follow the defaults in
+the `anki-card-authoring` skill. When the user states a durable
+card-authoring preference, it can be captured here.
+"""
+
+
+def materialize_conventions_agent_skill(agent_home: Path, text: str | None) -> Path:
     """Mirror the resolved conventions text into the agent-home skills dir
     (same directory `materialize_agent_skills` seeds) so the harness
     auto-discovers it like any other skill, instead of it being inlined
@@ -54,17 +61,19 @@ def materialize_conventions_agent_skill(agent_home: Path, text: str | None) -> P
     run: unlike the anki-card-authoring template, this file's source of
     truth is user_files/ (or the config), not something the user is
     expected to hand-edit inside agent_home directly.
+
+    The `note-conventions` slug must always resolve for the harness's Skill
+    tool, even when nothing is configured - an unlinked file made the agent
+    burn a tool call on "Unknown skill: note-conventions". So when `text` is
+    empty/blank we still write a valid SKILL.md, just with a stub body
+    pointing the agent at the `anki-card-authoring` defaults instead of the
+    real conventions; the file always reflects current conventions state
+    (real body when configured, stub when not), so the slug never dangles.
     """
     skill_path = agent_home / ".claude" / "skills" / "note-conventions" / "SKILL.md"
-    if not text or not text.strip():
-        if skill_path.exists():
-            try:
-                skill_path.unlink()
-            except OSError:
-                pass
-        return None
+    body = text.strip() if text and text.strip() else CONVENTIONS_STUB_BODY
     skill_path.parent.mkdir(parents=True, exist_ok=True)
-    skill_path.write_text(SKILL_HEADER + text.strip() + "\n", encoding="utf-8")
+    skill_path.write_text(SKILL_HEADER + body + "\n", encoding="utf-8")
     return skill_path
 
 

@@ -103,16 +103,40 @@ class MaterializeConventionsAgentSkillTest(unittest.TestCase):
         # so a card-writing task actually triggers it.
         self.assertIn("propose_note", body.split("---", 2)[1])
 
-    def test_none_or_blank_text_writes_nothing(self) -> None:
-        self.assertIsNone(materialize_conventions_agent_skill(self.agent_home, None))
-        self.assertIsNone(materialize_conventions_agent_skill(self.agent_home, "   "))
-        self.assertFalse(self._skill_path().exists())
+    def test_none_or_blank_text_writes_a_stub(self) -> None:
+        # The `note-conventions` slug must always resolve for the harness's
+        # Skill tool - an unlinked file used to make the agent burn a tool
+        # call on "Unknown skill: note-conventions". With nothing configured
+        # it now gets a stub body pointing at the default card-authoring
+        # skill instead.
+        for path in (
+            materialize_conventions_agent_skill(self.agent_home, None),
+            materialize_conventions_agent_skill(self.agent_home, "   "),
+        ):
+            self.assertEqual(path, self._skill_path())
+            self.assertTrue(self._skill_path().exists())
+            body = self._skill_path().read_text(encoding="utf-8")
+            self.assertTrue(body.startswith("---\nname: note-conventions\n"))
+            self.assertIn("No user-specific note conventions are configured yet", body)
+            self.assertIn("anki-card-authoring", body)
 
-    def test_clears_stale_skill_when_conventions_removed(self) -> None:
-        materialize_conventions_agent_skill(self.agent_home, "Keep answers short.")
-        self.assertTrue(self._skill_path().exists())
+    def test_replaces_stub_with_real_body_and_back(self) -> None:
+        # The file always reflects current conventions state: real body when
+        # configured, stub when removed again - never unlinked either way.
         materialize_conventions_agent_skill(self.agent_home, None)
-        self.assertFalse(self._skill_path().exists())
+        stub_body = self._skill_path().read_text(encoding="utf-8")
+        self.assertIn("No user-specific note conventions are configured yet", stub_body)
+
+        materialize_conventions_agent_skill(self.agent_home, "Keep answers short.")
+        real_body = self._skill_path().read_text(encoding="utf-8")
+        self.assertIn("Keep answers short.", real_body)
+        self.assertNotIn("No user-specific note conventions are configured yet", real_body)
+
+        materialize_conventions_agent_skill(self.agent_home, None)
+        cleared_body = self._skill_path().read_text(encoding="utf-8")
+        self.assertIn("No user-specific note conventions are configured yet", cleared_body)
+        self.assertNotIn("Keep answers short.", cleared_body)
+        self.assertTrue(self._skill_path().exists())
 
     def test_regenerated_each_call_unlike_the_card_authoring_template(self) -> None:
         materialize_conventions_agent_skill(self.agent_home, "First version.")
@@ -151,14 +175,20 @@ class LoadConventionsIntegrationTest(unittest.TestCase):
         text = load_conventions(self.user_files, "")
         self.assertEqual(text, "Old preference text.")
         path = materialize_conventions_agent_skill(self.agent_home, text)
-        self.assertIsNotNone(path)
-        assert path is not None
         self.assertIn("Old preference text.", path.read_text(encoding="utf-8"))
 
-    def test_no_conventions_configured_mirrors_nothing(self) -> None:
+    def test_no_conventions_configured_mirrors_a_stub(self) -> None:
+        # No config prompt and no prior user_files/ source of truth: the
+        # slug must still resolve, so the agent-home file gets the stub
+        # instead of being left unlinked.
         text = load_conventions(self.user_files, "")
         self.assertIsNone(text)
-        self.assertIsNone(materialize_conventions_agent_skill(self.agent_home, text))
+        path = materialize_conventions_agent_skill(self.agent_home, text)
+        self.assertTrue(path.exists())
+        self.assertIn(
+            "No user-specific note conventions are configured yet",
+            path.read_text(encoding="utf-8"),
+        )
 
 
 class MaterializeAgentSkillsTest(unittest.TestCase):

@@ -1984,7 +1984,8 @@ def _run_checks() -> dict[str, Any]:
             "    status: (p.querySelector('.eui-status') || {}).textContent,"
             "    fields: p.querySelectorAll('.eui-field').length,"
             "    approve: p.querySelectorAll('[data-action-id=approve]').length,"
-            "    edit: p.querySelectorAll('[data-action-id=revise]').length,"
+            "    edit_button: p.querySelectorAll('[data-action-id=revise]').length,"
+            "    editable_fields: p.querySelectorAll('.eui-field-value-editable').length,"
             "    reject: p.querySelectorAll('[data-action-id=reject]').length,"
             "    preview_tabs: p.querySelectorAll('.cwyc-preview-tab').length"
             "  };"
@@ -1996,8 +1997,14 @@ def _run_checks() -> dict[str, Any]:
             raise AssertionError(f"proposal card malformed: {card}")
         if card["status"] != "Pending review":
             raise AssertionError(f"unexpected pending badge: {card}")
-        if card["edit"] != 1 or card["reject"] != 1:
-            raise AssertionError(f"proposal card missing edit/reject controls: {card}")
+        if card["reject"] != 1:
+            raise AssertionError(f"proposal card missing reject control: {card}")
+        # Click-to-edit, not a separate Edit button: no revise action, and each
+        # field value is its own editable button (task #27).
+        if card["edit_button"] != 0:
+            raise AssertionError(f"unexpected Edit button (should be click-to-edit): {card}")
+        if card["editable_fields"] < 2:
+            raise AssertionError(f"click-to-edit field buttons missing: {card}")
         if card["preview_tabs"] != 2:
             raise AssertionError(f"expected Front/Back preview tabs: {card}")
 
@@ -2155,6 +2162,68 @@ def _run_checks() -> dict[str, Any]:
 
     check("proposal media: staged wav -> player strip -> collection.media",
           _proposal_media_round_trip)
+
+    def _existing_media_preview() -> dict[str, Any]:
+        """Task #25 in real Anki: a proposal that only REFERENCES media
+        already in the collection ([sound:cwyc-probe-tone.wav], imported by
+        the round-trip check above) - with NO staged attachment - still shows
+        a playable strip. _attach_preview_media reads the real col.media dir
+        into a data: URI and QtWebEngine must decode it (duration > 0)."""
+        if not mw.col.media.have("cwyc-probe-tone.wav"):
+            raise AssertionError("precondition: tone not in collection.media")
+        result = state.proposals.submit_create(
+            {
+                "note_type": "Basic",
+                "deck": "Default",
+                "fields": {
+                    "Front": "reuse existing [sound:cwyc-probe-tone.wav]",
+                    "Back": "plays the imported tone",
+                },
+                "rationale": "gui-smoke existing-media preview",
+            }
+        )
+        if result.get("status") != "pending_user_review":
+            raise AssertionError(f"existing-media proposal did not stage: {result}")
+
+        def _strip() -> Any:
+            return _eval_js(
+                dock.web,
+                "(function() {"
+                "  var cards = document.querySelectorAll('[data-testid=interaction-card]');"
+                "  var p = cards[cards.length - 1];"
+                "  if (!p) return null;"
+                "  var a = p.querySelector('.eui-media audio');"
+                "  if (!a) return {audio: 0};"
+                "  return {audio: 1, src: (a.getAttribute('src') || '').slice(0, 15),"
+                "          duration: a.duration || 0, label: a.getAttribute('aria-label')};"
+                "})();",
+                DOM_TIMEOUT_MS,
+                "existing-media strip state",
+            )
+
+        def _decodable() -> bool:
+            s = _strip()
+            return bool(s and s.get("audio") and s.get("duration", 0) > 0)
+
+        _wait_until(_decodable, STREAM_TIMEOUT_MS, "existing-media strip with decodable audio")
+        strip = _strip()
+        if not str(strip.get("src", "")).startswith("data:audio/"):
+            raise AssertionError(f"existing-media player src not a data: URI: {strip}")
+        if strip.get("label") != "cwyc-probe-tone.wav":
+            raise AssertionError(f"existing-media label wrong: {strip}")
+        _eval_js(
+            dock.web,
+            "(function() {"
+            "  var cards = document.querySelectorAll('[data-testid=interaction-card]');"
+            "  cards[cards.length - 1].querySelector('[data-action-id=reject]').click();"
+            "  return true; })();",
+            DOM_TIMEOUT_MS,
+            "existing-media proposal reject click",
+        )
+        return {"strip": strip}
+
+    check("proposal media: existing [sound:] ref -> preview strip (task #25)",
+          _existing_media_preview)
 
     def _hover_geometry_stable() -> dict[str, Any]:
         """Hovering a header button must change ONLY its background - never

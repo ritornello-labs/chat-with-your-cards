@@ -309,6 +309,62 @@ surfaced that `media_staging.py` was never added to the workbench
 crashed on init until 2026-07-18 — now covered by the media round-trip
 check.)
 
+**Preview/review dogfood round (2026-07-23).** A live test surfaced three
+issues, all fixed: (1) **existing-media audio had no player** — a proposal
+that *reuses* a `[sound:foo]` already in the collection (rather than staging
+a new file) rendered only Anki's inert `[anki:play:q:0]` token in the
+script-less preview iframe, never playable. Fixed by `_attach_preview_media`
+(task #25): at preview time the resolver reads each `[sound:...]` that
+resolves inside `col.media.dir()` into a `data:` URI on a new preview-only
+`Proposal.preview_media`, which the adapter merges into the same `.eui-media`
+strip as staged audio. It is kept *separate* from `Proposal.media` precisely
+so accept-time import never touches it (the file is already in the
+collection). Path-traversal-guarded (bare filenames only), audio-only,
+size-capped, and it skips anything a staged attachment already covers. (2)
+**preview horizontal scroll was dead** — the before/after card sat in a 3D
+CSS flip (`perspective`/`preserve-3d`/`rotateY`), and a nested `<iframe>`
+inside a 3D-transformed subtree has its wheel/drag events swallowed by the
+compositor, so a wide map's scrollbar painted but wouldn't move. Fixed by
+replacing the flip with a 2D opacity crossfade (task #24) — same tab UX,
+scroll restored. (3) **the Edit button was friction** — editing meant
+clicking Edit to enter a global mode that turned every field into a
+textarea. Replaced with **click-to-edit** (task #27, upstream
+`interaction-ui-react` 0.4.0): each field value is a button that swaps to a
+textarea in place on click, and a Save/Discard footer appears only once the
+draft diverges (the "revise"-intent action is no longer rendered). The
+before/after diff still shows until a field is opened.
+
+**Composer attachments & multimodal input (task #28, SPEC — not built).**
+Two distinct capabilities the user asked for, deliberately separated because
+they touch different layers:
+
+- **(a) Attach media for cards** — the *input* side of task #21. Today the
+  agent must *find* or *generate* an audio file; instead the user should
+  paste / drag-drop / pick a file in the composer, CWYC stages it (reusing
+  `media_staging.py`'s validation + per-message staging dir), and exposes its
+  path to the agent so `propose_note`'s `media` arg can reference it. Scope:
+  composer attach affordance (button + paste + drag-drop), a staging bucket
+  keyed to the message rather than a proposal, and a tool/context surface
+  that lists "files the user attached this turn". Audio first (matches task
+  #21); images already flow inline as `data:` in fields.
+- **(b) Attach images/PDFs as agent CONTEXT** — the user instructs the agent
+  *about* an image or document (as in this very chat), not to put it on a
+  card. This is multimodal input to the CLI: `claude -p --input-format
+  stream-json` accepts image content blocks (base64), so an attached image
+  becomes a content block on the user turn. PDFs are the open question — the
+  CLI's support for document content blocks needs verifying; the fallback is
+  to stage the PDF to a path and let the agent read it (agent-tools mode) or
+  run a text-extraction pass. Prior art: `get_card_images` already returns
+  collection images to the model as MCP image content blocks (§tools), so the
+  content-block plumbing is partly proven — this extends the *source* from
+  "media already on a card" to "a file the user just attached".
+
+Open questions for #28: message-scoped vs proposal-scoped staging lifecycle;
+whether (a) and (b) share one attach affordance with a type/intent hint or
+are distinct controls; CLI stream-json document-block support for PDFs; size
+budgets vs the existing 8 MB inline cap; and how attachments interact with
+`--resume` (do they persist across turns or are they one-shot per message).
+
 **Editing proposals — the review UX is a flagship surface.** The bar is "Cursor-grade amazing", but the right interface differs because the artifact is a flashcard, not code:
 
 - **Field-level diffs on rendered text**: word-level inline highlights (deletions struck through, insertions marked) per field — not line-based code diffs. Unchanged fields collapsed.
