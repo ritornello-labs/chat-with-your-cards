@@ -15,6 +15,12 @@ from .registry import ToolContext, ToolRegistry, ToolSpec
 SNIPPET_CHARS = 120
 DEFAULT_SEARCH_LIMIT = 20
 MAX_SEARCH_LIMIT = 100
+# Card templates / note-type CSS are returned VERBATIM (not stripped): the
+# agent needs the real markup to diagnose rendering - an <iframe src=...>,
+# a conditional section, a CSS rule. Generous per-string cap so a pathological
+# note type can't flood the context, and truncation is always announced (a
+# silent cut would hide the very line being debugged).
+MAX_TEMPLATE_CHARS = 20_000
 
 _TAG_STRIP = re.compile(r"<[^>]+>")
 
@@ -150,6 +156,17 @@ def list_note_types(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     return {"note_types": models}
 
 
+def _template_source(text: str) -> str:
+    """Card-template / CSS source, verbatim but bounded."""
+    text = str(text or "")
+    if len(text) <= MAX_TEMPLATE_CHARS:
+        return text
+    return text[:MAX_TEMPLATE_CHARS] + (
+        f"\n<!-- TRUNCATED by chat-with-your-cards: {len(text) - MAX_TEMPLATE_CHARS} "
+        "more characters; open the note type in Anki to see the rest -->"
+    )
+
+
 def get_note_type(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     model = ctx.col.models.by_name(str(args["name"]))
     if model is None:
@@ -157,7 +174,20 @@ def get_note_type(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     return {
         "name": model["name"],
         "fields": [f["name"] for f in model["flds"]],
-        "templates": [t["name"] for t in model["tmpls"]],
+        # Full front/back template source + the note type's CSS. Without these
+        # the agent is blind to how a note actually RENDERS: it could see the
+        # fields but not the <iframe src="{{Wikipedia}}"> using them, so it
+        # could not diagnose a rendering bug and had to ask the user to paste
+        # the template (dogfood 2026-07-23).
+        "templates": [
+            {
+                "name": t["name"],
+                "qfmt": _template_source(t.get("qfmt", "")),
+                "afmt": _template_source(t.get("afmt", "")),
+            }
+            for t in model["tmpls"]
+        ],
+        "css": _template_source(model.get("css", "")),
     }
 
 
@@ -306,7 +336,10 @@ def build_registry() -> ToolRegistry:
         ),
         ToolSpec(
             "get_note_type",
-            "Field names and card template names for one note type.",
+            "One note type's field names, its card templates INCLUDING the full "
+            "front/back template source (qfmt/afmt), and the note-type CSS. Use "
+            "this to see how a card actually renders - conditional sections, "
+            "embedded <iframe>/<img>, styling - not just which fields exist.",
             {
                 "type": "object",
                 "properties": {"name": {"type": "string"}},

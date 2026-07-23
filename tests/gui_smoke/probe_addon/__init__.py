@@ -670,6 +670,30 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
 
     check("get_card_images against real media dir", _card_images)
 
+    def _note_type_templates() -> dict[str, Any]:
+        """get_note_type must return the REAL template source from Anki's own
+        model dict (qfmt/afmt/css), not just names - otherwise the agent cannot
+        see how a card renders and reports that an <iframe> in the template
+        does not exist (dogfood 2026-07-23). Verifies the keys exist on a real
+        25.09 note type, which only real Anki can prove."""
+        addon = importlib.import_module(ADDON_PACKAGE)
+        from chat_with_your_cards.tools import build_registry
+
+        result = build_registry().call(addon._ToolCtx(), "get_note_type", {"name": "Basic"})
+        templates = result.get("templates") or []
+        if not templates or not isinstance(templates[0], dict):
+            raise AssertionError(f"templates are not objects: {result}")
+        first = templates[0]
+        if "qfmt" not in first or "afmt" not in first:
+            raise AssertionError(f"template source missing: {first}")
+        if "{{" not in str(first["qfmt"]):
+            raise AssertionError(f"qfmt does not look like template source: {first}")
+        if "css" not in result:
+            raise AssertionError(f"note-type css missing: {list(result)}")
+        return {"template": first["name"], "qfmt_chars": len(str(first["qfmt"]))}
+
+    check("get_note_type returns real template source", _note_type_templates)
+
     def _learning_flow() -> dict[str, Any]:
         # The edit-pattern learning loop end-to-end on the real collection:
         # accept-time diff -> snapshot -> direct col edit found by scan (real

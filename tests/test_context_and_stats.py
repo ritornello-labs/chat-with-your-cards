@@ -201,6 +201,68 @@ class OverviewToolTest(unittest.TestCase):
         self.assertFalse(result["available"])
 
 
+class GetNoteTypeTemplatesTest(unittest.TestCase):
+    """get_note_type must expose the real template source. It used to return
+    only NAMES, which left the agent blind to how a card renders: asked why an
+    embedded iframe showed "Invalid path", it could see the fields but not the
+    <iframe src="{{Wikipedia}}"> using them, so it reported no iframe existed
+    and had to ask the user to paste the template (dogfood 2026-07-23)."""
+
+    AFMT = '{{#Wikipedia}}\n<iframe src="{{Wikipedia}}" style="height: 100vh;"></iframe>\n{{/Wikipedia}}'
+
+    class _Ctx:
+        def __init__(self, model: dict | None) -> None:
+            outer = self
+
+            class _Models:
+                def by_name(self, name: str) -> dict | None:
+                    return outer._model
+
+            class _Col:
+                models = _Models()
+
+            self._model = model
+            self.col = _Col()
+
+    def _model(self, afmt: str | None = None, css: str = ".card { color: black; }") -> dict:
+        return {
+            "name": "River",
+            "flds": [{"name": "Name"}, {"name": "Wikipedia"}],
+            "tmpls": [
+                {"name": "Card 1", "qfmt": "{{Name}}", "afmt": afmt if afmt is not None else self.AFMT}
+            ],
+            "css": css,
+        }
+
+    def test_returns_full_template_source_and_css(self) -> None:
+        from chat_with_your_cards.tools.collection import get_note_type
+
+        result = get_note_type(self._Ctx(self._model()), {"name": "River"})
+        self.assertEqual(result["fields"], ["Name", "Wikipedia"])
+        (template,) = result["templates"]
+        self.assertEqual(template["name"], "Card 1")
+        self.assertEqual(template["qfmt"], "{{Name}}")
+        # The whole point: the iframe is visible in the returned source.
+        self.assertIn("<iframe", template["afmt"])
+        self.assertIn('src="{{Wikipedia}}"', template["afmt"])
+        self.assertIn("color: black", result["css"])
+
+    def test_oversized_template_truncation_is_announced(self) -> None:
+        from chat_with_your_cards.tools.collection import MAX_TEMPLATE_CHARS, get_note_type
+
+        huge = "x" * (MAX_TEMPLATE_CHARS + 500)
+        result = get_note_type(self._Ctx(self._model(afmt=huge)), {"name": "River"})
+        afmt = result["templates"][0]["afmt"]
+        self.assertIn("TRUNCATED", afmt)
+        self.assertIn("500 more characters", afmt)
+
+    def test_missing_note_type_is_an_error(self) -> None:
+        from chat_with_your_cards.tools.collection import get_note_type
+
+        with self.assertRaises(ValueError):
+            get_note_type(self._Ctx(None), {"name": "Nope"})
+
+
 class OverviewSerializerTest(unittest.TestCase):
     def test_small_collection_fully_included(self) -> None:
         text = serialize_overview(_stats(), budget_tokens=8000)

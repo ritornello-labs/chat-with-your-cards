@@ -128,7 +128,7 @@ Read (default-allowed):
 - `get_note(id)` / `get_card(id)` — full fields, tags, deck, model, scheduling.
 - `deck_tree(prefix?)`, `tag_tree(prefix?)` — drill into the annotated hierarchies beyond the overview budget.
 - `collection_stats(scope)` — cached stats; deck- or tag-scoped.
-- `list_note_types()` / `get_note_type(name)` — fields, templates (for convention-following).
+- `list_note_types()` / `get_note_type(name)` — field names plus each card template's **full source** (`qfmt`/`afmt`) and the note-type **CSS**, so the agent can follow conventions *and* see how a card actually renders (conditional sections, embedded `<iframe>`/`<img>`, styling). Source is returned verbatim but capped at 20k chars per string, with truncation announced inline.
 - `find_related(card_id, strategy?)` — convenience wrapper that applies the clue heuristics (prefix/tags/deck/keywords) and merges results.
 - `get_card_images(card_id?|note_id?)` — returns the card's embedded images as **MCP image content blocks** (base64 from `collection.media`, capped count/size, local files only — remote/`data:` sources skipped), so the model actually sees the picture rather than the `<img src>` filename. The current-card context block flags when a card has images and points the agent here. Audio is deliberately out of scope: the model cannot ingest audio, so a `[sound:...]` reference would need a transcription step. The MCP server passes a tool result straight through when it is already a list of content blocks, else wraps it as one text block.
 
@@ -354,6 +354,22 @@ instead of dying on `.items()`, and errors clearly on anything else. Note the
 comparison itself was never the problem: `submit_edit` compares **raw** field
 strings, so markup-only edits (same visible text, different HTML) always
 counted as changes — now covered by a regression test.
+
+**Template blindness (task #30, 2026-07-23).** Asked why an embedded iframe
+rendered "Invalid path", the agent answered that the card had no iframe at
+all — and was *honest but blind*: `get_note_type` returned only field names
+and template **names**, and no other tool exposed `qfmt`/`afmt`/`css`, so the
+template source was unreachable. It said so explicitly, correctly guessed the
+iframe must live in the template, and asked the user to paste it. The gap was
+a scope artifact: the tool was designed for *note authoring* ("match the
+user's existing style"), never for *template debugging* — but as CWYC is
+increasingly asked "fix my card", anything about how a note **renders** was
+invisible. `get_note_type` now returns each template's full `qfmt`/`afmt` plus
+the note-type CSS, verbatim, capped at 20k chars per string with truncation
+announced inline (a silent cut would hide the very line being debugged). The
+tool description tells the agent it can now inspect rendering. Note this is a
+read-only widening: templates are still never written by the agent — note-type
+edits remain outside the proposal flow's scope.
 
 **Composer attachments & multimodal input (task #28, SPEC — not built).**
 Two distinct capabilities the user asked for, deliberately separated because
