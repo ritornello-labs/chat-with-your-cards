@@ -327,23 +327,64 @@ an OS set to dark falls back to the OS signal, since Anki has no equivalent
 "day-mode" class to detect that case explicitly - not solvable from CSS
 alone without a real signal from Python, and out of scope for this pass.
 
-Not ported from `app.js` (intentionally out of scope for this scaffold -
-restyle-later or integration-later, not forgotten):
+Not ported from `app.js`. **Re-audited 2026-07-23** — the previous version of
+this list was both stale (several items had since shipped) and, more
+importantly, *incomplete*: it omitted every item marked ⚠ below, including a
+permission mode that hangs. Treat this as the record, and keep it honest — a
+missing entry here is how the word-level diff stayed unimplemented for a year
+while this file claimed it was a known gap.
 
-- The word-level diff view on edit-proposal fields (whole-field old/new
-  blocks render red/green instead)
-- Friendly tool-name labels + hiding internal tools (`search_notes` ->
-  "Searched your cards", `ToolSearch` hidden) - every tool call renders
-  generically here
-- Everything outside the core thread: pins panel, agent/model picker,
-  permission-mode chip, doctor panel, chat history panel, ledger strip,
-  bulk accept/reject bar, learning nudge, suggested-questions ghost text,
-  keyboard shortcuts (Cmd+Enter to accept, Shift+Tab to cycle mode, etc.)
-- Bulk/delete/change_set/deck_op/skill_update proposal kinds render (kind
-  badge, rationale, warnings, count, Accept/Reject) but without their
-  kind-specific body (no diff samples, no change-set item list, no skill
-  diff view) - only `create`/`edit` get field-level editing, matching the
-  task's explicit Approve/Edit/Reject scope
+**Since shipped** (were on this list, no longer gaps): word-level field diff
+(2026-07-23, now `wordDiff` from `@elvis-labs/interaction-ui-react`), pins
+panel, agent/model picker, permission-mode chip + Shift+Tab, doctor panel,
+chat history panel. Cmd+J / Cmd+Shift+J were not lost either — they moved to
+Qt shortcuts (`shortcuts.py`), which is the correct home.
+
+**⚠ Functional breakage (was never recorded here):**
+
+- `tool_approval` is never handled in `store.ts`, so the **"Ask each read"
+  permission mode hangs for 120s and then auto-denies** — Python blocks on
+  `approvals.py`'s `event.wait(120)` for a response the UI cannot send. It is
+  the first entry in the mode picker.
+- The **session ledger has no entry point at all** — Python still pushes
+  `ledger` events and binds `undo_session` / `open_session_browser`, but there
+  is no ledger strip and nothing on the Tools menu, so session-wide revert and
+  the Browser jump are unreachable.
+- **Per-proposal Revert / Re-add / Restore** are gone: the action row renders
+  only while `pending`, so a resolved card has no buttons, though the Python
+  handlers and the `revertible` flag on `proposal_resolved` both still exist.
+- **`proposal_supersede` is never sent**, so a proposal you discussed and moved
+  on from stays `pending` forever. (The old "Suggest change" button did this;
+  its CSS class was reused for the in-card Edit toggle and the supersede half
+  was dropped.)
+- **Tags are invisible on proposals** — `add_tags`/`remove_tags` reach the UI
+  types but nothing renders them, so a *tag-only edit proposal shows no visible
+  change at all*.
+- The **`open` flag is ignored**, so Accept is clickable on a change set that
+  is still collecting edits (Python rejects it, so it is a dead button rather
+  than data loss).
+- ⚠ **Accessibility**: the transcript lost its `aria-live="polite"`, and the
+  vendored assistant-ui primitives supply none, so streamed replies are not
+  announced.
+- ⚠ **Escape returns focus to the reviewer only in vim mode.** The old handler
+  was deliberately *capture-phase* to beat AnkiWebView's own bubble-phase
+  Escape → `pycmd("close")`; preserve that detail in any fix.
+
+**Known gaps, previously recorded and still open:**
+
+- Live preview-while-typing on **edit** proposals (`proposal_preview` /
+  `preview_update` are implemented in Python, unused by the UI).
+- Deck is read-only on a create proposal (was a `<select>`).
+- Friendly tool-name labels + hiding internal tools — every call still renders
+  its raw tool name.
+- Bulk accept/reject bar, learning nudge, suggested-questions ghost text,
+  context chip.
+- Proposal keyboard review: Cmd+Enter accept, Cmd+Backspace reject,
+  Cmd+Up/Down to cycle.
+- Bulk/delete/change_set/deck_op/skill_update kinds render the shared chrome
+  (kind badge, rationale, warnings, count, Accept/Reject) but not their
+  kind-specific body — no diff samples, change-set item list, or skill diff.
+  Only `create`/`edit` get field-level editing.
 
 ## Integration status
 
@@ -362,14 +403,13 @@ and **markdown rendering** (`marked` → DOMPurify, `src/markdown.ts` /
 `TextPart.tsx` — sanitized because model output is untrusted, streaming-safe
 because it re-renders on every delta).
 
-Still open (parity gaps with the old `app.js`, not blockers):
+Still open:
 
 - The CSS variable source stays this bundle's self-contained `--cwyc-*`
   variables (see "Design notes"); rewiring them to Anki's injected
   `--canvas`/`--fg`/`--border` for tighter chrome consistency is a possible
   future pass.
-- The word-level diff view on edit-proposal fields, friendly tool-name
-  labels / hiding internal tools, and everything outside the core thread
-  (pins panel, history, model/effort + permission pickers, doctor, ledger
-  strip, bulk bar, learning nudge, suggested-questions ghost text, extra
-  keyboard shortcuts) — see the "Not ported from `app.js`" list above.
+- Everything under "Not ported from `app.js`" above — re-audited 2026-07-23
+  and filed in the working backlog. Note that several of those are *not*
+  cosmetic parity: the `tool_approval` hang, the unreachable ledger/revert
+  path, and invisible proposal tags all affect correctness or safety.
