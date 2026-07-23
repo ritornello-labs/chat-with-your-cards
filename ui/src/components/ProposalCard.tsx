@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { InteractionCard } from "@elvis-labs/interaction-ui-react";
+import { InteractionCard, wordDiff } from "@elvis-labs/interaction-ui-react";
 import "@elvis-labs/interaction-ui-react/styles.css";
 import type { ChatStore, ProposalCardData } from "../store";
 import { createProposalInteraction } from "../interactionAdapter";
@@ -274,9 +274,23 @@ function LegacyProposalCard({ data, store }: ProposalCardProps) {
               ) : (
                 <div className="cwyc-field-value">
                   {data.kind === "edit" && field.old ? (
-                    <div className="cwyc-field-old">{field.old}</div>
-                  ) : null}
-                  <div className="cwyc-field-new">{values[field.name] ?? field.new}</div>
+                    // Word-level diff, same marks the shared renderer uses on
+                    // create cards: a one-word typo fix must not read as a
+                    // whole-field rewrite (dogfood 2026-07-23).
+                    <div className="cwyc-field-new eui-field-diff">
+                      {wordDiff(field.old, values[field.name] ?? field.new).map((part, i) => {
+                        if (part.op === "eq") return <span key={i}>{part.text}</span>;
+                        const Tag = part.op === "del" ? "del" : "ins";
+                        return (
+                          <Tag key={i} className={`eui-diff-${part.op}`}>
+                            {part.text}
+                          </Tag>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="cwyc-field-new">{values[field.name] ?? field.new}</div>
+                  )}
                 </div>
               )}
             </div>

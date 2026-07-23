@@ -1513,20 +1513,23 @@ body {
   gap: 3px;
 }
 
-/* Field diffs stay conventional green/red (desaturated). */
-.cwyc-field-old {
+/* Field diffs stay conventional green/red (desaturated). The marks are
+   rendered with the shared renderer's classes (both the interaction card and
+   the legacy edit card use wordDiff), but that package themes itself off
+   `prefers-color-scheme`, which NEVER fires inside Anki - night mode there is
+   a CLASS. Driving them from CWYC's own palette vars means they follow Anki's
+   theme in both directions; left un-themed, insertions rendered dark green on
+   a dark card and were unreadable (dogfood 2026-07-23). */
+#cwyc-root .eui-diff-del {
   color: var(--cwyc-red);
   background: var(--cwyc-red-soft);
-  text-decoration: line-through;
   border-radius: 4px;
-  padding: 2px 5px;
 }
 
-.cwyc-field-old + .cwyc-field-new {
+#cwyc-root .eui-diff-ins {
   color: var(--cwyc-green);
   background: var(--cwyc-green-soft);
   border-radius: 4px;
-  padding: 2px 5px;
 }
 
 .cwyc-field-input {

@@ -371,6 +371,45 @@ tool description tells the agent it can now inspect rendering. Note this is a
 read-only widening: templates are still never written by the agent — note-type
 edits remain outside the proposal flow's scope.
 
+**Template & note-type writing (task #33, SPEC — not built).** Today the agent
+can *read* card templates (#30) but never write them: proposal kinds cover
+notes, tags, decks and skills only, and note-type edits sit outside the
+proposal flow. The wanted capability is agent-proposed **card-template edits**
+and **new note types / card templates**. The gating decision is already made,
+and it is not to invent our own warning: every schema-changing operation goes
+through **Anki's own** `mw.confirm_schema_modification()` (`aqt/main.py`):
+
+```python
+def confirm_schema_modification(self) -> bool:
+    """If schema unmodified, ask user to confirm change.
+    True if confirmed or already modified."""
+    if self.col.schema_changed():
+        return True
+    return askUser(tr.qt_misc_the_requested_change_will_require_a())
+```
+
+Reusing it buys correctness for free: the identical full-upload warning, in
+the user's own language (it is Anki's translated string, not ours), and the
+identical semantics — including that it does **not** re-prompt once the schema
+is already dirty since the last sync, so it never nags. It is exactly what
+Anki's own dialogs use (`changenotetype.py`, `deckbrowser.py`, `deckconf.py`,
+`schema_change_tracker.py`). Below it, `col.mod_schema(check=True)` marks the
+schema modified and raises `AbortSchemaModification` if a `schema_will_change`
+hook declines. Feasibility is good: the modal must run on the main thread,
+which is where CWYC already marshals all collection work, and the natural
+trigger is the accept the user is already clicking.
+
+Open questions: which proposal kind(s) (one `note_type_op`, or split
+template-edit vs note-type-create); how to preview a *template* change (the
+existing card preview renders a note through its templates, so a template diff
+could render the same note before/after — reusing `wordDiff` for the source
+diff); whether template writes are gated behind a stricter permission tier
+than note writes, given a bad template breaks every card of that type at once;
+undo/ledger semantics (schema changes are not covered by the note-level
+ledger, and a full sync cannot be undone); and whether creating a note type
+should clone an existing one (Anki's own "Add: Basic" flow) rather than
+building from scratch.
+
 **Composer attachments & multimodal input (task #28, SPEC — not built).**
 Two distinct capabilities the user asked for, deliberately separated because
 they touch different layers:
@@ -404,7 +443,7 @@ budgets vs the existing 8 MB inline cap; and how attachments interact with
 
 **Editing proposals — the review UX is a flagship surface.** The bar is "Cursor-grade amazing", but the right interface differs because the artifact is a flashcard, not code:
 
-- **Field-level diffs on rendered text**: word-level inline highlights (deletions struck through, insertions marked) per field — not line-based code diffs. Unchanged fields collapsed.
+- **Field-level diffs on rendered text**: word-level inline highlights (deletions struck through, insertions marked) per field — not line-based code diffs. **Shipped 2026-07-23** (task #31): an LCS-over-word-tokens diff lives in `interaction-ui-react` (`wordDiff`, exported so a host rendering its own field UI gets the same marks) and drives both the shared interaction card and CWYC's legacy edit card. Whitespace rides with each token so joining the ops reproduces the input exactly, comparison is on the trimmed token, and fields big enough to blow the DP table (>250k cells) fall back to a whole-value del/ins pair. This had been promised here since the classic UI was deleted (`23f94fa`) while the React card only ever rendered whole-value before/after, so a one-character typo fix read as a full rewrite (dogfood). Still **not** done: "unchanged fields collapsed".
 - **Live card preview, before/after**: the proposal renders the note through its *actual card templates* — a toggle (or side-by-side, width permitting) between current card and card-as-it-would-become. Seeing the real card is the flashcard equivalent of Cursor showing the real file, and it's the detail most likely to make the UX feel magical.
 - **Granular acceptance**: per-field accept/reject plus accept-all, like Cursor's per-hunk controls.
 - **Keyboard-first**: when a proposal has focus — `Cmd+Enter` accept, `Cmd+Backspace` reject, `Tab`/arrows move between fields/proposals. Multiple pending proposals form a queue navigable without the mouse.
