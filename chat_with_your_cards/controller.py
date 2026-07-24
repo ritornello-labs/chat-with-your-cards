@@ -75,6 +75,7 @@ class ChatController:
         ensure_mcp: Callable[[], tuple[str, str]],
         workdir: Path,
         proposals: Any = None,
+        grading: Any = None,
         transcripts: Any = None,
     ) -> None:
         self._push = push
@@ -83,6 +84,7 @@ class ChatController:
         self._ensure_mcp = ensure_mcp
         self._workdir = workdir
         self._proposals = proposals
+        self._grading = grading
         self._transcripts = transcripts
         self._assistant_buffer = ""
         self._pending_resume: str | None = None
@@ -297,6 +299,8 @@ class ChatController:
             self._transcripts.begin()
         if self._proposals is not None:
             self._proposals.new_session()
+        if self._grading is not None:
+            self._grading.new_session()
         self._push({"type": "reset"})
 
     # ---- chat history ----
@@ -338,6 +342,8 @@ class ChatController:
         self.event_log.clear()
         if self._proposals is not None:
             self._proposals.new_session()
+        if self._grading is not None:
+            self._grading.new_session()
         self._push({"type": "reset"})
         self._push({"type": "history_load", "events": events})
         self.push_agent_state()

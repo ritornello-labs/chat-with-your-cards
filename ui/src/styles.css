@@ -1608,6 +1608,208 @@ body {
   border-color: var(--cwyc-accent-hover);
 }
 
+/* ---------- native grading card ---------- */
+
+.cwyc-grading {
+  border: 1px solid var(--cwyc-border);
+  border-left: 3px solid var(--cwyc-red);
+  border-radius: var(--cwyc-radius);
+  background: var(--cwyc-surface-raised);
+  box-shadow: var(--cwyc-card-shadow);
+  padding: 10px 11px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cwyc-grading-accepted,
+.cwyc-grading-auto-accepted,
+.cwyc-grading-rejected {
+  box-shadow: none;
+}
+
+.cwyc-grading-accepted,
+.cwyc-grading-auto-accepted {
+  border-left-color: var(--cwyc-green);
+}
+
+.cwyc-grading-rejected {
+  opacity: 0.78;
+  border-left-color: var(--cwyc-fg-faint);
+}
+
+.cwyc-grading-failed {
+  border-left-color: var(--cwyc-red);
+}
+
+.cwyc-grading-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cwyc-grading-mark {
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  flex: none;
+  border-radius: 7px;
+  color: var(--cwyc-red);
+  background: var(--cwyc-red-soft);
+  font-family: var(--cwyc-mono);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.cwyc-grading-accepted .cwyc-grading-mark,
+.cwyc-grading-auto-accepted .cwyc-grading-mark {
+  color: var(--cwyc-green);
+  background: var(--cwyc-green-soft);
+}
+
+.cwyc-grading-title {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.cwyc-grading-title strong {
+  font-size: 12.5px;
+  line-height: 1.25;
+}
+
+.cwyc-grading-title span,
+.cwyc-grading-status {
+  font-size: 10.5px;
+  color: var(--cwyc-fg-subtle);
+}
+
+.cwyc-grading-status {
+  flex: none;
+  border-radius: 999px;
+  padding: 1px 7px;
+  background: var(--cwyc-surface);
+}
+
+.cwyc-grading-rationale {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--cwyc-fg-subtle);
+}
+
+.cwyc-grading-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.cwyc-grading-card-row {
+  position: relative;
+  border: 1px solid var(--cwyc-border-subtle);
+  border-radius: 7px;
+  background: var(--cwyc-bg);
+  padding: 6px 8px;
+}
+
+.cwyc-grading-prompt {
+  padding-right: 4px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--cwyc-fg);
+  overflow-wrap: anywhere;
+}
+
+.cwyc-grading-prompt > span {
+  margin-right: 5px;
+  font-family: var(--cwyc-mono);
+  font-size: 9.5px;
+  color: var(--cwyc-fg-faint);
+}
+
+.cwyc-grading-meta {
+  margin-top: 3px;
+  padding-right: 92px;
+  font-family: var(--cwyc-mono);
+  font-size: 9.5px;
+  color: var(--cwyc-fg-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cwyc-grading-hidden {
+  position: absolute;
+  right: 7px;
+  bottom: 5px;
+  font-size: 9.5px;
+  color: var(--cwyc-warn);
+  background: var(--cwyc-warn-soft);
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+
+.cwyc-grading-warning,
+.cwyc-grading-success {
+  border-radius: 6px;
+  padding: 4px 7px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.cwyc-grading-warning {
+  color: var(--cwyc-warn);
+  background: var(--cwyc-warn-soft);
+}
+
+.cwyc-grading-success {
+  color: var(--cwyc-green);
+  background: var(--cwyc-green-soft);
+}
+
+.cwyc-grading-actions,
+.cwyc-grading-offer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.cwyc-grading-offer {
+  justify-content: space-between;
+  color: var(--cwyc-fg-subtle);
+  font-size: 11px;
+}
+
+#cwyc-root .cwyc-grading button {
+  border: 1px solid var(--cwyc-border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--cwyc-fg);
+  font-size: 11.5px;
+  font-weight: 500;
+  padding: 4px 11px;
+  cursor: pointer;
+}
+
+#cwyc-root .cwyc-grading-actions .cwyc-btn-accept {
+  border-color: var(--cwyc-red);
+  background: var(--cwyc-red);
+  color: #fff;
+  font-weight: 600;
+}
+
+#cwyc-root .cwyc-grading-actions .cwyc-btn-accept:hover {
+  filter: brightness(0.94);
+}
+
+#cwyc-root .cwyc-grading-offer .cwyc-btn-suggest {
+  margin-right: 0;
+  color: var(--cwyc-accent-ink) !important;
+}
+
 /* ---------- composer ---------- */
 
 .cwyc-composer {

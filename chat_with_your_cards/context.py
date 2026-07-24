@@ -155,20 +155,12 @@ def build_system_prompt(
         ),
         "",
         "You have MCP tools (server \"anki\") over the user's collection: "
-        "search_notes (full Anki search syntax), get_note, get_card, "
-        "deck_tree, tag_tree, collection_stats, list_note_types, "
-        "get_note_type, find_related (clue-based: field prefixes like "
-        "\"Analysis:\", shared tags, same deck), get_card_images (actual "
-        "images, not just filenames). Reads need no confirmation; prefer "
-        "find_related before search_notes for related material. Cards may "
-        "carry source URIs in their fields - get_card_sources finds them "
-        "(with position metadata when present): WebFetch for web sources, "
-        "Read for local PDFs (meta.page), read_epub for EPUBs, to ground "
-        "explanations and propose more cards from the same source. When "
-        "creating a card from a source, record a rich anchor: "
-        "<a href=\"URI#page=N\" data-source='{\"chapter\": \"...\", "
-        "\"section\": \"...\"}'>title, p.N</a> so future sessions jump "
-        "straight to the spot.",
+        "search_notes (Anki syntax), get_note/get_card, collection/deck/tag "
+        "overviews, note types/templates, clue-based find_related, and actual "
+        "card images. Reads need no confirmation; prefer find_related before "
+        "broad search. get_card_sources resolves source URIs and positions; "
+        "ground answers in those sources and preserve page/section anchors "
+        "when creating sourced cards.",
         "",
         "When a <current-card> block is present in a message, that is the "
         "card the user is looking at right now; treat it as the default "
@@ -193,6 +185,12 @@ def build_system_prompt(
             "instead of piling up."
         )
         parts.append(
+            "\nUse fail_cards_now with exact IDs for cards judged wrong; it "
+            "records native Again even when future, hidden, or filtered. "
+            "Never edit due/scheduling rows. Report preserved hidden state "
+            "and offer make_cards_available, which leaves the failure intact."
+        )
+        parts.append(
             "\nFor many-note operations, don't loop propose_note_edit: use "
             "rename_tag / find_replace / move_cards for mechanical ops (one "
             "confirmation, with an affected count), and a change set "
@@ -212,7 +210,7 @@ def build_system_prompt(
         if permission_mode == "trusted-writes":
             parts.append(
                 "\nTrusted-writes is on: creations, edits, bulk operations "
-                "and change sets apply immediately (an Anki backup checkpoint "
+                "change sets, and native grading apply immediately (an Anki backup checkpoint "
                 "runs before bulk applies), up to a per-session write "
                 "budget - past that, changes queue for manual review. "
                 "Deleting notes ALWAYS needs the user's explicit "
@@ -222,7 +220,8 @@ def build_system_prompt(
         if permission_mode == "auto-accept":
             parts.append(
                 "\nAuto-accept is on: your note creations apply immediately "
-                "(up to a session cap) and are tagged ai-created. Be "
+                "and native grading applies immediately (up to the same "
+                "session cap); created notes are tagged ai-created. Be "
                 "conservative - only create notes the user clearly asked for. "
                 "Edits still require manual review."
             )

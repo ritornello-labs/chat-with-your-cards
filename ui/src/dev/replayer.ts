@@ -21,14 +21,14 @@
  * every effort level - see claude_cli.py's parser and DESIGN.md section 9),
  * exercising the Reasoning primitive's no-text rotating-indicator path.
  */
-import type { ChatEvent } from "../events";
-import type { ProposalPayload } from "../events";
+import type { ChatEvent, GradingPayload, ProposalPayload } from "../events";
 
 type Step =
   | { kind: "think" | "text"; text: string }
   | { kind: "think_tokens"; tokens: readonly number[] }
   | { kind: "tool"; tool: string; summary: string; result: string; ok: boolean; durationMs: number }
   | { kind: "proposal"; proposal: ProposalPayload }
+  | { kind: "grading"; grading: GradingPayload }
   | { kind: "image"; src: string; caption: string }
   | { kind: "widget"; html: string; title: string }
   | { kind: "widget_offer"; title: string }
@@ -52,6 +52,7 @@ function chopWords(text: string, rand: () => number): string[] {
 }
 
 const devProposals = new Map<string, ProposalPayload>();
+const devGradings = new Map<string, GradingPayload>();
 
 function compile(steps: readonly Step[]): Array<[number, ChatEvent]> {
   const timeline: Array<[number, ChatEvent]> = [];
@@ -90,6 +91,9 @@ function compile(steps: readonly Step[]): Array<[number, ChatEvent]> {
     } else if (step.kind === "proposal") {
       devProposals.set(step.proposal.id, step.proposal);
       timeline.push([delay(), { type: "proposal", proposal: step.proposal }]);
+    } else if (step.kind === "grading") {
+      devGradings.set(step.grading.id, step.grading);
+      timeline.push([delay(), { type: "grading", grading: step.grading }]);
     } else if (step.kind === "image") {
       timeline.push([delay(), { type: "inline_image", src: step.src, caption: step.caption }]);
     } else if (step.kind === "widget") {
@@ -250,6 +254,56 @@ function editProposalScript(): Step[] {
   ];
 }
 
+function gradingScript(): Step[] {
+  const grading: GradingPayload = {
+    id: "g-dev-1",
+    action: "fail",
+    status: "pending",
+    card_ids: [1700000000001, 1700000000002],
+    cards: [
+      {
+        card_id: 1700000000001,
+        note_id: 1600000000001,
+        deck: "Math::Analysis",
+        current_deck: "Math::Analysis",
+        template: "Card 1",
+        prompt_field: "Front",
+        prompt: "Why does the order of quantifiers matter in the epsilon–delta definition?",
+        queue: -3,
+        hidden_state: "manually buried",
+        preview_filtered: false,
+        rescheduling_filtered: false,
+      },
+      {
+        card_id: 1700000000002,
+        note_id: 1600000000002,
+        deck: "Math::Analysis",
+        current_deck: "Preview missed concepts",
+        template: "Card 1",
+        prompt_field: "Front",
+        prompt: "State the punctured-neighborhood clause in the definition of a limit.",
+        queue: 2,
+        hidden_state: null,
+        preview_filtered: true,
+        rescheduling_filtered: false,
+      },
+    ],
+    rationale: "Both atomics were explicitly missed in the learner’s explanation.",
+    warnings: [
+      "The failure will be recorded, but existing manually buried state will remain. You can make the cards available afterward.",
+      "Preview-filtered targets will leave preview individually before Anki records Again in their home deck.",
+    ],
+    result: null,
+    availability: null,
+    available_card_ids: [],
+    automatic_mode: null,
+  };
+  return [
+    { kind: "text", text: "I resolved the two missed atomics to these exact cards:\n\n" },
+    { kind: "grading", grading },
+  ];
+}
+
 const DEFAULT_SCRIPT: Step[] = [
   {
     kind: "text",
@@ -405,6 +459,7 @@ function selectScript(userText: string): Step[] {
   if (text.includes("widget") || text.includes("chart")) return widgetScript();
   if (text.includes("image") || text.includes("picture")) return IMAGE_SCRIPT;
   if (text.includes("think") || text.includes("reason")) return REASONING_SCRIPT;
+  if (text.includes("grade") || text.includes("fail") || text.includes("again")) return gradingScript();
   if (text.includes("edit")) return editProposalScript();
   if (text.includes("propose") || text.includes("note") || text.includes("card")) return createProposalScript();
   if (text.includes("tool")) return TOOL_SCRIPT;
@@ -427,7 +482,7 @@ const WELCOME_SCRIPT: Step[] = [
     kind: "text",
     text:
       "Hi! This is the assistant-ui scaffold running against the scripted dev replayer.\n\nTry typing " +
-      "**tool**, **propose**, **edit**, **think**, **long**, **widget**, **image**, **setup**, or **error** to see each " +
+      "**tool**, **propose**, **edit**, **grade**, **think**, **long**, **widget**, **image**, **setup**, or **error** to see each " +
       "event path, or just send anything else for the default reply.",
   },
 ];
@@ -772,6 +827,56 @@ export function installDevReplayer(): void {
       case "proposal_reject":
         window.chatUI?.dispatch({ type: "proposal_resolved", id: msg.id, status: "rejected" });
         break;
+      case "grading_accept": {
+        const current = devGradings.get(String(msg.id));
+        if (!current) break;
+        const applied: GradingPayload = {
+          ...current,
+          status: "accepted",
+          result: {
+            card_ids: current.card_ids,
+            preview_exits: [1700000000002],
+            rescheduling_filtered: [],
+            preserved_hidden_state: {
+              suspended: [],
+              user_buried: [1700000000001],
+              scheduler_buried: [],
+            },
+            newly_suspended: [],
+            warnings: [],
+          },
+          available_card_ids: [1700000000001],
+        };
+        devGradings.set(applied.id, applied);
+        window.chatUI?.dispatch({ type: "grading", grading: applied });
+        break;
+      }
+      case "grading_reject": {
+        const current = devGradings.get(String(msg.id));
+        if (!current) break;
+        const rejected = { ...current, status: "rejected" as const };
+        devGradings.set(rejected.id, rejected);
+        window.chatUI?.dispatch({ type: "grading", grading: rejected });
+        break;
+      }
+      case "grading_make_available": {
+        const current = devGradings.get(String(msg.id));
+        if (!current) break;
+        const available: GradingPayload = {
+          ...current,
+          cards: current.cards.map((card) =>
+            card.card_id === 1700000000001 ? { ...card, hidden_state: null, queue: 2 } : card
+          ),
+          available_card_ids: [],
+          availability: {
+            card_ids: [1700000000001],
+            restored: { suspended: [], user_buried: [1700000000001], scheduler_buried: [] },
+          },
+        };
+        devGradings.set(available.id, available);
+        window.chatUI?.dispatch({ type: "grading", grading: available });
+        break;
+      }
       case "new_chat":
         cancelPending();
         window.chatUI?.dispatch({ type: "reset" });

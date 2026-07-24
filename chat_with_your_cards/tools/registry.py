@@ -24,6 +24,9 @@ class ToolContext(Protocol):
     def proposals(self) -> Any: ...  # proposals.ProposalManager
 
     @property
+    def grading(self) -> Any: ...  # grading.GradingManager
+
+    @property
     def config(self) -> dict[str, Any]: ...  # live add-on config
 
     @property

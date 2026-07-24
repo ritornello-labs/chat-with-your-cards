@@ -129,6 +129,39 @@ export interface ProposalErrorEvent {
   message: string;
 }
 
+export interface GradingCardSummary {
+  card_id: number;
+  note_id: number;
+  deck: string;
+  current_deck: string;
+  template: string;
+  prompt_field: string;
+  prompt: string;
+  queue: number;
+  hidden_state: string | null;
+  preview_filtered: boolean;
+  rescheduling_filtered: boolean;
+}
+
+export interface GradingPayload {
+  id: string;
+  action: "fail" | "make_available";
+  status: "pending" | "applying" | "accepted" | "auto-accepted" | "rejected" | "failed";
+  card_ids: number[];
+  cards: GradingCardSummary[];
+  rationale: string;
+  warnings: string[];
+  result: Record<string, unknown> | null;
+  availability: Record<string, unknown> | null;
+  available_card_ids: number[];
+  automatic_mode: string | null;
+}
+
+export interface GradingEvent {
+  type: "grading";
+  grading: GradingPayload;
+}
+
 /**
  * cache_read_tokens/cache_creation_tokens mirror the Anthropic API's
  * cache_read_input_tokens/cache_creation_input_tokens usage fields
@@ -267,6 +300,7 @@ export type KnownChatEvent =
   | ProposalEvent
   | ProposalResolvedEvent
   | ProposalErrorEvent
+  | GradingEvent
   | UsageEvent
   | DockStateEvent
   | SettingsEvent

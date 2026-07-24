@@ -44,6 +44,7 @@ include = [
     "contract.py",
     "invariants.py",
     "grading.py",
+    "_vendor",
     "learning.py",
     "skills.py",
     "stats.py",

@@ -399,6 +399,7 @@ def build_registry() -> ToolRegistry:
         registry.register(spec)
     from .decks import register_deck_tools
     from .documents import register_document_tools
+    from .grading import register_grading_tools
     from .learning import register_learning_tools
     from .media import register_media_tools
     from .proposals import register_proposal_tools
@@ -409,6 +410,7 @@ def build_registry() -> ToolRegistry:
     register_widget_tools(registry)
     register_document_tools(registry)
     register_proposal_tools(registry)
+    register_grading_tools(registry)
     register_deck_tools(registry)
     register_learning_tools(registry)
     register_skill_tools(registry)

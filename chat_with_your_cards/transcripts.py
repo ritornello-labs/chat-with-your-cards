@@ -28,6 +28,7 @@ RECORDED_TYPES = {
     "tool_call_finished",
     "proposal",
     "proposal_resolved",
+    "grading",
     "inline_image",
     "inline_widget",
     "usage",

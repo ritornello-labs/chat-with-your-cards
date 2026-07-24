@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from .controller import ChatController
     from .dock import ChatDock
     from .mcp_server import McpServer
+    from .grading import GradingManager
     from .proposals import ProposalManager
     from .stats import StatsCache
 
@@ -111,6 +112,7 @@ class AddonState:
     stats_cache: Optional[StatsCache] = None
     mcp: Optional[McpServer] = None
     proposals: Optional[ProposalManager] = None
+    grading: Optional[GradingManager] = None
     transcripts: Any = None
     approvals: Any = None
     learning: Any = None
@@ -171,6 +173,7 @@ def _setup() -> None:
     from . import shortcuts as shortcuts_mod
     from .context import build_system_prompt
     from .controller import ChatController
+    from .grading import GradingManager
     from .proposals import ProposalManager
     from .skills import load_conventions
     from .stats import StatsCache
@@ -241,6 +244,12 @@ def _setup() -> None:
         list_skill_names=_agent_skill_names,
         media_staging=_build_media_staging(),
     )
+    state.grading = GradingManager(
+        get_col=lambda: mw.col,
+        push=recording_push,
+        config=config,
+        after_change=_refresh_after_grading,
+    )
 
     def system_prompt() -> str:
         return build_system_prompt(
@@ -257,6 +266,7 @@ def _setup() -> None:
         ensure_mcp=_ensure_mcp,
         workdir=USER_FILES / "agent-home",
         proposals=state.proposals,
+        grading=state.grading,
         transcripts=state.transcripts,
     )
     _wire_bridge()
@@ -284,6 +294,10 @@ class _ToolCtx:
     @property
     def proposals(self) -> Any:
         return state.proposals
+
+    @property
+    def grading(self) -> Any:
+        return state.grading
 
     @property
     def config(self) -> dict[str, Any]:
@@ -434,6 +448,11 @@ def _wire_bridge() -> None:
     bridge.on("proposal_readd", proposals.readd)
     bridge.on("proposal_restore", proposals.restore)
     bridge.on("proposal_preview", proposals.preview_request)
+    grading = state.grading
+    assert grading is not None
+    bridge.on("grading_accept", grading.accept)
+    bridge.on("grading_reject", grading.reject)
+    bridge.on("grading_make_available", grading.make_available_from_failure)
     bridge.on("undo_session", lambda _msg: proposals.undo_session())
     bridge.on("set_pins", lambda msg: proposals.set_pins(msg.get("pins") or {}))
     bridge.on("open_session_browser", lambda _msg: _open_session_browser())
@@ -921,6 +940,26 @@ def _refresh_reviewer(note_ids: list[int]) -> None:
             reviewer._showQuestion()
     except Exception:
         # Best-effort: a private-API drift shouldn't break the write itself.
+        pass
+
+
+def _refresh_after_grading(card_ids: list[int]) -> None:
+    """Reload a reviewer that was showing a card just graded by the agent.
+
+    The scheduler write is already complete, but leaving the reviewer's stale
+    in-memory card on screen could let the user answer it a second time.
+    ``mw.reset()`` is Anki's normal UI refresh path.
+    """
+
+    if mw is None or mw.col is None:
+        return
+    reviewer: Any = getattr(mw, "reviewer", None)
+    card = getattr(reviewer, "card", None) if reviewer else None
+    if card is None or int(getattr(card, "id", 0)) not in set(card_ids):
+        return
+    try:
+        mw.reset()
+    except Exception:
         pass
 
 

@@ -219,6 +219,30 @@ what we want, we do not want it.
 (`qt/aqt/main.py:1571-1579`). Required before: any schema-bumping op (see hazard 17),
 `delete_notes`, notetype edits, template add/remove.
 
+### 6. Scheduler writes use a separate, equally narrow chokepoint
+
+ProposalManager is the chokepoint for content, deck, and destructive writes.
+Native review grading is intentionally not disguised as a note proposal: it
+flows through `GradingManager`, which provides its own confirmation/audit chip
+and delegates only to the pinned vendored Safe Collection Operations core.
+
+That core:
+
+- addresses exact card IDs and verifies stable note GUIDs immediately before
+  the write;
+- uses native Grade Now, filtered-deck, suspend, and bury operations only;
+- wraps the multi-step operation in `col.db.transact`;
+- checks revlog, reps, deck, and hidden-queue postconditions;
+- stores the caller's event cursor in the same transaction for safe retries;
+- preserves suspension, manual burial, and scheduler burial while reporting
+  native leech suspension;
+- exposes hidden-state removal as a distinct native operation that does not
+  alter review history.
+
+CWYC resets the reviewer if its displayed card was among the targets, avoiding
+a second answer against stale in-memory reviewer state. No generic scheduler,
+backend, SQL, or AnkiConnect surface is exposed through this path.
+
 ---
 
 ## Part 3 — Hazard taxonomy

@@ -9,7 +9,9 @@ Chat With Your Cards is built for questions that arise while studying: explain
 this card, find related material, inspect the surrounding topic, or propose a
 better note without leaving the reviewer. The agent can search the collection,
 read notes and cards, summarize deck/tag structure, and prepare changes through
-a reviewable proposal flow.
+a reviewable proposal flow. It can also record native Anki **Again** reviews on
+exact cards the learner or an AI grader identifies as wrong, even when those
+cards are not scheduled today.
 
 ## Three study moments
 
@@ -57,6 +59,10 @@ milestones.
 - Render the note's real card templates before a proposed change is accepted.
 - Show per-field diffs, detect stale edits, and support per-change or
   whole-session rollback.
+- Fail exact future, suspended, buried, and filtered-deck cards through Anki's
+  native scheduler, with a dedicated confirmation/audit chip.
+- Preserve existing hidden state, report it explicitly, and offer a separate
+  “Make available” action that leaves the recorded failure intact.
 - Carry neutral Agent Skills for card authoring, curriculum design, safe
   delivery, and user-owned conventions learned from accepted edits.
 - Render Mermaid diagrams and opt-in interactive widgets in a restricted
@@ -64,11 +70,20 @@ milestones.
 
 ## Safety model
 
-Collection writes do not go directly from an agent tool to Anki. They pass
-through one proposal manager that validates the operation, displays the change,
-and applies only the accepted fields. Destructive actions create a backup
-checkpoint first. Automatic acceptance is limited to note creation and is
-capped per session.
+Content and deck writes pass through the proposal manager, which validates the
+operation, displays the change, and applies only what the user accepts.
+Scheduler grading passes through a separate, narrow grading manager backed by a
+pinned vendored copy of
+[Safe Collection Operations](https://github.com/ritornello-labs/anki-addon-safe-collection-operations).
+It uses Anki's native Grade Now/scheduler operations, exact card IDs, stable
+note GUID preflight, transactions, postconditions, and idempotent event
+cursors—never direct scheduling-row writes.
+
+In Propose and Ask-each-read modes, grading waits on its dedicated confirmation
+chip. Auto-accept and Trusted writes may apply it immediately under their
+existing session caps; Read-only blocks it. Existing suspension and both forms
+of burial remain after the failure and are visibly offered for removal.
+Destructive content actions still create a backup checkpoint first.
 
 Card content is treated as untrusted input. The local MCP server binds to a
 random loopback port and requires a per-session token; inheritance of unrelated

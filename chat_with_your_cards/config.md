@@ -167,16 +167,19 @@
   write tools entirely; `ask-each-read` additionally shows an inline
   Allow/Deny chip for every collection read (for chats about untrusted
   shared decks) - denials and 120s timeouts refuse the call; `auto-accept` applies the assistant's note *creations*
-  immediately (up to `auto_accept_cap` per session) while edits stay behind
-  proposals; `trusted-writes` applies creations, edits, bulk operations, and
-  change sets directly (an Anki backup checkpoint is forced before bulk
+  and native card grading immediately (up to `auto_accept_cap` affected
+  notes/cards per session) while edits stay behind proposals;
+  `trusted-writes` applies creations, edits, bulk operations, change sets,
+  and native grading directly (an Anki backup checkpoint is forced before bulk
   applies) up to `write_budget` notes per session — after that everything
   falls back to manual review. Deleting notes always asks, in every mode.
 - `auto_accept_cap` (default `20`): in `auto-accept` mode, how many notes may be
-  created without review per chat session before proposals pause for manual
-  review again.
-- `write_budget` (default `200`): in `trusted-writes` mode, how many notes the
-  assistant may write directly per chat session before pausing for review.
+  created and how many cards may be natively graded without review per chat
+  session. The two operations keep separate counters, so a card-writing run
+  does not silently consume the grading allowance (or vice versa).
+- `write_budget` (default `200`): in `trusted-writes` mode, how many notes may
+  be written and how many cards may be natively graded directly per chat
+  session before pausing for review. These also use separate counters.
 - `conventions_prompt` (default empty): your note-authoring conventions (style,
   field usage, tagging). Injected into the assistant's instructions for every
   proposal and materialized as `user_files/skills/note-conventions/SKILL.md`.

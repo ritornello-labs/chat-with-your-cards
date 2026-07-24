@@ -880,7 +880,9 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
         # underlying card, while grading.fail_cards_now exits only that card's
         # preview and then records a real Again without rebuilding the deck.
         col = mw.col
-        grading = importlib.import_module(f"{ADDON_PACKAGE}.grading")
+        grading = importlib.import_module(
+            f"{ADDON_PACKAGE}._vendor.safe_collection_operations"
+        )
 
         def _review_card(front: str) -> tuple[int, int]:
             nid = _new_note(front, deck="ZZProbeGrading")
@@ -909,7 +911,7 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
             col.db.scalar("select count() from revlog where cid = ?", naive_cid)
         )
         col._backend.grade_now(
-            card_ids=[naive_cid], rating=grading.GradeRating.AGAIN
+            card_ids=[naive_cid], rating=grading.Rating.AGAIN
         )
         naive_after = col.get_card(naive_cid)
         if int(naive_after.did) != naive_did or int(naive_after.reps) != naive_reps:
@@ -927,8 +929,8 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
         normal_guid = str(col.get_note(normal_nid).guid)
         normal_before = col.get_card(normal_cid)
         normal_reps = int(normal_before.reps)
-        event = grading.GradingEventRef("gui-smoke-stream", 1, "gui-smoke-event-1")
-        target = grading.GradingTarget(normal_cid, normal_guid)
+        event = grading.EventRef("gui-smoke-stream", 1, "gui-smoke-event-1")
+        target = grading.Target(normal_cid, normal_guid)
         first = grading.fail_cards_now(col, [target], event=event)
         retry = grading.fail_cards_now(col, [target], event=event)
         if first.already_applied or not retry.already_applied:
@@ -1016,12 +1018,33 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
         suspended_reps = int(suspended_before.reps)
         suspended_result = grading.fail_cards_now(col, [suspended_cid])
         suspended_after = col.get_card(suspended_cid)
-        if suspended_result.restored_suspended != (suspended_cid,):
+        if suspended_result.preserved_suspended != (suspended_cid,):
             raise AssertionError("suspension restore was not reported")
         if int(suspended_after.queue) != -1:
             raise AssertionError("grading unexpectedly unsuspended an explicit suspension")
         if int(suspended_after.reps) != suspended_reps + 1:
             raise AssertionError("suspended card did not record the real failure")
+
+        # CWYC's policy layer must preflight and wait in Propose mode, then
+        # execute the same vendored core only after the confirmation action.
+        _, workflow_cid = _review_card("grade through CWYC chip")
+        workflow_before = int(col.get_card(workflow_cid).reps)
+        workflow = state.grading.submit_fail(
+            {
+                "card_ids": [workflow_cid],
+                "rationale": "real-Anki integration probe",
+            }
+        )
+        if workflow.get("status") != "pending_user_confirmation":
+            raise AssertionError(f"grading workflow did not pause: {workflow}")
+        if int(col.get_card(workflow_cid).reps) != workflow_before:
+            raise AssertionError("pending grading mutated the card before confirmation")
+        state.grading.accept({"id": workflow["grading_id"]})
+        request = state.grading._requests[workflow["grading_id"]]
+        if request.status != "accepted":
+            raise AssertionError(f"grading chip did not resolve accepted: {request.status}")
+        if int(col.get_card(workflow_cid).reps) != workflow_before + 1:
+            raise AssertionError("confirmed grading chip did not record native Again")
 
         return {
             "normal": normal_cid,
@@ -1029,10 +1052,11 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
             "preview_companion": companion_cid,
             "rescheduling": resched_cid,
             "suspended": suspended_cid,
+            "workflow": workflow_cid,
         }
 
     check(
-        "native arbitrary-card grading: normal/filtered/suspended/idempotent",
+        "native arbitrary-card grading + CWYC confirmation workflow",
         _native_grading_flow,
     )
 

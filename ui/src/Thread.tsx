@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import type { KeyboardEvent } from "react";
 import { ComposerPrimitive, MessagePrimitive, ThreadPrimitive } from "@assistant-ui/react";
 import { useChatState } from "./ChatRuntimeProvider";
-import type { ChatStore, ProposalCardData } from "./store";
+import type { ChatStore, GradingCardData, ProposalCardData } from "./store";
 import { ProposalCard } from "./components/ProposalCard";
 import { ToolCallCard } from "./components/ToolCallCard";
 import { ReasoningBlock } from "./components/ReasoningBlock";
@@ -13,6 +13,7 @@ import { ModeChip, ModelPicker, PinsButton, ToolsChip } from "./components/Compo
 import { VimComposer } from "./components/VimComposer";
 import { WidgetCard, WidgetOfferChip } from "./components/WidgetCard";
 import { SetupCard } from "./components/SetupCard";
+import { GradingCard } from "./components/GradingCard";
 
 function UserMessage() {
   return (
@@ -58,6 +59,18 @@ function AssistantMessage({ store }: { store: ChatStore }) {
             >
               {/* data/store are all ProposalCard needs (see its props doc). */}
               <ProposalCard data={props.data as ProposalCardData} store={store} />
+            </ErrorBoundary>
+          ),
+          grading: (props: { data?: unknown }) => (
+            <ErrorBoundary
+              resetKey={(props.data as { id?: string } | undefined)?.id}
+              fallback={
+                <div className="cwyc-grading cwyc-grading-failed" data-testid="grading-card">
+                  <div className="cwyc-grading-warning">This grading card couldn’t be displayed.</div>
+                </div>
+              }
+            >
+              <GradingCard data={props.data as GradingCardData} store={store} />
             </ErrorBoundary>
           ),
           error: ErrorBanner,

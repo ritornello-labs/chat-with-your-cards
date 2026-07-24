@@ -54,6 +54,8 @@ import type {
   ProposalEvent,
   ProposalPayload,
   ProposalResolvedEvent,
+  GradingEvent,
+  GradingPayload,
   ToolCallFinishedEvent,
   ToolCallStartedEvent,
   UsageEvent,
@@ -108,6 +110,14 @@ interface ProposalDataPart {
   readonly data: ProposalCardData;
 }
 
+export type GradingCardData = GradingPayload;
+
+interface GradingDataPart {
+  readonly type: "data";
+  readonly name: "grading";
+  readonly data: GradingCardData;
+}
+
 interface ErrorDataPart {
   readonly type: "data";
   readonly name: "error";
@@ -141,6 +151,7 @@ type AssistantPart =
   | ReasoningPart
   | ToolCallPart
   | ProposalDataPart
+  | GradingDataPart
   | ErrorDataPart
   | ImageDataPart
   | WidgetDataPart
@@ -297,7 +308,7 @@ export const PERMISSION_MODES: readonly { id: string; label: string; hint: strin
   { id: "ask-each-read", label: "Ask each read", hint: "Every tool call needs your OK" },
   { id: "read-only", label: "Read-only", hint: "No write tools offered at all" },
   { id: "default", label: "Propose", hint: "Reads free; writes as review cards" },
-  { id: "auto-accept", label: "Auto-accept", hint: "New notes apply instantly (capped)" },
+  { id: "auto-accept", label: "Auto-accept", hint: "New notes and grading apply instantly (capped)" },
   { id: "trusted-writes", label: "Trusted writes", hint: "Writes apply under a session budget" },
 ];
 
@@ -442,6 +453,18 @@ export class ChatStore {
 
   rejectProposal(id: string): void {
     postCommand({ type: "proposal_reject", id });
+  }
+
+  acceptGrading(id: string): void {
+    postCommand({ type: "grading_accept", id });
+  }
+
+  rejectGrading(id: string): void {
+    postCommand({ type: "grading_reject", id });
+  }
+
+  makeGradingCardsAvailable(id: string): void {
+    postCommand({ type: "grading_make_available", id });
   }
 
   // ---- outbound: control-surface commands (header + composer row) ----
@@ -596,6 +619,9 @@ export class ChatStore {
         break;
       case "proposal_error":
         this.errorProposal(event as ProposalErrorEvent);
+        break;
+      case "grading":
+        this.upsertGrading((event as GradingEvent).grading);
         break;
       case "inline_image":
         this.appendImage(event as { src: string; caption?: string });
@@ -913,6 +939,18 @@ export class ChatStore {
     return null;
   }
 
+  private findGradingMessageId(id: string): string | null {
+    for (const msg of this.messages) {
+      if (msg.role !== "assistant") continue;
+      for (const part of msg.content) {
+        if (part.type === "data" && part.name === "grading" && part.data.id === id) {
+          return msg.id;
+        }
+      }
+    }
+    return null;
+  }
+
   private appendImage(event: { src: string; caption?: string }): void {
     if (!event.src) return;
     const current = this.ensureCurrentAssistant();
@@ -1006,6 +1044,25 @@ export class ChatStore {
     } else {
       const current = this.ensureCurrentAssistant();
       const part: ProposalDataPart = { type: "data", name: "proposal", data: proposal };
+      this.updateMessage(current.id, (msg) => ({ ...msg, content: [...msg.content, part] }));
+    }
+    this.emit();
+  }
+
+  private upsertGrading(grading: GradingPayload): void {
+    const existingId = this.findGradingMessageId(grading.id);
+    if (existingId) {
+      this.updateMessage(existingId, (msg) => ({
+        ...msg,
+        content: msg.content.map((part) =>
+          part.type === "data" && part.name === "grading" && part.data.id === grading.id
+            ? { ...part, data: grading }
+            : part
+        ),
+      }));
+    } else {
+      const current = this.ensureCurrentAssistant();
+      const part: GradingDataPart = { type: "data", name: "grading", data: grading };
       this.updateMessage(current.id, (msg) => ({ ...msg, content: [...msg.content, part] }));
     }
     this.emit();

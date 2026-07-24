@@ -5,7 +5,7 @@ PYTHON ?= python3
 UV ?= uv
 
 PY_FILES := $(shell git ls-files --cached --others --exclude-standard '*.py' ':!:dist/**' ':!:node_modules/**' ':!:.venv/**' ':!:_vendor/**')
-MYPY_FILES := $(shell git ls-files --cached --others --exclude-standard '*.py' ':!:tests/**' ':!:dist/**' ':!:node_modules/**' ':!:.venv/**' ':!:_vendor/**')
+MYPY_FILES := $(shell git ls-files --cached --others --exclude-standard '*.py' ':!:tests/**' ':!:dist/**' ':!:node_modules/**' ':!:.venv/**' ':!:_vendor/**' ':!:chat_with_your_cards/_vendor/**')
 JS_FILES := $(shell git ls-files --cached --others --exclude-standard '*.js' '*.mjs' ':!:dist/**' ':!:node_modules/**' ':!:chat_with_your_cards/web/vendor/**')
 SHELL_FILES := $(shell git ls-files --cached --others --exclude-standard '*.sh')
 
