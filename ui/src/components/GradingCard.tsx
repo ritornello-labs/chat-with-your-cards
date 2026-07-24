@@ -45,10 +45,13 @@ export function GradingCard({ data, store }: GradingCardProps) {
   const applying = data.status === "applying";
   const applied = data.status === "accepted" || data.status === "auto-accepted";
   const makeAvailable = applied && data.action === "fail" && data.available_card_ids.length > 0;
-  const title = data.action === "fail" ? "Record Again" : "Make cards available";
+  const title =
+    data.action === "fail"
+      ? `Mark ${data.card_ids.length === 1 ? "card" : "cards"} wrong`
+      : "Make cards available";
   const appliedTitle =
     data.action === "fail"
-      ? `${data.card_ids.length} Again review${data.card_ids.length === 1 ? "" : "s"} recorded`
+      ? `${data.card_ids.length} card${data.card_ids.length === 1 ? "" : "s"} marked wrong`
       : `${data.card_ids.length} card${data.card_ids.length === 1 ? "" : "s"} made available`;
 
   return (
@@ -61,7 +64,7 @@ export function GradingCard({ data, store }: GradingCardProps) {
         <span className="cwyc-grading-mark" aria-hidden="true">↘</span>
         <div className="cwyc-grading-title">
           <strong>{applied ? appliedTitle : title}</strong>
-          <span>{data.action === "fail" ? "Native Anki scheduler" : "Review history stays unchanged"}</span>
+          <span>{data.action === "fail" ? "Uses Anki’s Again rating" : "Review history stays unchanged"}</span>
         </div>
         <span className="cwyc-grading-status">{STATUS_LABELS[data.status] ?? data.status}</span>
       </header>
@@ -111,7 +114,7 @@ export function GradingCard({ data, store }: GradingCardProps) {
             onClick={() => store.acceptGrading(data.id)}
             data-testid="grading-approve"
           >
-            {data.action === "fail" ? "Record Again" : "Make available"}
+            {data.action === "fail" ? "Mark wrong" : "Make available"}
           </button>
         </div>
       ) : null}
