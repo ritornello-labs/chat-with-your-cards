@@ -24,6 +24,11 @@ MAX_TEMPLATE_CHARS = 20_000
 # Ceiling for an explicit `max_chars` override. The default keeps a routine
 # read cheap; this bounds how much one call can ever return.
 HARD_MAX_TEMPLATE_CHARS = 200_000
+HIDDEN_QUEUE_NAMES = {
+    -1: "suspended",
+    -2: "scheduler-buried",
+    -3: "manually buried",
+}
 
 _TAG_STRIP = re.compile(r"<[^>]+>")
 
@@ -58,6 +63,76 @@ def search_notes(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _deck_name(col: Any, deck_id: int) -> str:
+    try:
+        return str(col.decks.name(deck_id))
+    except Exception:
+        return f"[missing deck {deck_id}]"
+
+
+def _card_summary(col: Any, card_id: int) -> dict[str, Any]:
+    card = col.get_card(card_id)
+    note = card.note()
+    fields = dict(note.items())
+    current_deck_id = int(card.did)
+    original_deck_id = int(getattr(card, "odid", 0))
+    home_deck_id = original_deck_id or current_deck_id
+    queue = int(card.queue)
+    try:
+        template = str(card.template().get("name", ""))
+    except Exception:
+        template = ""
+    return {
+        "card_id": int(card.id),
+        "note_id": int(note.id),
+        "note_type": str(note.note_type()["name"]),
+        "template": template,
+        "template_ordinal": int(card.ord),
+        "tags": list(note.tags),
+        "fields_preview": {
+            name: _plain(value) for name, value in list(fields.items())[:2]
+        },
+        "current_deck": _deck_name(col, current_deck_id),
+        "current_deck_id": current_deck_id,
+        "home_deck": _deck_name(col, home_deck_id),
+        "home_deck_id": home_deck_id,
+        "in_filtered_deck": bool(original_deck_id),
+        "hidden_state": HIDDEN_QUEUE_NAMES.get(queue),
+        "scheduling": {
+            "type": int(card.type),
+            "queue": queue,
+            "due": int(card.due),
+            "interval_days": int(card.ivl),
+            "ease_factor": int(card.factor),
+            "reps": int(card.reps),
+            "lapses": int(card.lapses),
+            "user_flag": int(getattr(card, "flags", 0)) & 0x7,
+        },
+    }
+
+
+def find_cards(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    """Search without collapsing card-level matches to their parent notes."""
+    query = str(args["query"])
+    limit = max(1, min(int(args.get("limit", DEFAULT_SEARCH_LIMIT)), MAX_SEARCH_LIMIT))
+    offset = max(0, int(args.get("offset", 0)))
+    card_ids = [int(card_id) for card_id in ctx.col.find_cards(query)]
+    page_ids = card_ids[offset : offset + limit]
+    next_offset = offset + len(page_ids)
+    return {
+        "query": query,
+        "total": len(card_ids),
+        "offset": offset,
+        "shown": len(page_ids),
+        "next_offset": next_offset if next_offset < len(card_ids) else None,
+        "cards": [_card_summary(ctx.col, card_id) for card_id in page_ids],
+        "selection_note": (
+            "These are exact card matches, not authorization to modify every result. "
+            "Inspect and select only the intended card IDs before a card-level write."
+        ),
+    }
+
+
 def get_note(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     note = ctx.col.get_note(int(args["note_id"]))
     cards = []
@@ -77,22 +152,34 @@ def get_card(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     card = ctx.col.get_card(int(args["card_id"]))
     note = card.note()
     template = card.template()
+    current_deck_id = int(card.did)
+    original_deck_id = int(getattr(card, "odid", 0))
+    home_deck_id = original_deck_id or current_deck_id
+    queue = int(card.queue)
     return {
         "card_id": card.id,
         "note_id": note.id,
-        "deck": ctx.col.decks.name(card.did),
+        "deck": _deck_name(ctx.col, current_deck_id),
+        "current_deck": _deck_name(ctx.col, current_deck_id),
+        "current_deck_id": current_deck_id,
+        "home_deck": _deck_name(ctx.col, home_deck_id),
+        "home_deck_id": home_deck_id,
+        "in_filtered_deck": bool(original_deck_id),
         "note_type": note.note_type()["name"],
         "template": template.get("name"),
+        "template_ordinal": int(card.ord),
         "tags": note.tags,
         "fields": dict(note.items()),
+        "hidden_state": HIDDEN_QUEUE_NAMES.get(queue),
         "scheduling": {
             "type": card.type,
-            "queue": card.queue,
+            "queue": queue,
             "interval_days": card.ivl,
             "ease_factor": card.factor,
             "reps": card.reps,
             "lapses": card.lapses,
             "due": card.due,
+            "user_flag": int(getattr(card, "flags", 0)) & 0x7,
         },
     }
 
@@ -280,6 +367,34 @@ def build_registry() -> ToolRegistry:
                 "required": ["query"],
             },
             search_notes,
+        ),
+        ToolSpec(
+            "find_cards",
+            "Search with Anki syntax and return the exact matching cards rather "
+            "than collapsing matches to notes. Use this before any card-level "
+            "operation when exact IDs are not already known. Results are "
+            "candidates: inspect and select the intended cards instead of "
+            "blindly modifying every broad-search match. Page with offset.",
+            {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Anki search query"},
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": MAX_SEARCH_LIMIT,
+                        "default": DEFAULT_SEARCH_LIMIT,
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 0,
+                    },
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+            find_cards,
         ),
         ToolSpec(
             "get_note",

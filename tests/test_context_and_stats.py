@@ -81,6 +81,7 @@ class ContextTest(unittest.TestCase):
     def test_system_prompt_mentions_tools(self) -> None:
         prompt = build_system_prompt(permission_mode="read-only")
         self.assertIn("search_notes", prompt)
+        self.assertIn("find_cards", prompt)
         self.assertIn("find_related", prompt)
         self.assertIn("read-only", prompt)
 

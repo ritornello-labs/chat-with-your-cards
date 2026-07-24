@@ -705,9 +705,12 @@ trusted-writes within the write budget; deck ops cost 1 budget unit).
 
 ## 17. LLM-graded long-recall cards + capstone gating (2026-07-06)
 
-Design captured from a brainstorming pass. Status: **agreed direction, not
-yet built.** The Layer-1 server component may end up living outside this
-repo; the agent-driven Layer-2 parts belong to CWYC.
+Design captured from a brainstorming pass. Status: **agreed direction,
+partially built.** Exact card discovery plus permission-aware native Again and
+make-available operations are shipped in CWYC (§17.6). The server tutor,
+server-event ingestion, dependency graph, capstone gating, reconciler, and
+progress bubble remain unbuilt. The Layer-1 server component may end up living
+outside this repo; the agent-driven Layer-2 parts belong to CWYC.
 
 ### 17.1 Components: always-on server + desktop add-on
 
@@ -723,11 +726,12 @@ cross-platform.
   AnkiDroid / desktop because it talks to the server, not the laptop. The
   server records per-atomic verdicts **and full conversations** (§17.9).
 - **Chat With Your Cards add-on (desktop).** The single *writer* for
-  scheduling: reads the server's grading events and applies the
+  scheduling: will read the server's grading events and apply the
   consequences to the collection — fail missed atomics, gate the
   capstone, promote related cards (§17.5–17.7). Also builds/maintains the
   dependency graph and renders the desktop bubble. Deliberately **not**
-  the grader (the laptop isn't always on).
+  the grader (the laptop isn't always on). Today the shipped writer accepts
+  reviewed exact IDs from the agent tool; server-event ingestion is not wired.
 - **Reconciler add-on.** Consistency checks (§17.3, §17.7).
 
 A "big card" is a *capstone / integration test* over a set of atomic
@@ -837,14 +841,16 @@ never.
    never removes or rewrites the recorded failure.
 
    CWYC's `GradingManager` is the permission/UI layer over that core. It
-   resolves exact IDs and note GUIDs, rechecks identity at confirmation time,
-   shows a dedicated chip with deck/prompt/filtered/hidden context, and uses a
-   caller-owned contiguous event cursor. Propose and Ask-each-read wait for the
-   chip; Auto-accept and Trusted writes apply under their session budgets;
-   Read-only rejects at both the MCP boundary and the confirmation handler
-   (including after a live mode switch). If the currently displayed reviewer
-   card is graded, CWYC resets the reviewer so a stale in-memory card cannot
-   be answered twice.
+   receives exact IDs resolved through `find_cards` (unless current-card
+   context already names one), resolves stable note GUIDs, rechecks identity at
+   confirmation time, shows a dedicated chip with
+   deck/prompt/filtered/hidden context, and uses a caller-owned contiguous
+   event cursor. Broad search results are candidates, never implicit permission
+   to fail every match. Propose and Ask-each-read wait for the chip; Auto-accept
+   and Trusted writes apply under their session budgets; Read-only rejects at
+   both the MCP boundary and the confirmation handler (including after a live
+   mode switch). If the currently displayed reviewer card is graded, CWYC
+   resets the reviewer so a stale in-memory card cannot be answered twice.
 2. **Short-interval re-drilling** = *free.* An Again drops the card into
    FSRS relearning steps automatically — that IS "practice a few times at
    short intervals, then graduate." No custom interval logic.

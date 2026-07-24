@@ -654,6 +654,37 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
 
     check("trusted-writes direct apply", _trusted_writes)
 
+    def _find_cards() -> dict[str, Any]:
+        """The agent-facing read must preserve the exact card that matched.
+
+        search_notes intentionally collapses card-level matches to a note, so
+        it cannot safely select a sibling for grading. Exercise the real
+        col.find_cards path and the serialized card-level context here.
+        """
+        addon = importlib.import_module(ADDON_PACKAGE)
+        nid = _new_note("find this exact card", tags=["probe-find-card"])
+        cid = int(mw.col.get_note(nid).cards()[0].id)
+        from chat_with_your_cards.tools import build_registry
+
+        result = build_registry().call(
+            addon._ToolCtx(),
+            "find_cards",
+            {"query": f"cid:{cid}", "limit": 20},
+        )
+        cards = result.get("cards") or []
+        if result.get("total") != 1 or len(cards) != 1:
+            raise AssertionError(f"find_cards did not preserve the exact match: {result}")
+        card = cards[0]
+        if int(card.get("card_id", 0)) != cid or int(card.get("note_id", 0)) != nid:
+            raise AssertionError(f"find_cards returned the wrong identity: {card}")
+        if card.get("template") != "Card 1":
+            raise AssertionError(f"find_cards omitted the real template: {card}")
+        if "Front" not in (card.get("fields_preview") or {}):
+            raise AssertionError(f"find_cards omitted the prompt preview: {card}")
+        return {"card": cid, "total": result["total"]}
+
+    check("find_cards preserves exact real-Anki card matches", _find_cards)
+
     def _card_images() -> dict[str, Any]:
         addon = importlib.import_module(ADDON_PACKAGE)
         media_dir = Path(mw.col.media.dir())

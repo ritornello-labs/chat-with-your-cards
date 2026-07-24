@@ -1,7 +1,8 @@
 # Capability gaps vs. Anki
 
 What Anki can do that **Chat With Your Cards cannot**, and how badly we need each
-thing. Audited 2026-07-23 against the official manual (docs.ankiweb.net) —
+thing. Audited 2026-07-23 and reconciled 2026-07-24 against the official manual
+(docs.ankiweb.net) —
 Editing/Note Types/Templates/Media/Import-Export, Studying/Deck Options/FSRS/
 Filtered Decks/Stats, and Browsing/Searching/Maintenance/Preferences/Syncing —
 cross-checked against the live tool registry and the proposal layer, so the
@@ -24,27 +25,37 @@ limits, display order, desired retention and FSRS `params` are all reachable),
 filtered decks (create/reconfigure/rebuild/empty — which also covers most of
 Custom Study), rename tag collection-wide (including `::` re-parenting), tag and
 deck trees, note-type **reads** including full template source and CSS, card
-inspection, audio attachment on proposals, and arbitrary Anki search.
+inspection, exact card search, native Again grading of arbitrary exact cards,
+post-grading suspension/burial removal, audio attachment on proposals, and
+arbitrary Anki search.
 
-**Search syntax is fully available** — `search_notes` hands the raw string to
-`col.find_notes`, so everything documented parses (`is:`, `prop:`, `flag:`,
-`rated:`, `added:`, `introduced:`, `re:`, `nc:`, `preset:`, field searches,
-boolean/wildcards). *Mark* is just a tag (`marked`), so single-note marking
-already works.
+**Search syntax is fully available at both identity levels.** `search_notes`
+hands the raw string to `col.find_notes`; `find_cards` uses `col.find_cards` and
+therefore preserves the exact sibling card that matched a card-level predicate.
+Everything documented parses (`is:`, `prop:`, `flag:`, `rated:`, `added:`,
+`introduced:`, `re:`, `nc:`, `preset:`, field searches, boolean/wildcards).
+`find_cards` returns template, prompt preview, current/home deck, filtered and
+hidden state, scheduling summary, and user flag. It is paged (`offset`, up to
+100 per call) and explicitly treats results as candidates that must be selected
+before a write. *Mark* is just a tag (`marked`), so single-note marking already
+works.
+
+**Exact-card grading is covered.** `fail_cards_now` records a native Again on
+reviewed exact IDs, including future, hidden, and filtered-deck cards.
+`make_cards_available` is the separate post-grading removal of suspension or
+burial and never rewrites the failure. This does not yet provide general flag,
+suspend, bury, due-date, forget, or reposition operations.
 
 ## Cross-cutting constraints
 
-Three structural issues cut across most gaps below and should be settled before
+Two structural issues cut across most remaining gaps and should be settled before
 building any of them:
 
-1. **We return notes; half of Anki is card-level.** Flags, suspension, burial,
-   due dates, intervals and repositioning are all properties of a *card*, and a
-   note can have several. `search_notes` returns note ids, so today the agent
-   cannot name the card it wants to act on. **A `find_cards` counterpart is a
-   prerequisite** for the entire card-state family, not a nice-to-have.
-2. **`search_notes` caps at 100 results.** Any bulk operation over a real
+1. **`search_notes` caps at 100 results.** Any bulk operation over a real
    collection ("tag these 400 notes") cannot even enumerate its targets.
-3. **Some writes force a full sync.** Anki calls these schema modifications and
+   Card search no longer shares this dead end: `find_cards` has explicit
+   offset-based pagination.
+2. **Some writes force a full sync.** Anki calls these schema modifications and
    warns before them. From this audit the list is: adding a field, removing a
    card template, Change Note Type, and deleting a deck-options preset. Everything
    else below (including every card-state action) is a normal, syncable,
@@ -140,9 +151,9 @@ media), and a forced-direction sync. LaTeX preamble editing is security-sensitiv
 
 ## Suggested sequencing
 
-1. **`find_cards` + card-state family** (flags, suspend, bury) — unblocks the
-   largest class of requests, all reversible, and `find_cards` is a prerequisite
-   for anything card-level.
+1. **Card-state write family** (flags, general suspend/unsuspend,
+   bury/unbury) — exact card discovery is now shipped; these reversible writes
+   are the remaining half of the former `find_cards` milestone.
 2. **Bulk tagging** + raise/parameterise the search result cap.
 3. **Read-only blind spots** — stats, due counts, card review history. No risk,
    high answer-quality gain.

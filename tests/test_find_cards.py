@@ -1,0 +1,177 @@
+from __future__ import annotations
+
+import unittest
+from types import SimpleNamespace
+from typing import Any
+
+from chat_with_your_cards.tools.collection import find_cards, get_card
+from chat_with_your_cards.tools import build_registry
+
+
+class FakeNote:
+    def __init__(
+        self,
+        note_id: int,
+        *,
+        front: str,
+        back: str,
+        tags: list[str] | None = None,
+    ) -> None:
+        self.id = note_id
+        self.tags = tags or []
+        self._fields = {"Front": front, "Back": back, "Extra": "not in preview"}
+
+    def items(self) -> list[tuple[str, str]]:
+        return list(self._fields.items())
+
+    def note_type(self) -> dict[str, str]:
+        return {"name": "Basic (and reversed card)"}
+
+
+class FakeCard:
+    def __init__(
+        self,
+        card_id: int,
+        note: FakeNote,
+        *,
+        template: str,
+        ordinal: int,
+        did: int = 1,
+        odid: int = 0,
+        queue: int = 2,
+        flags: int = 0,
+    ) -> None:
+        self.id = card_id
+        self.nid = note.id
+        self.did = did
+        self.odid = odid
+        self.ord = ordinal
+        self.queue = queue
+        self.type = 2
+        self.due = 42
+        self.ivl = 12
+        self.factor = 2500
+        self.reps = 8
+        self.lapses = 1
+        self.flags = flags
+        self._note = note
+        self._template = template
+
+    def note(self) -> FakeNote:
+        return self._note
+
+    def template(self) -> dict[str, str]:
+        return {"name": self._template}
+
+
+class FakeDecks:
+    NAMES = {1: "Default", 9: "Preview targets"}
+
+    def name(self, deck_id: int) -> str:
+        return self.NAMES[deck_id]
+
+
+class FakeCollection:
+    def __init__(self, cards: list[FakeCard], matches: list[int]) -> None:
+        self.cards = {card.id: card for card in cards}
+        self.matches = matches
+        self.decks = FakeDecks()
+        self.queries: list[str] = []
+
+    def find_cards(self, query: str) -> list[int]:
+        self.queries.append(query)
+        return list(self.matches)
+
+    def get_card(self, card_id: int) -> FakeCard:
+        return self.cards[card_id]
+
+
+def _fixture() -> tuple[FakeCollection, Any]:
+    shared_note = FakeNote(
+        10,
+        front="Which direction matched?",
+        back="Only the reverse card did.",
+        tags=["probe"],
+    )
+    other_note = FakeNote(20, front="Another note", back="Another answer")
+    cards = [
+        FakeCard(101, shared_note, template="Forward", ordinal=0),
+        FakeCard(102, shared_note, template="Reverse", ordinal=1),
+        FakeCard(
+            103,
+            other_note,
+            template="Forward",
+            ordinal=0,
+            did=9,
+            odid=1,
+            queue=-3,
+            flags=10,
+        ),
+    ]
+    col = FakeCollection(cards, [102, 103, 101])
+    return col, SimpleNamespace(col=col)
+
+
+class FindCardsTests(unittest.TestCase):
+    def test_preserves_exact_matching_sibling_and_native_order(self) -> None:
+        col, ctx = _fixture()
+
+        result = find_cards(ctx, {"query": "card:2 flag:2", "limit": 2})
+
+        self.assertEqual(col.queries, ["card:2 flag:2"])
+        self.assertEqual(result["total"], 3)
+        self.assertEqual(result["shown"], 2)
+        self.assertEqual(result["next_offset"], 2)
+        self.assertEqual([card["card_id"] for card in result["cards"]], [102, 103])
+        self.assertEqual(result["cards"][0]["template"], "Reverse")
+        self.assertEqual(result["cards"][0]["note_id"], 10)
+        self.assertNotIn("Extra", result["cards"][0]["fields_preview"])
+        self.assertIn("not authorization", result["selection_note"])
+
+    def test_pagination_reaches_remaining_matches(self) -> None:
+        _col, ctx = _fixture()
+
+        result = find_cards(ctx, {"query": "*", "offset": 2, "limit": 20})
+
+        self.assertEqual(result["offset"], 2)
+        self.assertEqual(result["shown"], 1)
+        self.assertIsNone(result["next_offset"])
+        self.assertEqual([card["card_id"] for card in result["cards"]], [101])
+
+    def test_reports_filtered_hidden_and_flag_state(self) -> None:
+        _col, ctx = _fixture()
+
+        result = find_cards(ctx, {"query": "cid:103", "offset": 1, "limit": 1})
+        (card,) = result["cards"]
+
+        self.assertEqual(card["current_deck"], "Preview targets")
+        self.assertEqual(card["home_deck"], "Default")
+        self.assertTrue(card["in_filtered_deck"])
+        self.assertEqual(card["hidden_state"], "manually buried")
+        self.assertEqual(card["scheduling"]["queue"], -3)
+        self.assertEqual(card["scheduling"]["user_flag"], 2)
+
+    def test_get_card_exposes_the_same_card_level_context(self) -> None:
+        col, ctx = _fixture()
+
+        result = get_card(ctx, {"card_id": 103})
+
+        self.assertEqual(result["card_id"], 103)
+        self.assertEqual(result["current_deck"], "Preview targets")
+        self.assertEqual(result["home_deck"], "Default")
+        self.assertEqual(result["template_ordinal"], 0)
+        self.assertEqual(result["hidden_state"], "manually buried")
+        self.assertEqual(result["scheduling"]["user_flag"], 2)
+        self.assertEqual(col.queries, [])
+
+    def test_registry_exposes_find_cards_as_a_read_tool(self) -> None:
+        spec = next(spec for spec in build_registry().specs() if spec.name == "find_cards")
+
+        self.assertFalse(spec.writes)
+        self.assertEqual(spec.input_schema["properties"]["limit"]["maximum"], 100)
+        self.assertIn("exact matching cards", spec.description)
+        self.assertIn("blindly", spec.description)
+
+
+if __name__ == "__main__":
+    unittest.main()

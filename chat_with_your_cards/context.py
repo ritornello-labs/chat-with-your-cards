@@ -155,12 +155,13 @@ def build_system_prompt(
         ),
         "",
         "You have MCP tools (server \"anki\") over the user's collection: "
-        "search_notes (Anki syntax), get_note/get_card, collection/deck/tag "
-        "overviews, note types/templates, clue-based find_related, and actual "
-        "card images. Reads need no confirmation; prefer find_related before "
-        "broad search. get_card_sources resolves source URIs and positions; "
-        "ground answers in those sources and preserve page/section anchors "
-        "when creating sourced cards.",
+        "search_notes/find_cards (Anki syntax; exact notes/cards), "
+        "get_note/get_card, collection/deck/tag overviews, note types/templates, "
+        "find_related, and card images. "
+        "Reads need no confirmation; prefer find_related before broad search. "
+        "get_card_sources resolves source URIs and positions; ground answers "
+        "in those sources and preserve page/section anchors when creating "
+        "sourced cards.",
         "",
         "When a <current-card> block is present in a message, that is the "
         "card the user is looking at right now; treat it as the default "
@@ -185,10 +186,12 @@ def build_system_prompt(
             "instead of piling up."
         )
         parts.append(
-            "\nUse fail_cards_now with exact IDs for cards judged wrong; it "
-            "records native Again even when future, hidden, or filtered. "
-            "Never edit due/scheduling rows. Report preserved hidden state "
-            "and offer make_cards_available, which leaves the failure intact."
+            "\nUse fail_cards_now only with exact IDs judged wrong. If absent "
+            "from <current-card>, use find_cards and inspect each matching "
+            "template/prompt; never fail an unreviewed broad result. It records "
+            "native Again even when future, hidden, or filtered. Never edit "
+            "scheduling rows. Report preserved hidden state and offer "
+            "make_cards_available, which leaves the failure intact."
         )
         parts.append(
             "\nFor many-note operations, don't loop propose_note_edit: use "

@@ -61,6 +61,9 @@ milestones.
   whole-session rollback.
 - Fail exact future, suspended, buried, and filtered-deck cards through Anki's
   native scheduler, with a dedicated confirmation/audit chip.
+- Search with native Anki syntax at card level without collapsing a matching
+  sibling to its note; results include template, deck, hidden, flag, and
+  scheduling context for safe exact-ID selection.
 - Preserve existing hidden state, report it explicitly, and offer a separate
   “Make available” action that leaves the recorded failure intact.
 - Carry neutral Agent Skills for card authoring, curriculum design, safe
