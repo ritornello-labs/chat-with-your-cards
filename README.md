@@ -96,7 +96,7 @@ cd ui && npm run dev
 ```
 
 The GUI smoke test uses
-[`anki-addon-workbench`](https://github.com/elvis-sik/anki-addon-workbench) to
+[`anki-addon-workbench`](https://github.com/ritornello-labs/anki-addon-workbench) to
 install the add-on into a disposable profile, drive the real send and proposal
 paths, manipulate real test notes, and capture light/dark screenshots. It never
 opens or changes the user's normal Anki profile.
