@@ -1,7 +1,7 @@
 {
-    "package": "chat_with_your_cards",
-    "name": "Chat With Your Cards",
-    "min_point_version": 250500,
-    "human_version": "0.1.0",
-    "homepage": ""
+  "package": "chat_with_your_cards",
+  "name": "Chat With Your Cards",
+  "min_point_version": 250500,
+  "human_version": "0.1.0",
+  "homepage": "https://github.com/ritornello-labs/chat-with-your-cards"
 }

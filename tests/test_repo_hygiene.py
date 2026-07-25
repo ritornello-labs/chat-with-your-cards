@@ -8,7 +8,9 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKSPACE_PATH = "/" + str(Path("Users") / "elvis" / "Code" / "anki-studying")
+# The developer's checkout parent, derived at runtime so no absolute path is
+# hardcoded here (this guard would otherwise exempt itself from its own scan).
+WORKSPACE_PATH = str(ROOT.parent)
 
 SKIP_PARTS = {
     ".git",

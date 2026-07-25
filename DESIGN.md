@@ -193,7 +193,7 @@ The existing `ai-enhanced-learning` skill (`skills/anki-card-authoring/`) is the
 
 **Agent environment / tool limits (added 2026-07-12; made mode-conditional 2026-07-13).** In the default `sandbox` agent-tools mode the dock spawns the CLI with `--disallowedTools Bash,Edit,Write,NotebookEdit` (card content is untrusted input → RCE risk, §5), and that disallow propagates to subagents (verified: a subagent's `Write` failed). But the agent wasn't *told* this, so it assumed it had shell via a subagent, tried to write a file, failed, and flip-flopped (dogfood). Fix has two channels: a tight one-line constraint in `--append-system-prompt` (guaranteed main-agent delivery, kept under the rule-3 length ceiling), plus a fuller `user_files/agent-home/CLAUDE.md` (`skills.materialize_agent_environment`, regenerated each run) — Claude Code loads CLAUDE.md from cwd for the main agent *and* subagents, so it's the one place the limits reach a subagent. In sandbox the agent is told to hand the user a recipe when a task needs code execution or media generation, rather than attempting it. **Both channels are now conditional on `agent_tools` (§5):** in `full` mode the shell/file tools are actually on, so the same two channels instead tell the agent it *has* shell/write, warn that card content is untrusted (injection risk), and steer it to the proposal tools and AnkiConnect (never direct `.anki2` writes) — they must never lie about the live tool posture in either direction. Length ceiling (< 4,000 chars) is re-tested for both modes. **Session-preamble freshness — intentional Claude-Code parity (decided 2026-07-13):** the system prompt and CLAUDE.md are captured at session start (per Anki run for CLAUDE.md), so a *mid-session* sandbox↔full switch (which respawns with `--resume`) does **not** rewrite them until the next chat/launch — same as model/effort/permission-mode. This deliberately mirrors Claude Code's own model: a continued/resumed conversation keeps the preamble it was born with rather than retroactively rewriting it, and switching the model there doesn't re-read CLAUDE.md either. We do not special-case this: a fresh chat always gets the correct text, which is the same escape hatch Claude Code offers. (We *could* regenerate the append-prompt/CLAUDE.md on our respawn, but chose parity over a bespoke divergence — the switch is rare and the next chat is correct.)
 
-**Agent-proposed NEW skills (workspace task #20, added 2026-07-16).** The
+**Agent-proposed NEW skills (task #20, added 2026-07-16).** The
 self-improvement loop generalized: `propose_new_skill(name, description,
 markdown, rationale)` lets the agent propose saving a reusable workflow it
 worked out with the user (the canonical example: a TTS-audio pipeline via the
@@ -219,12 +219,12 @@ the user deletes the directory to undo.
 Flow: agent calls `propose_note` → ProposalManager validates (note type exists, deck exists or is creatable, required fields present, duplicate check via Anki's dupe detection) → proposal card renders in the chat stream with editable fields, deck picker, tag editor, Accept / Edit / Reject.
 
 **Shared interaction renderer (2026-07-15).** New-note proposal cards now adapt
-the local Proposal payload to the renderer-neutral upstream interaction
-protocol and render through the exact same packaged React component as the
-private front-end. The canonical package lives at
-`the private upstream package tree` in a private upstream repository;
-this repository vendors its built tarball rather than using a non-reproducible
-sibling `file:` path. Execution remains local and every collection mutation
+the local Proposal payload to a renderer-neutral upstream interaction
+protocol and render through the same packaged React component used by that
+protocol's other (currently private) front-ends. The canonical package
+sources live in a separate first-party repository that is not yet public;
+this repository vendors the built tarball rather than using a
+non-reproducible sibling `file:` path. Execution remains local and every collection mutation
 still passes through ProposalManager. Field edits no longer ride along with an
 accept click: Save creates a validated, re-previewed immutable revision, and
 Accept names that exact revision. Stale approvals fail closed. This first
@@ -233,12 +233,12 @@ stay on the existing renderer until their protocol operations are designed.
 
 **Interaction-ui posture — keep, freeze, then swap to modular packages
 (decided 2026-07-16).** Clarified after the broker discussion: what this repo
-consumes is a *component library*, NOT the upstream broker — the
+consumes is a *component library*, NOT the upstream broker layer — the
 broker protocol (semantic operations, executors, lifecycle, transport) is not
 in CWYC and must never be imported here. Decisions:
 
 1. **Keep the vendored renderer, frozen.** The pinned tarball stays exactly
-   as-is (no upgrades tracking upstream needs) until the upstream split below
+   as-is (no upgrades tracking other consumers' needs) until the upstream split below
    lands. Do not extend CWYC's use of it in the meantime.
 2. **Upstream splits into layered packages** (work happens in the
    interaction/infra repo, not here): `interaction-schema` — the block
@@ -265,8 +265,8 @@ in CWYC and must never be imported here. Decisions:
    stale `proposal-card` selectors). Task #21 (playable audio in proposal
    previews) builds after that; whether audio-in-preview becomes a
    `card_preview` schema feature or CWYC-local wrapping is decided when #21
-   is specced. **Done 2026-07-16:** upstream split landed (`upstream`
-   `interaction-schema` 1.0.0 + `interaction-ui-react` 0.2.0, broker
+   is specced. **Done 2026-07-16:** upstream split landed
+   (`interaction-schema` 1.0.0 + `interaction-ui-react` 0.2.0, broker
    client separate; `card_preview` grandfathered as an alias of
    `x-anki.card_preview` behind the new extension namespace); CWYC swapped in
    one commit — adapter now emits `InteractionPresentation` (host-owned
@@ -298,7 +298,7 @@ URI; `SUPPORTED_PRESENTATION_VERSIONS = ["1.0","1.1"]` so 1.0 trees still
 validate) and `interaction-ui-react` 0.3.0 renders an `.eui-media` player
 strip (audio `controls`, `preload=metadata`, aria-labeled, no autoplay, with
 a defensive re-check skipping hostile/malformed entries). **Landed
-2026-07-18** (`upstream` schema 23 tests / renderer 19
+2026-07-18** (upstream: schema 23 tests / renderer 19
 tests): CWYC vendored the 1.1.0/0.3.0 tarballs and its adapter (`version:
 "1.1"`) maps `proposal.media` onto the preview block, guarding non-`data:`
 src at the first trusted layer. Verified end-to-end — browser preview
@@ -484,7 +484,7 @@ budgets vs the existing 8 MB inline cap; and how attachments interact with
 - **Tool calls read as plain language**: the transcript maps `mcp__anki__*` calls to friendly labels ("Searched your cards", "Read a note", …), hides raw JSON payloads and internal CLI plumbing (ToolSearch), and hides `propose_*` chips since the proposal card itself is the visible artifact.
 - **Auto-accept scope**: auto-accept mode applies to *creations and native card grading* by default. Grading does not rewrite card content; it records the exact honest Again review the caller requested through the audited native scheduler core. Both have separate counters under the configured session cap. Edits mutate existing user content and stay proposal-gated unless a separate, explicit auto-accept-edits toggle is enabled.
 
-**Pinning**: a dock panel lets the user pin deck, tags, note type, and prefilled field values, through Anki-editor-like selectors styled to the dock — populated from a `collection_meta` event (deck names, note types + their fields, existing tags) pushed on web-ready, and per-field default inputs that render from the selected note type's actual fields. **All three selectors are typeable with in-DOM autocomplete (rebuilt 2026-07-14, dogfood: native `<select>` popups render at broken screen positions inside the Anki webview and can't be typed in):** Deck and Note type are `ComboBox` components (filtered suggestion list rendered inside the panel, match highlighting, arrow/Enter/Esc navigation; deck allows free text since the agent can create decks, note type reverts to the last valid value on blur), Tags is a `TagChips` chip editor (Enter/comma/space commits, Backspace-on-empty removes, suggestions from existing tags — the Anki-editor tag UX). Nothing in the panel uses native `<select>`/`<datalist>`. Tag chips follow Anki's editor proportions (12.5px rounded-rect surface chips with a hover-red delete affordance — the first cut's 11px pills were unreadably small, dogfood 2026-07-14). Suggestion lists render at most 40 items with an "…N more — keep typing" overflow line: real collections have tens of thousands of tags (tens of thousands observed), and rendering the unfiltered list froze the panel solid (dogfood 2026-07-14). Pins are committed with Apply (draft-local until then); "Clear" resets them. Pinned tags are a **floor, not a ceiling**: they are always added, but the agent may still propose additional tags, and the user edits the final tag set per-proposal on the card (below). A stricter "pinned tags exclusive" mode is a possible future toggle.
+**Pinning**: a dock panel lets the user pin deck, tags, note type, and prefilled field values, through Anki-editor-like selectors styled to the dock — populated from a `collection_meta` event (deck names, note types + their fields, existing tags) pushed on web-ready, and per-field default inputs that render from the selected note type's actual fields. **All three selectors are typeable with in-DOM autocomplete (rebuilt 2026-07-14, dogfood: native `<select>` popups render at broken screen positions inside the Anki webview and can't be typed in):** Deck and Note type are `ComboBox` components (filtered suggestion list rendered inside the panel, match highlighting, arrow/Enter/Esc navigation; deck allows free text since the agent can create decks, note type reverts to the last valid value on blur), Tags is a `TagChips` chip editor (Enter/comma/space commits, Backspace-on-empty removes, suggestions from existing tags — the Anki-editor tag UX). Nothing in the panel uses native `<select>`/`<datalist>`. Tag chips follow Anki's editor proportions (12.5px rounded-rect surface chips with a hover-red delete affordance — the first cut's 11px pills were unreadably small, dogfood 2026-07-14). Suggestion lists render at most 40 items with an "…N more — keep typing" overflow line: real collections can have tens of thousands of tags, and rendering the unfiltered list froze the panel solid (dogfood 2026-07-14). Pins are committed with Apply (draft-local until then); "Clear" resets them. Pinned tags are a **floor, not a ceiling**: they are always added, but the agent may still propose additional tags, and the user edits the final tag set per-proposal on the card (below). A stricter "pinned tags exclusive" mode is a possible future toggle.
 
 **Proposed destination is editable**: create-proposal cards carry an editable deck dropdown (from `collection_meta`) and an editable tag chip editor pre-filled with the proposed tags, so the user reviews and changes where the note lands and how it's tagged before accepting; the chosen deck/tags flow through on accept.
 
@@ -522,7 +522,7 @@ budgets vs the existing 8 MB inline cap; and how attachments interact with
 - **Context-window usage (added 2026-07-13)**: the stream's `usage` object carries only cumulative per-turn token counts — `input_tokens`/`output_tokens`/`cache_creation_input_tokens`/`cache_read_input_tokens` (Anthropic API usage field names). "Context used" for a turn is approximated as `input_tokens + cache_read_tokens + cache_creation_tokens` (the size of that turn's own request, since each call resends the growing conversation as its input — no manual summing across turns). The footer shows a compact `128k / 1M context` readout with a thin proportional bar (accent fill, turning the warning red past ~80% full). The window size prefers the CLI's own per-turn `modelUsage.contextWindow` when present, else a hardcoded per-model table (`contextWindow.ts`, mirrored in `claude_cli.py`). **Staleness fix (2026-07-14):** the live reported window is per-model and only refreshes on the next real turn, so after a model switch it lagged — an "Opus" label could sit over a stale `200k` from the previous Haiku turn (dogfood). `setAgent` now drops the live window on a model change so the footer falls back to the table for the newly selected model immediately.
   - **Window size — live value preferred, table as fallback (refined 2026-07-13 via the Slice-2 spike).** The `result` message *does* carry the real per-turn window in a `modelUsage` map (`modelUsage.<model-id>.contextWindow`, e.g. `1000000` — dogfooded against 2.1.207, contra the earlier "no window in stream" belief). `_context_window_from_result()` (`backends/claude_cli.py`) pulls it, picking the token-**dominant** entry's window so a smaller-window subagent doesn't skew the main-thread gauge; it flows through `UsageUpdate.context_window` → the `usage` payload → `UsageFooter.tsx`, which **prefers it** over the hardcoded table. The per-model tables — `context_window_for()` (Python, unit-tested) and its TS port `ui/src/contextWindow.ts` — remain as the **fallback** for scripted/older backends that omit `modelUsage` (**1,000,000** for Opus 4.6/4.7/4.8, Sonnet 4.6/5, Fable 5, Mythos*; **200,000** for Sonnet ≤4.5, Haiku ≤4.5, and unrecognized). Net effect: the "unpinned model → pessimistic 200k default" caveat is gone whenever a real turn has run; the table only bites before the first result or on backends without it.
 - **Fast-mode verification (added 2026-07-13)**: the `result` message also reports `fast_mode_state` (`"on"`/`"off"`) — the CLI's ground-truth of whether the running process actually engaged fast mode. It flows through `UsageUpdate.fast_mode_state` → the `usage` payload → the store's `UsageSnapshot.fastState`, verifying that the requested `--settings '{"fastMode":true}'` took effect rather than trusting the arg shape alone. (No dedicated UI badge yet; it's observability/state, and is the authoritative source for the *effective* fast state of the current process should a future badge want to distinguish requested-vs-effective across the respawn boundary.)
-- **First-run onboarding for no-CLI installs, no restart (workspace task #19, added 2026-07-16)**: previously a user without Claude Code got one line ("Claude Code CLI not found — using the built-in demo backend…") and nothing actionable. `ChatController._build_backend()` now pushes a structured `{"type": "setup_needed", "platform": "darwin"|"linux"|"windows"}` event instead (superseding the old notice — no redundant double-messaging), and the UI (`Thread.tsx`, gated inside `ThreadPrimitive.Empty` — only shows on an empty thread) renders a step-numbered setup card: (1) a platform-appropriate install one-liner in a copyable code block + a link to `code.claude.com/docs/en/setup`, (2) sign-in guidance covering **both** paths — subscription (`claude` once, log in via the browser link) and BYOK (Anthropic pay-as-you-go API key, cheapest via Haiku; a button opens Anki's add-on config directly on `anthropic_api_key`/`anthropic_api_key_op`, never asking the user to paste a key into the chat), (3) a **Re-check** button. Re-check (`ChatController.recheck_backend()`, bridge command `recheck_backend`) re-runs `find_claude_cli()` — cheap (just `shutil.which`/`Path.exists`, no subprocess) so it runs synchronously on the main thread unlike the doctor panel's `--version` probes — and on success tears down the demo session/backend and rebuilds for real (`ensure_ready()`), all **with no Anki restart**, matching the existing "no restart" contract `new_chat()`/config-edits already rely on; on failure it pushes a plain notice with a PATH/restart-terminal hint instead. `ui.setup` (store.ts) persists across `reset()` like the rest of the dock chrome, so the card correctly reappears on the next empty thread (new chat) without Python needing to re-push it. Dev replayer: typing **setup** clears the thread and dispatches `setup_needed` for preview; Re-check always "succeeds" after a short delay.
+- **First-run onboarding for no-CLI installs, no restart (task #19, added 2026-07-16)**: previously a user without Claude Code got one line ("Claude Code CLI not found — using the built-in demo backend…") and nothing actionable. `ChatController._build_backend()` now pushes a structured `{"type": "setup_needed", "platform": "darwin"|"linux"|"windows"}` event instead (superseding the old notice — no redundant double-messaging), and the UI (`Thread.tsx`, gated inside `ThreadPrimitive.Empty` — only shows on an empty thread) renders a step-numbered setup card: (1) a platform-appropriate install one-liner in a copyable code block + a link to `code.claude.com/docs/en/setup`, (2) sign-in guidance covering **both** paths — subscription (`claude` once, log in via the browser link) and BYOK (Anthropic pay-as-you-go API key, cheapest via Haiku; a button opens Anki's add-on config directly on `anthropic_api_key`/`anthropic_api_key_op`, never asking the user to paste a key into the chat), (3) a **Re-check** button. Re-check (`ChatController.recheck_backend()`, bridge command `recheck_backend`) re-runs `find_claude_cli()` — cheap (just `shutil.which`/`Path.exists`, no subprocess) so it runs synchronously on the main thread unlike the doctor panel's `--version` probes — and on success tears down the demo session/backend and rebuilds for real (`ensure_ready()`), all **with no Anki restart**, matching the existing "no restart" contract `new_chat()`/config-edits already rely on; on failure it pushes a plain notice with a PATH/restart-terminal hint instead. `ui.setup` (store.ts) persists across `reset()` like the rest of the dock chrome, so the card correctly reappears on the next empty thread (new chat) without Python needing to re-push it. Dev replayer: typing **setup** clears the thread and dispatches `setup_needed` for preview; Re-check always "succeeds" after a short delay.
 
 ## 10. Packaging & compatibility
 
@@ -748,11 +748,13 @@ Tailscale certs).
 
 ### 17.2 First card (the proving ground)
 
-"List the members of a fixed canonical sequence, in order." Chosen because it dodges
-both hard problems: the atomic cards **already exist** in such a deck
-("given a member, what comes after it"), the composition is a *declared*
-fixed set (no graph discovery, never goes stale), and every mechanism it
-needs is FSRS-native. Build this before anything semantic.
+A pure ordered-enumeration card — "list the members of this fixed
+sequence, in order" (month orders, planet orders, dynasty successions,
+canonical book orders all fit). Chosen because it dodges both hard
+problems: the atomic cards already exist in such decks ("given a member,
+what comes after it"), the composition is a *declared* fixed set (no
+graph discovery, never goes stale), and every mechanism it needs is
+FSRS-native. Build this before anything semantic.
 
 ### 17.3 Graphs: two kinds, very different difficulty
 
@@ -767,8 +769,8 @@ needs is FSRS-native. Build this before anything semantic.
   update the big card's stored reference set as needed. Believed
   tractable and inexpensive per the user's experience with search agents.
   Scaling this to a **full-collection dependency-graph backfill** (and
-  eventually to other users' collections) is designed and costed in
-  [`GRAPH_BACKFILL.md`](GRAPH_BACKFILL.md): naive pairwise LLM checking is
+  eventually to other users' collections) is designed and costed in a
+  separate (private) planning document: naive pairwise LLM checking is
   ~$100k+; embeddings-blocking + per-note neighborhood judging is
   ~$50–300 one-time and ~1¢ per new note.
 

@@ -116,9 +116,11 @@ def build_system_prompt(
 ) -> str:
     """Assemble the string passed to `--append-system-prompt`.
 
-    COMPLIANCE.md rule 3: this must stay lean and roughly constant-size. The ceiling test asserts under 4,000 chars in the worst case. The two unbounded inputs that used to be
-    inlined here - the collection overview and the user's note conventions -
-    are gone from this function's signature on purpose:
+    COMPLIANCE.md rule 3: this must stay lean and roughly constant-size
+    (the ceiling test asserts under 4,000 chars in the worst case). The two
+    unbounded inputs that used to be inlined here - the collection overview
+    and the user's note conventions - are gone from this function's
+    signature on purpose:
       - the overview is a TOOL (get_collection_overview, design change
         2026-07-14; it was previously injected into the first user message);
       - conventions are a skill the harness loads on demand (see

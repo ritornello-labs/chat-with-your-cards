@@ -2,6 +2,7 @@
 name = "chat-with-your-cards"
 version = "0.1.0"
 description = "Anki add-on: a collapsible AI chat dock for talking to your collection."
+license = "MIT"
 requires-python = ">=3.10"
 dependencies = []
 

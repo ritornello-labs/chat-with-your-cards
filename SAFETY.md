@@ -1,7 +1,9 @@
 # Collection safety: design and hazard taxonomy
 
-Every claim below is cited against the Anki **25.09.2** source vendored at
-`_vendor/anki-src`. Read `rslib/src/...:LINE` as a real line number, not a gesture.
+Every claim below is cited against the Anki **25.09.2** source — read
+`rslib/src/...:LINE` as a real line number in the upstream tree at
+<https://github.com/ankitects/anki/tree/25.09.2>, not a gesture. (Anki's
+source is AGPL-3 and deliberately not vendored into this MIT repo.)
 
 Written after an agent-proposed note ended up leaving the collection in an inconsistent
 state involving a filtered deck. The incident is the occasion; the point is that our

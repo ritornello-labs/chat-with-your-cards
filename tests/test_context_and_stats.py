@@ -135,8 +135,9 @@ class ContextTest(unittest.TestCase):
         self.assertNotIn("No shell/file-writing", prompt)
 
     def test_system_prompt_length_ceiling_worst_case(self) -> None:
-        """COMPLIANCE.md rule 3 regression guard: the assembled --append-system-prompt content must stay bounded (under 4,000 chars) in the worst case. Assert real headroom below that in
-        the worst case across every permission mode AND both agent-tools
+        """COMPLIANCE.md rule 3 regression guard: the assembled
+        --append-system-prompt content must stay bounded (under 4,000 chars)
+        in the worst case across every permission mode AND both agent-tools
         modes, with a heavily-pinned session (every pin type set, a long deck
         path, the longest stock note-type name, several tags, two field
         defaults) - larger than any pin configuration the dock's dropdowns/chip

@@ -191,13 +191,11 @@ revision is rejected before the Anki write chokepoint. Other proposal kinds
 retain the legacy React renderer and bridge commands until their
 presentation adapters exist.
 
-The canonical package sources are
-`the private upstream package tree` and
-`.../interaction-ui-react` in the `upstream` repository (see its
-`its planning docs` for the split's design and report). CWYC
-commits the exact `npm pack` tarballs under `ui/vendor/`, so this repository
-does not depend on a sibling checkout or a private registry — deliberately
-kept off public npm (DESIGN.md "Interaction-ui posture").
+The canonical package sources live in a separate first-party repository
+that is not yet public. CWYC commits the exact `npm pack` tarballs under
+`ui/vendor/`, so this repository does not depend on a sibling checkout or a
+private registry — the packages are deliberately not on public npm yet
+(DESIGN.md "Interaction-ui posture").
 
 ### Impedance mismatches hit against assistant-ui's model
 
