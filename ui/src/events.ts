@@ -270,6 +270,32 @@ export interface WidgetOfferEvent {
 }
 
 /**
+ * Ask-each-read (approvals.py): a read tool call is BLOCKED on the MCP thread
+ * waiting for this answer. Python pushes this, then waits up to
+ * APPROVAL_TIMEOUT_S (120s) for a `tool_approval_response` command before
+ * denying by itself. Rendering it is therefore not optional - an unhandled
+ * event is a two-minute freeze followed by a spurious "user declined".
+ */
+export interface ToolApprovalEvent {
+  type: "tool_approval";
+  id: string;
+  tool: string;
+  summary: string;
+}
+
+/**
+ * The approval was settled: by our own response (echoed back), by the 120s
+ * timeout (`reason: "timed out"`), or by session teardown. Idempotent - the
+ * chip may already have marked itself resolved optimistically.
+ */
+export interface ToolApprovalResolvedEvent {
+  type: "tool_approval_resolved";
+  id: string;
+  allow: boolean;
+  reason?: string;
+}
+
+/**
  * First-run onboarding (task #19): pushed by controller.py's _build_backend
  * the first time it falls back to the demo backend because Claude Code
  * couldn't be found (find_claude_cli() returned None). `platform` is
@@ -311,6 +337,8 @@ export type KnownChatEvent =
   | InlineImageEvent
   | InlineWidgetEvent
   | WidgetOfferEvent
+  | ToolApprovalEvent
+  | ToolApprovalResolvedEvent
   | SetupNeededEvent
   | SetupResolvedEvent;
 

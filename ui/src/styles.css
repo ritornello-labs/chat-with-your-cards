@@ -763,6 +763,50 @@ body {
   margin-top: 8px;
 }
 
+/* Ask-each-read approval chip. Deliberately louder than the widget offer: a
+   pending one means a tool call is blocked and the agent is stalled until the
+   user answers, so it carries the warm warning accent rather than blending in
+   as chrome. */
+#cwyc-root .cwyc-approval {
+  margin: 6px 0 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--cwyc-warn);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: var(--cwyc-warn-soft);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--cwyc-fg);
+}
+#cwyc-root .cwyc-approval code {
+  font-family: var(--cwyc-mono);
+  font-size: 11px;
+}
+#cwyc-root .cwyc-approval-args {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--cwyc-surface);
+  color: var(--cwyc-fg-subtle);
+  font-family: var(--cwyc-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+#cwyc-root .cwyc-approval-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+#cwyc-root .cwyc-approval-resolved {
+  border-color: var(--cwyc-border);
+  border-left-width: 1px;
+  background: var(--cwyc-surface);
+  color: var(--cwyc-fg-subtle);
+  font-size: 11px;
+}
+
 /* First-run onboarding (task #19): the "Claude Code not found" setup card,
    shown in place of the plain empty-thread line (Thread.tsx) when
    ui.setup is set. Sized to sit comfortably in the ~360-420px dock floor

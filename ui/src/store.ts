@@ -146,6 +146,22 @@ interface WidgetOfferDataPart {
   readonly data: { id: string; title: string; resolved: boolean };
 }
 
+/** Ask-each-read approval chip. A pending one means a tool call is BLOCKED on
+ *  the MCP thread; `outcome` records how it settled (ours or Python's 120s
+ *  timeout) so the chip never lies about what happened. */
+interface ToolApprovalDataPart {
+  readonly type: "data";
+  readonly name: "tool_approval";
+  readonly data: {
+    id: string;
+    tool: string;
+    summary: string;
+    resolved: boolean;
+    allow?: boolean;
+    reason?: string;
+  };
+}
+
 type AssistantPart =
   | TextPart
   | ReasoningPart
@@ -155,7 +171,8 @@ type AssistantPart =
   | ErrorDataPart
   | ImageDataPart
   | WidgetDataPart
-  | WidgetOfferDataPart;
+  | WidgetOfferDataPart
+  | ToolApprovalDataPart;
 
 type MessageStatus =
   | { type: "running" }
@@ -632,6 +649,14 @@ export class ChatStore {
       case "widget_offer":
         this.appendWidgetOffer(event as { title?: string });
         break;
+      case "tool_approval":
+        this.appendToolApproval(event as { id?: string; tool?: string; summary?: string });
+        break;
+      case "tool_approval_resolved":
+        this.markToolApprovalResolved(
+          event as { id?: string; allow?: boolean; reason?: string }
+        );
+        break;
       case "usage":
         this.setUsage(event as UsageEvent);
         break;
@@ -984,6 +1009,73 @@ export class ChatStore {
     };
     this.updateMessage(current.id, (msg) => ({ ...msg, content: [...msg.content, part] }));
     this.emit();
+  }
+
+  /**
+   * Ask-each-read: a tool call is blocked on the MCP thread until this is
+   * answered. The id comes from Python (approvals.py's broker owns it) - never
+   * mint one here, it is the handle the waiting thread is keyed on.
+   */
+  private appendToolApproval(event: { id?: string; tool?: string; summary?: string }): void {
+    const id = String(event.id ?? "");
+    if (!id) return; // unanswerable: no handle to respond with
+    const current = this.ensureCurrentAssistant();
+    const part: ToolApprovalDataPart = {
+      type: "data",
+      name: "tool_approval",
+      data: {
+        id,
+        tool: String(event.tool ?? ""),
+        summary: String(event.summary ?? ""),
+        resolved: false,
+      },
+    };
+    this.updateMessage(current.id, (msg) => ({ ...msg, content: [...msg.content, part] }));
+    this.emit();
+  }
+
+  /** Settled by us (echo), by the 120s timeout, or by session teardown.
+   *  Idempotent: respondToolApproval already marked it optimistically. */
+  private markToolApprovalResolved(event: { id?: string; allow?: boolean; reason?: string }): void {
+    this.setToolApprovalResolved(String(event.id ?? ""), {
+      allow: !!event.allow,
+      reason: event.reason ? String(event.reason) : undefined,
+    });
+  }
+
+  private setToolApprovalResolved(
+    approvalId: string,
+    outcome: { allow: boolean; reason?: string }
+  ): void {
+    if (!approvalId) return;
+    let touched = false;
+    this.messages = this.messages.map((msg) => {
+      if (msg.role !== "assistant") return msg;
+      let hit = false;
+      const content = msg.content.map((part) => {
+        if (part.type !== "data" || part.name !== "tool_approval" || part.data.id !== approvalId) {
+          return part;
+        }
+        hit = true;
+        return {
+          ...part,
+          data: { ...part.data, resolved: true, allow: outcome.allow, reason: outcome.reason },
+        };
+      });
+      touched = touched || hit;
+      return hit ? { ...msg, content } : msg;
+    });
+    if (touched) this.emit();
+  }
+
+  /**
+   * The Allow/Deny buttons. Marks the chip resolved immediately rather than
+   * waiting for Python's echo, so the UI never looks stuck after a click; the
+   * echo (or a timeout) lands on the same id and is idempotent.
+   */
+  respondToolApproval(approvalId: string, allow: boolean): void {
+    this.setToolApprovalResolved(approvalId, { allow });
+    postCommand({ type: "tool_approval_response", id: approvalId, allow });
   }
 
   /**

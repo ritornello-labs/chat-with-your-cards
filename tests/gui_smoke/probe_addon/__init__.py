@@ -2304,6 +2304,90 @@ def _run_checks() -> dict[str, Any]:
     check("proposal media: existing [sound:] ref -> preview strip (task #25)",
           _existing_media_preview)
 
+    def _tool_approval_round_trip() -> dict[str, Any]:
+        """Task #17 end-to-end against the REAL broker. The bug was that
+        approvals.py blocked an MCP thread for 120s on an answer the UI could
+        never send, so the only meaningful test drives the actual blocking
+        call: request() runs on a background thread (exactly like a real MCP
+        tool call), the chip must appear in the real dock webview, and clicking
+        Allow must unblock the waiter with True. A browser-only test cannot
+        prove this - it was the Python<->UI seam that was broken."""
+        import threading as _threading
+
+        addon = importlib.import_module(ADDON_PACKAGE)
+        # The broker is built lazily by _ensure_mcp() on first tool use, so a
+        # smoke profile that never started a real backend has none yet. Drive
+        # the production path rather than hand-building a replica - the wiring
+        # (push_on_main -> dock.bridge.push) is precisely what was broken.
+        addon._ensure_mcp()
+        broker = state.approvals
+        if broker is None:
+            raise AssertionError("approval broker missing after _ensure_mcp()")
+
+        result: dict[str, Any] = {}
+
+        def ask() -> None:
+            result["allowed"] = broker.request("search_notes", '{"query": "deck:Default"}')
+
+        waiter = _threading.Thread(target=ask, daemon=True)
+        waiter.start()
+
+        def _chip() -> Any:
+            return _eval_js(
+                state.dock.web,
+                "(function() {"
+                "  var c = document.querySelectorAll('[data-testid=tool-approval]');"
+                "  var el = c[c.length - 1];"
+                "  if (!el) return null;"
+                "  return {resolved: el.getAttribute('data-resolved'),"
+                "          text: (el.textContent || '').slice(0, 80),"
+                "          allow: el.querySelectorAll('[data-testid=tool-approval-allow]').length};"
+                "})();",
+                DOM_TIMEOUT_MS,
+                "approval chip state",
+            )
+
+        _wait_until(lambda: bool(_chip()), STREAM_TIMEOUT_MS, "approval chip to render")
+        pending = _chip()
+        if pending.get("resolved") == "true" or not pending.get("allow"):
+            raise AssertionError(f"approval chip is not answerable: {pending}")
+        if "search_notes" not in str(pending.get("text", "")):
+            raise AssertionError(f"approval chip does not name the tool: {pending}")
+
+        _eval_js(
+            state.dock.web,
+            "(function() {"
+            "  var c = document.querySelectorAll('[data-testid=tool-approval]');"
+            "  c[c.length - 1].querySelector('[data-testid=tool-approval-allow]').click();"
+            "  return true; })();",
+            DOM_TIMEOUT_MS,
+            "approval allow click",
+        )
+
+        # MUST pump the Qt event loop while waiting: the click's answer travels
+        # back through pycmd, which is dispatched on THIS (main) thread. A bare
+        # thread.join() here would block the very loop that delivers the
+        # response and deadlock until the join timed out. Bounded well under
+        # APPROVAL_TIMEOUT_S so a pass proves the click released the waiter,
+        # not the 120s auto-deny.
+        _wait_until(
+            lambda: not waiter.is_alive(),
+            10_000,
+            "Allow to unblock the waiting tool call",
+        )
+        if result.get("allowed") is not True:
+            raise AssertionError(f"blocked call did not receive Allow: {result}")
+
+        _wait_until(
+            lambda: _chip().get("resolved") == "true",
+            DOM_TIMEOUT_MS,
+            "approval chip to show resolved",
+        )
+        return {"allowed": result["allowed"], "chip": _chip()}
+
+    check("ask-each-read: approval chip unblocks a real tool call",
+          _tool_approval_round_trip)
+
     def _hover_geometry_stable() -> dict[str, Any]:
         """Hovering a header button must change ONLY its background - never
         padding, font, size, or radius. A geometry change on hover shrinks the

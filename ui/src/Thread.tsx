@@ -13,6 +13,7 @@ import { ModeChip, ModelPicker, PinsButton, ToolsChip } from "./components/Compo
 import { VimComposer } from "./components/VimComposer";
 import { WidgetCard, WidgetOfferChip } from "./components/WidgetCard";
 import { SetupCard } from "./components/SetupCard";
+import { ToolApprovalChip } from "./components/ToolApprovalChip";
 import { GradingCard } from "./components/GradingCard";
 
 function UserMessage() {
@@ -74,6 +75,13 @@ function AssistantMessage({ store }: { store: ChatStore }) {
             </ErrorBoundary>
           ),
           error: ErrorBanner,
+          // Ask-each-read: a blocked tool call is waiting on this (approvals.py).
+          tool_approval: (props: { data?: unknown }) => (
+            <ToolApprovalChip
+              {...(props as { data: Parameters<typeof ToolApprovalChip>[0]["data"] })}
+              store={store}
+            />
+          ),
           image: (props: Record<string, unknown>) => (
             <InlineImage {...(props as { data: { src: string; caption: string } })} />
           ),

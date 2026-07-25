@@ -32,6 +32,7 @@ type Step =
   | { kind: "image"; src: string; caption: string }
   | { kind: "widget"; html: string; title: string }
   | { kind: "widget_offer"; title: string }
+  | { kind: "tool_approval"; approvalId: string; tool: string; summary: string }
   | { kind: "error"; message: string };
 
 const DEMO_CSS =
@@ -100,6 +101,21 @@ function compile(steps: readonly Step[]): Array<[number, ChatEvent]> {
       timeline.push([delay(), { type: "inline_widget", html: step.html, title: step.title }]);
     } else if (step.kind === "widget_offer") {
       timeline.push([delay(), { type: "widget_offer", title: step.title }]);
+    } else if (step.kind === "tool_approval") {
+      // Mirrors approvals.py: push the request, then STOP. Nothing further is
+      // scheduled - the real MCP thread is blocked here, and the rest of the
+      // turn only resumes once `tool_approval_response` comes back (handled in
+      // the command switch below), so the dev harness reproduces the stall
+      // that made this bug invisible.
+      timeline.push([
+        delay(),
+        {
+          type: "tool_approval",
+          id: step.approvalId,
+          tool: step.tool,
+          summary: step.summary,
+        },
+      ]);
     } else if (step.kind === "error") {
       timeline.push([delay(), { type: "error", message: step.message }]);
       endedWithError = true;
@@ -417,6 +433,46 @@ const WIDGET_HTML =
   ".catch(function(){line('network fetch blocked (CSP)',true);});" +
   "<\/script>";
 
+/** Ask-each-read (task #17): the turn STALLS on the approval, exactly as the
+ *  real MCP thread does, and only continues when the chip answers. */
+let approvalCounter = 0;
+const pendingApproval: { id: string | null } = { id: null };
+
+function approvalScript(): Step[] {
+  approvalCounter += 1;
+  const id = `a${approvalCounter}`;
+  pendingApproval.id = id;
+  return [
+    { kind: "text", text: "Let me look at the cards in that deck.\n\n" },
+    {
+      kind: "tool_approval",
+      approvalId: id,
+      // Faithful to __init__.py: the summary is json.dumps(args)[:120].
+      tool: "search_notes",
+      summary: '{"query": "deck:\\"Math::Analysis\\"", "limit": 20}',
+    },
+  ];
+}
+
+/** What the agent does once the user answers - the half a real backend would
+ *  run after `request()` returns. */
+function afterApproval(allow: boolean): Step[] {
+  if (!allow) {
+    return [{ kind: "text", text: "Understood — I'll skip that search. Anything else?" }];
+  }
+  return [
+    {
+      kind: "tool",
+      tool: "search_notes",
+      summary: 'deck:"Math::Analysis"',
+      result: "12 notes",
+      ok: true,
+      durationMs: 240,
+    },
+    { kind: "text", text: "Found 12 notes in that deck." },
+  ];
+}
+
 function widgetScript(): Step[] {
   if (!devSettings.widget_rendering) {
     return [
@@ -455,6 +511,7 @@ const MATH_SCRIPT: Step[] = [
 function selectScript(userText: string): Step[] {
   const text = userText.toLowerCase();
   if (text.includes("error")) return ERROR_SCRIPT;
+  if (text.includes("approve") || text.includes("approval")) return approvalScript();
   if (text.includes("math") || text.includes("mermaid")) return MATH_SCRIPT;
   if (text.includes("widget") || text.includes("chart")) return widgetScript();
   if (text.includes("image") || text.includes("picture")) return IMAGE_SCRIPT;
@@ -801,6 +858,17 @@ export function installDevReplayer(): void {
           window.chatUI?.dispatch({ type: "setup_resolved" });
         }, 250);
         break;
+      // approvals.py's respond(): echo the resolution (the chip already marked
+      // itself, so this proves idempotency), then let the blocked turn finish.
+      case "tool_approval_response": {
+        const id = String(msg.id ?? "");
+        if (!id || id !== pendingApproval.id) break; // unknown/stale handle
+        pendingApproval.id = null;
+        const allow = Boolean(msg.allow);
+        window.chatUI?.dispatch({ type: "tool_approval_resolved", id, allow });
+        scheduleAll(compile(afterApproval(allow)));
+        break;
+      }
       case "cancel":
         cancelPending();
         window.chatUI?.dispatch({ type: "cancelled" });

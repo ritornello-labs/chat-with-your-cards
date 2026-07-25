@@ -335,17 +335,24 @@ missing entry here is how the word-level diff stayed unimplemented for a year
 while this file claimed it was a known gap.
 
 **Since shipped** (were on this list, no longer gaps): word-level field diff
-(2026-07-23, now `wordDiff` from `@elvis-labs/interaction-ui-react`), pins
-panel, agent/model picker, permission-mode chip + Shift+Tab, doctor panel,
-chat history panel. Cmd+J / Cmd+Shift+J were not lost either — they moved to
-Qt shortcuts (`shortcuts.py`), which is the correct home.
+(2026-07-23, now `wordDiff` from `@elvis-labs/interaction-ui-react`), the
+**ask-each-read approval chip** (2026-07-23 — see below), pins panel,
+agent/model picker, permission-mode chip + Shift+Tab, doctor panel, chat
+history panel. Cmd+J / Cmd+Shift+J were not lost either — they moved to Qt
+shortcuts (`shortcuts.py`), which is the correct home.
+
+**Fixed 2026-07-23 — `tool_approval`.** Was: never handled in `store.ts`, so
+"Ask each read" (the first entry in the mode picker) hung for 120s and then
+auto-denied, because Python blocks on `approvals.py`'s `event.wait(120)` for a
+response the UI could not send. Now `ToolApprovalChip` renders the request with
+its raw tool arguments, Allow autofocused for a keyboard-only loop, and posts
+`tool_approval_response`. The chip marks itself resolved optimistically on
+click; Python's echo (or the timeout, which reports *"Denied (timed out)"*) is
+idempotent. Covered by a GUI-smoke check that drives the **real** broker on a
+background thread and asserts the click — not the 120s timeout — releases it.
 
 **⚠ Functional breakage (was never recorded here):**
 
-- `tool_approval` is never handled in `store.ts`, so the **"Ask each read"
-  permission mode hangs for 120s and then auto-denies** — Python blocks on
-  `approvals.py`'s `event.wait(120)` for a response the UI cannot send. It is
-  the first entry in the mode picker.
 - The **session ledger has no entry point at all** — Python still pushes
   `ledger` events and binds `undo_session` / `open_session_browser`, but there
   is no ledger strip and nothing on the Tools menu, so session-wide revert and
@@ -411,5 +418,5 @@ Still open:
   future pass.
 - Everything under "Not ported from `app.js`" above — re-audited 2026-07-23
   and filed in the working backlog. Note that several of those are *not*
-  cosmetic parity: the `tool_approval` hang, the unreachable ledger/revert
+  cosmetic parity: the unreachable ledger/revert
   path, and invisible proposal tags all affect correctness or safety.
