@@ -13,10 +13,12 @@ is available at
 ## First-party vendored UI packages
 
 `ui/vendor/` contains built tarballs of the first-party packages
-`@elvis-labs/interaction-schema` and `@elvis-labs/interaction-ui-react`
-(copyright Elvis Sikora). Their source repository is not yet public; the
-tarballs are committed so this repository builds hermetically. See
-`ui/README.md` for how they are consumed.
+`@elvis-labs/interaction-schema` and `@elvis-labs/interaction-ui-react`.
+Copyright Elvis Sikora, licensed under the MIT License (declared upstream;
+tarballs built before the declaration are covered by the same grant). Their
+source repository is not yet public; the tarballs are committed so this
+repository builds hermetically. See `ui/README.md` for how they are
+consumed.
 
 ## Bundled JavaScript libraries
 
