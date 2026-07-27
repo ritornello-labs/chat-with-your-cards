@@ -2307,10 +2307,20 @@ body {
   padding: 4px 8px;
   font-size: 12.5px;
   color: var(--cwyc-fg);
+  /* Last resort when even min-content + a wrapped control won't fit: the
+     control drops to its own line rather than overflowing the panel. */
+  flex-wrap: wrap;
 }
 .cwyc-setting-label {
   flex: 1 1 auto;
-  min-width: 0;
+  /* NOT min-width:0 - that let the label shrink to zero and its text spilled
+     OVER the control beside it (the Theme row's three swatch buttons are the
+     widest, so it showed there first; it was a row-level bug, not a Theme
+     one). Flexbox shrinks before it wraps, so flex-wrap alone would not have
+     saved it. min-content = the longest word, so the text can still wrap onto
+     several lines ("Key mappings (vim_mappings)" does) but never overflows.
+     (dogfood 2026-07-23) */
+  min-width: min-content;
 }
 .cwyc-setting-kbd {
   flex: 0 0 auto;
