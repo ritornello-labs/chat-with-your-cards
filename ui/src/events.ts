@@ -293,6 +293,10 @@ export interface ToolApprovalResolvedEvent {
   id: string;
   allow: boolean;
   reason?: string;
+  /** True when the answer arrived after the tool call had already given up its
+   *  slot, so it cannot resume that call - only the agent's next attempt can
+   *  use it. The chip says so rather than implying work continued. */
+  late?: boolean;
 }
 
 /**

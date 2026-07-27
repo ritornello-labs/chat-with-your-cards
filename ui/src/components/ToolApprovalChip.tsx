@@ -22,6 +22,7 @@ export function ToolApprovalChip({
     resolved: boolean;
     allow?: boolean;
     reason?: string;
+    late?: boolean;
   };
   store: ChatStore;
 }) {
@@ -37,8 +38,15 @@ export function ToolApprovalChip({
         className="cwyc-approval cwyc-approval-resolved"
         data-testid="tool-approval"
         data-resolved="true"
+        data-late={data.late ? "true" : undefined}
       >
         {verdict}: <code>{data.tool}</code>
+        {/* The answer came after the call gave up, so nothing resumed on its
+            own - say that plainly instead of leaving the user waiting for
+            output that is never coming. */}
+        {data.late && data.allow ? (
+          <span className="cwyc-approval-late"> — ask again to continue.</span>
+        ) : null}
       </div>
     );
   }

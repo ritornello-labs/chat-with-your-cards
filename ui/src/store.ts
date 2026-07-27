@@ -159,6 +159,7 @@ interface ToolApprovalDataPart {
     resolved: boolean;
     allow?: boolean;
     reason?: string;
+    late?: boolean;
   };
 }
 
@@ -1036,16 +1037,22 @@ export class ChatStore {
 
   /** Settled by us (echo), by the 120s timeout, or by session teardown.
    *  Idempotent: respondToolApproval already marked it optimistically. */
-  private markToolApprovalResolved(event: { id?: string; allow?: boolean; reason?: string }): void {
+  private markToolApprovalResolved(event: {
+    id?: string;
+    allow?: boolean;
+    reason?: string;
+    late?: boolean;
+  }): void {
     this.setToolApprovalResolved(String(event.id ?? ""), {
       allow: !!event.allow,
       reason: event.reason ? String(event.reason) : undefined,
+      late: !!event.late,
     });
   }
 
   private setToolApprovalResolved(
     approvalId: string,
-    outcome: { allow: boolean; reason?: string }
+    outcome: { allow: boolean; reason?: string; late?: boolean }
   ): void {
     if (!approvalId) return;
     let touched = false;
@@ -1059,7 +1066,13 @@ export class ChatStore {
         hit = true;
         return {
           ...part,
-          data: { ...part.data, resolved: true, allow: outcome.allow, reason: outcome.reason },
+          data: {
+            ...part.data,
+            resolved: true,
+            allow: outcome.allow,
+            reason: outcome.reason,
+            late: outcome.late,
+          },
         };
       });
       touched = touched || hit;

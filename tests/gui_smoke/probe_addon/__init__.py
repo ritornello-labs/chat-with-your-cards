@@ -2319,6 +2319,8 @@ def _run_checks() -> dict[str, Any]:
         # smoke profile that never started a real backend has none yet. Drive
         # the production path rather than hand-building a replica - the wiring
         # (push_on_main -> dock.bridge.push) is precisely what was broken.
+        from chat_with_your_cards import approvals as approvals_mod
+
         addon._ensure_mcp()
         broker = state.approvals
         if broker is None:
@@ -2327,7 +2329,7 @@ def _run_checks() -> dict[str, Any]:
         result: dict[str, Any] = {}
 
         def ask() -> None:
-            result["allowed"] = broker.request("search_notes", '{"query": "deck:Default"}')
+            result["verdict"] = broker.request("search_notes", '{"query": "deck:Default"}')
 
         waiter = _threading.Thread(target=ask, daemon=True)
         waiter.start()
@@ -2375,7 +2377,9 @@ def _run_checks() -> dict[str, Any]:
             10_000,
             "Allow to unblock the waiting tool call",
         )
-        if result.get("allowed") is not True:
+        # Must be ALLOW, not PENDING: PENDING would mean the click missed the
+        # grace window and the call gave up, which is the bug this guards.
+        if result.get("verdict") != approvals_mod.ALLOW:
             raise AssertionError(f"blocked call did not receive Allow: {result}")
 
         _wait_until(
@@ -2383,7 +2387,7 @@ def _run_checks() -> dict[str, Any]:
             DOM_TIMEOUT_MS,
             "approval chip to show resolved",
         )
-        return {"allowed": result["allowed"], "chip": _chip()}
+        return {"verdict": result["verdict"], "chip": _chip()}
 
     check("ask-each-read: approval chip unblocks a real tool call",
           _tool_approval_round_trip)

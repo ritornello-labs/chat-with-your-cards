@@ -328,6 +328,7 @@ def _ensure_mcp() -> tuple[str, str]:
 
         specs_by_name = {spec.name: spec for spec in registry.specs(include_trusted=True)}
 
+        from . import approvals as approvals_mod
         from .approvals import ApprovalBroker
 
         def push_on_main(payload: dict[str, Any]) -> None:
@@ -362,7 +363,20 @@ def _ensure_mcp() -> tuple[str, str]:
                 import json as _json
 
                 summary = _json.dumps(args, ensure_ascii=False)[:120]
-                if not state.approvals.request(name, summary):
+                verdict = state.approvals.request(name, summary)
+                if verdict == approvals_mod.PENDING:
+                    # NOT a refusal: the prompt is still on screen, unanswered.
+                    # Saying so plainly is the whole point - handed a bare
+                    # timeout here, the agent told a user their collection was
+                    # busy mid-sync while four prompts sat waiting (dogfood
+                    # 2026-07-23).
+                    raise PermissionError(
+                        f"Approval pending: the user has not answered the prompt for "
+                        f"{name} yet. It is still waiting in the chat. Tell them a "
+                        "prompt needs their answer and stop - do NOT retry this call "
+                        "or try a different tool to work around it."
+                    )
+                if verdict == approvals_mod.DENY:
                     raise PermissionError(f"the user declined this {name} call")
             box: dict[str, Any] = {}
             done = threading.Event()

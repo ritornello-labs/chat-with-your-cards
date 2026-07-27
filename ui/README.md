@@ -345,9 +345,12 @@ auto-denied, because Python blocks on `approvals.py`'s `event.wait(120)` for a
 response the UI could not send. Now `ToolApprovalChip` renders the request with
 its raw tool arguments, Allow autofocused for a keyboard-only loop, and posts
 `tool_approval_response`. The chip marks itself resolved optimistically on
-click; Python's echo (or the timeout, which reports *"Denied (timed out)"*) is
-idempotent. Covered by a GUI-smoke check that drives the **real** broker on a
-background thread and asserts the click — not the 120s timeout — releases it.
+click; Python's echo is idempotent. Covered by a GUI-smoke check that drives
+the **real** broker on a background thread and asserts the click releases it.
+A follow-up fixed the blocking model behind the chip: the call now waits only
+~10s (`APPROVAL_GRACE_S`) and then returns *pending* rather than blocking past
+the MCP client's own tool timeout — the chip stays answerable, and an answer
+given late is consumed by the agent's next attempt.
 
 **⚠ Functional breakage (was never recorded here):**
 

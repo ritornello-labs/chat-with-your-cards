@@ -436,12 +436,38 @@ const WIDGET_HTML =
 /** Ask-each-read (task #17): the turn STALLS on the approval, exactly as the
  *  real MCP thread does, and only continues when the chip answers. */
 let approvalCounter = 0;
-const pendingApproval: { id: string | null } = { id: null };
+const pendingApproval: { id: string | null; late: boolean } = { id: null, late: false };
+
+/** `approve slow` models the grace expiring before the user answers: the turn
+ *  ends with the "prompt is waiting" message the tool now returns, and the
+ *  chip stays answerable. Answering it late marks the chip accordingly. */
+function slowApprovalScript(): Step[] {
+  approvalCounter += 1;
+  const id = `a${approvalCounter}`;
+  pendingApproval.id = id;
+  pendingApproval.late = true;
+  return [
+    { kind: "text", text: "Let me look at the cards in that deck.\n\n" },
+    {
+      kind: "tool_approval",
+      approvalId: id,
+      tool: "search_notes",
+      summary: '{"query": "deck:\\"Math::Analysis\\"", "limit": 20}',
+    },
+    {
+      kind: "text",
+      text:
+        "You have an approval prompt waiting above — answer it and ask me again " +
+        "and I'll pick this up.",
+    },
+  ];
+}
 
 function approvalScript(): Step[] {
   approvalCounter += 1;
   const id = `a${approvalCounter}`;
   pendingApproval.id = id;
+  pendingApproval.late = false;
   return [
     { kind: "text", text: "Let me look at the cards in that deck.\n\n" },
     {
@@ -511,7 +537,8 @@ const MATH_SCRIPT: Step[] = [
 function selectScript(userText: string): Step[] {
   const text = userText.toLowerCase();
   if (text.includes("error")) return ERROR_SCRIPT;
-  if (text.includes("approve") || text.includes("approval")) return approvalScript();
+  if (text.includes("approve") || text.includes("approval"))
+    return text.includes("slow") ? slowApprovalScript() : approvalScript();
   if (text.includes("math") || text.includes("mermaid")) return MATH_SCRIPT;
   if (text.includes("widget") || text.includes("chart")) return widgetScript();
   if (text.includes("image") || text.includes("picture")) return IMAGE_SCRIPT;
@@ -865,8 +892,11 @@ export function installDevReplayer(): void {
         if (!id || id !== pendingApproval.id) break; // unknown/stale handle
         pendingApproval.id = null;
         const allow = Boolean(msg.allow);
-        window.chatUI?.dispatch({ type: "tool_approval_resolved", id, allow });
-        scheduleAll(compile(afterApproval(allow)));
+        const late = pendingApproval.late;
+        window.chatUI?.dispatch({ type: "tool_approval_resolved", id, allow, late });
+        // A late answer cannot resume the call that gave up - the chip says
+        // "ask again to continue" and nothing streams until the user does.
+        if (!late) scheduleAll(compile(afterApproval(allow)));
         break;
       }
       case "cancel":

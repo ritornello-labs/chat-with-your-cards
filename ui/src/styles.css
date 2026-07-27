@@ -806,6 +806,9 @@ body {
   color: var(--cwyc-fg-subtle);
   font-size: 11px;
 }
+#cwyc-root .cwyc-approval-late {
+  color: var(--cwyc-warn);
+}
 
 /* First-run onboarding (task #19): the "Claude Code not found" setup card,
    shown in place of the plain empty-thread line (Thread.tsx) when
