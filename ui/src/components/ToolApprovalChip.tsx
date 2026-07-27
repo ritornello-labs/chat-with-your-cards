@@ -40,13 +40,12 @@ export function ToolApprovalChip({
         data-resolved="true"
         data-late={data.late ? "true" : undefined}
       >
+        {/* A late approval cannot resume the call that gave up, so the store
+            posts a visible "go ahead" message on the user's behalf. That
+            message sits right below this chip and explains itself, so no hint
+            belongs here - and telling the user to "ask again" would now be
+            actively wrong. */}
         {verdict}: <code>{data.tool}</code>
-        {/* The answer came after the call gave up, so nothing resumed on its
-            own - say that plainly instead of leaving the user waiting for
-            output that is never coming. */}
-        {data.late && data.allow ? (
-          <span className="cwyc-approval-late"> — ask again to continue.</span>
-        ) : null}
       </div>
     );
   }

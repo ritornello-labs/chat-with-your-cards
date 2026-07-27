@@ -37,8 +37,12 @@ import time
 from typing import Any, Callable
 
 # How long a tool call blocks waiting for a click before giving up its slot.
-# Must stay comfortably under the MCP client's own tool timeout.
-APPROVAL_GRACE_S = 10.0
+# Must stay comfortably under the MCP client's per-request ceiling, which for
+# an HTTP MCP server is 60s by default and which we raise to
+# claude_cli.MCP_REQUEST_TIMEOUT_MS (120s) in the config we write. 45s is long
+# enough to read the arguments and decide without feeling rushed, and still
+# leaves generous headroom.
+APPROVAL_GRACE_S = 45.0
 
 # How long an answer given AFTER the call gave up stays consumable by a retry.
 # One-shot and short: approving a call is not standing consent for the same

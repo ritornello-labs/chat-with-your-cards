@@ -147,8 +147,8 @@ interface WidgetOfferDataPart {
 }
 
 /** Ask-each-read approval chip. A pending one means a tool call is BLOCKED on
- *  the MCP thread; `outcome` records how it settled (ours or Python's 120s
- *  timeout) so the chip never lies about what happened. */
+ *  the MCP thread. `late` marks an answer that arrived after the call gave up
+ *  its slot, so the chip never implies work resumed when it did not. */
 interface ToolApprovalDataPart {
   readonly type: "data";
   readonly name: "tool_approval";
@@ -1043,18 +1043,32 @@ export class ChatStore {
     reason?: string;
     late?: boolean;
   }): void {
-    this.setToolApprovalResolved(String(event.id ?? ""), {
+    const tool = this.setToolApprovalResolved(String(event.id ?? ""), {
       allow: !!event.allow,
       reason: event.reason ? String(event.reason) : undefined,
       late: !!event.late,
     });
+    // A LATE approval cannot resume the call that gave up, so without this the
+    // user clicks Allow and nothing happens while the agent's last message
+    // still reads "approve it and I'll continue" - contradicting the chip
+    // beside it (dogfood 2026-07-23). Nudge the agent the same way the widget
+    // offer does: a visible user message is one of the only channels that
+    // reliably reaches a mid-conversation CLI session. Approving IS the
+    // instruction to proceed, so this needs no second click.
+    if (tool && event.late && event.allow) {
+      const note = `(I approved the ${tool} request - go ahead.)`;
+      if (this.isRunning) this.pendingAutoSend = note;
+      else this.sendUserMessage(note);
+    }
   }
 
+  /** Returns the resolved chip's tool name, or "" if no chip matched. */
   private setToolApprovalResolved(
     approvalId: string,
     outcome: { allow: boolean; reason?: string; late?: boolean }
-  ): void {
-    if (!approvalId) return;
+  ): string {
+    if (!approvalId) return "";
+    let tool = "";
     let touched = false;
     this.messages = this.messages.map((msg) => {
       if (msg.role !== "assistant") return msg;
@@ -1064,6 +1078,7 @@ export class ChatStore {
           return part;
         }
         hit = true;
+        tool = part.data.tool;
         return {
           ...part,
           data: {
@@ -1079,6 +1094,7 @@ export class ChatStore {
       return hit ? { ...msg, content } : msg;
     });
     if (touched) this.emit();
+    return tool;
   }
 
   /**

@@ -374,7 +374,10 @@ def build_registry() -> ToolRegistry:
             "than collapsing matches to notes. Use this before any card-level "
             "operation when exact IDs are not already known. Results are "
             "candidates: inspect and select the intended cards instead of "
-            "blindly modifying every broad-search match. Page with offset.",
+            "blindly modifying every broad-search match. Page with offset. "
+            "COUNTING: `total` is always the full number of matches, whatever "
+            "`limit` is - so for a count alone pass limit=1 and read `total`, "
+            "rather than fetching a page you do not need.",
             {
                 "type": "object",
                 "properties": {
@@ -384,6 +387,8 @@ def build_registry() -> ToolRegistry:
                         "minimum": 1,
                         "maximum": MAX_SEARCH_LIMIT,
                         "default": DEFAULT_SEARCH_LIMIT,
+                        "description": "How many cards to return in this page. "
+                        "Does NOT affect `total`; use 1 when you only need the count.",
                     },
                     "offset": {
                         "type": "integer",

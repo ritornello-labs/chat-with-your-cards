@@ -415,6 +415,8 @@ def _write_project_mcp_json(url: str, token: str) -> None:
     Rewritten each Anki run because the port and token rotate."""
     import json as _json
 
+    from .backends.claude_cli import MCP_REQUEST_TIMEOUT_MS as _MCP_REQUEST_TIMEOUT_MS
+
     path = USER_FILES / "agent-home" / ".mcp.json"
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -426,6 +428,9 @@ def _write_project_mcp_json(url: str, token: str) -> None:
                             "type": "http",
                             "url": url,
                             "headers": {"Authorization": f"Bearer {token}"},
+                            # Same per-request ceiling the dock's own session
+                            # uses; ask-each-read holds requests open.
+                            "timeout": _MCP_REQUEST_TIMEOUT_MS,
                         }
                     }
                 },

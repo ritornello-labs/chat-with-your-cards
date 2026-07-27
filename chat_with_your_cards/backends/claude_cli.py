@@ -551,6 +551,10 @@ def build_cli_args(
     return args
 
 
+# Client-side per-request ceiling for our MCP server (see write_mcp_config).
+MCP_REQUEST_TIMEOUT_MS = 120_000
+
+
 def write_mcp_config(
     directory: Path,
     url: str,
@@ -584,6 +588,14 @@ def write_mcp_config(
         "type": "http",
         "url": url,
         "headers": {"Authorization": f"Bearer {token}"},
+        # Raise the client's per-request timer. Claude Code gives an HTTP MCP
+        # server 60s by default to send its first response byte, INDEPENDENT of
+        # MCP_TOOL_TIMEOUT (which defaults to ~28h) - and ask-each-read
+        # deliberately holds a request open while the user decides. At the
+        # default, a slow answer got the call killed and the agent, handed a
+        # bare timeout, blamed the collection (dogfood 2026-07-23). Must stay
+        # comfortably above approvals.APPROVAL_GRACE_S.
+        "timeout": MCP_REQUEST_TIMEOUT_MS,
     }
     config = {"mcpServers": servers}
     path = directory / "mcp-config.json"

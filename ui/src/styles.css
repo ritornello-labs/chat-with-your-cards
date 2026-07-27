@@ -806,9 +806,6 @@ body {
   color: var(--cwyc-fg-subtle);
   font-size: 11px;
 }
-#cwyc-root .cwyc-approval-late {
-  color: var(--cwyc-warn);
-}
 
 /* First-run onboarding (task #19): the "Claude Code not found" setup card,
    shown in place of the plain empty-thread line (Thread.tsx) when
@@ -2230,12 +2227,14 @@ body {
 
 .cwyc-composer-bar {
   justify-content: space-between;
-  align-items: center;
+  /* Send sits on the LAST line of a wrapped chip block, not centred against
+     it. */
+  align-items: flex-end;
   gap: 5px 6px;
-  /* Narrow dock: the model/send group wraps to its own line instead of the
-     chips crushing into each other (dogfood 2026-07-13: "buttons crammed
-     together" at small widths). */
-  flex-wrap: wrap;
+  /* Send must NOT wrap: it is the primary action and its position has to be
+     stable, or it hops between lines as chips reflow (dogfood 2026-07-23).
+     Only the chips wrap, inside their own groups. */
+  flex-wrap: nowrap;
 }
 .cwyc-composer-left,
 .cwyc-composer-right {
@@ -2243,10 +2242,18 @@ body {
   align-items: center;
   gap: 5px;
   min-width: 0;
+  /* Chips reflow within the group rather than shoving the send button out of
+     the row (dogfood 2026-07-13: "buttons crammed together" at small widths). */
+  flex-wrap: wrap;
+}
+.cwyc-composer-left {
+  flex: 1 1 auto;
 }
 .cwyc-composer-right {
-  /* Stay glued to the right edge even on a wrapped second line. */
+  /* Stay glued to the right edge, and never shrink the send button away. */
   margin-left: auto;
+  flex: 0 1 auto;
+  justify-content: flex-end;
 }
 #cwyc-root .cwyc-chip {
   border: 1px solid var(--cwyc-border);
