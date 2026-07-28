@@ -37,6 +37,7 @@ include = [
     "shortcuts.py",
     "context.py",
     "approvals.py",
+    "search_terms.py",
     "doctor.py",
     "keys.py",
     "transcripts.py",

@@ -160,6 +160,9 @@ interface ToolApprovalDataPart {
     allow?: boolean;
     reason?: string;
     late?: boolean;
+    /** Wall-clock ms after which Python stops honouring an answer. Absent =
+     *  expiry disabled, and the chip then shows no deadline. */
+    expiresAtMs?: number;
   };
 }
 
@@ -1017,10 +1020,16 @@ export class ChatStore {
    * answered. The id comes from Python (approvals.py's broker owns it) - never
    * mint one here, it is the handle the waiting thread is keyed on.
    */
-  private appendToolApproval(event: { id?: string; tool?: string; summary?: string }): void {
+  private appendToolApproval(event: {
+    id?: string;
+    tool?: string;
+    summary?: string;
+    expires_at_ms?: number;
+  }): void {
     const id = String(event.id ?? "");
     if (!id) return; // unanswerable: no handle to respond with
     const current = this.ensureCurrentAssistant();
+    const expiresAtMs = Number(event.expires_at_ms);
     const part: ToolApprovalDataPart = {
       type: "data",
       name: "tool_approval",
@@ -1029,13 +1038,15 @@ export class ChatStore {
         tool: String(event.tool ?? ""),
         summary: String(event.summary ?? ""),
         resolved: false,
+        expiresAtMs: Number.isFinite(expiresAtMs) && expiresAtMs > 0 ? expiresAtMs : undefined,
       },
     };
     this.updateMessage(current.id, (msg) => ({ ...msg, content: [...msg.content, part] }));
     this.emit();
   }
 
-  /** Settled by us (echo), by the 120s timeout, or by session teardown.
+  /** Settled by us (echo), by expiry (`approval_timeout_minutes`), or by
+   *  session teardown.
    *  Idempotent: respondToolApproval already marked it optimistically. */
   private markToolApprovalResolved(event: {
     id?: string;

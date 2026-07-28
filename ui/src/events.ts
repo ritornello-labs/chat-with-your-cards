@@ -270,23 +270,27 @@ export interface WidgetOfferEvent {
 }
 
 /**
- * Ask-each-read (approvals.py): a read tool call is BLOCKED on the MCP thread
- * waiting for this answer. Python pushes this, then waits up to
- * APPROVAL_TIMEOUT_S (120s) for a `tool_approval_response` command before
- * denying by itself. Rendering it is therefore not optional - an unhandled
- * event is a two-minute freeze followed by a spurious "user declined".
+ * Ask-each-read (approvals.py): a read tool call is blocked on the MCP thread
+ * waiting for this answer. The call itself gives up its slot after
+ * APPROVAL_GRACE_S (45s) and reports back that it did not run, but this chip
+ * STAYS ANSWERABLE until `expires_at_ms`: an Allow inside that window is
+ * remembered and the agent's next attempt at the same call proceeds. Rendering
+ * it is therefore not optional - an unhandled event is a stalled agent.
  */
 export interface ToolApprovalEvent {
   type: "tool_approval";
   id: string;
   tool: string;
   summary: string;
+  /** Wall-clock ms after which answering does nothing (config
+   *  `approval_timeout_minutes`). Absent when expiry is switched off. */
+  expires_at_ms?: number;
 }
 
 /**
- * The approval was settled: by our own response (echoed back), by the 120s
- * timeout (`reason: "timed out"`), or by session teardown. Idempotent - the
- * chip may already have marked itself resolved optimistically.
+ * The approval was settled: by our own response (echoed back), by expiry
+ * (`reason: "expired"`), or by session teardown. Idempotent - the chip may
+ * already have marked itself resolved optimistically.
  */
 export interface ToolApprovalResolvedEvent {
   type: "tool_approval_resolved";

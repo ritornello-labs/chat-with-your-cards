@@ -51,10 +51,29 @@ def _note_summary(col: Any, note_id: int) -> dict[str, Any]:
     }
 
 
+def guard_empty_search(col: Any, query: str) -> None:
+    """Raise when an empty result is explained by a term naming nothing.
+
+    Called only after a search returned zero rows: a query that matched
+    something is never second-guessed, so this cannot break a working search.
+    An empty result whose cause is a bad deck/tag/note name must not reach the
+    assistant looking like an answer - that is how `deck:Default` became "you
+    have no cards there" when the deck was `Decks::Default` (dogfood
+    2026-07-23).
+    """
+    from ..search_terms import diagnose_collection
+
+    message = diagnose_collection(col, query)
+    if message:
+        raise ValueError(message)
+
+
 def search_notes(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     query = str(args["query"])
     limit = min(int(args.get("limit", DEFAULT_SEARCH_LIMIT)), MAX_SEARCH_LIMIT)
     note_ids = list(ctx.col.find_notes(query))
+    if not note_ids:
+        guard_empty_search(ctx.col, query)
     return {
         "query": query,
         "total": len(note_ids),
@@ -129,6 +148,10 @@ def find_cards(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     limit = max(1, min(int(args.get("limit", DEFAULT_SEARCH_LIMIT)), MAX_SEARCH_LIMIT))
     offset = max(0, int(args.get("offset", 0)))
     card_ids = [int(card_id) for card_id in ctx.col.find_cards(query)]
+    if not card_ids:
+        # Including detail='count': a bare `0` is the most confidently wrong
+        # answer of the three.
+        guard_empty_search(ctx.col, query)
     if detail == "count":
         return {"query": query, "total": len(card_ids)}
     page_ids = card_ids[offset : offset + limit]

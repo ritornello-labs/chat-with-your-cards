@@ -796,8 +796,32 @@ body {
 }
 #cwyc-root .cwyc-approval-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
   margin-top: 8px;
+  flex-wrap: wrap;
+}
+/* Deadline for an unanswered prompt (approval_timeout_minutes). Pushed to the
+   end so it never crowds the buttons, and allowed to drop to its own line in a
+   narrow dock rather than squeezing them. */
+#cwyc-root .cwyc-approval-countdown {
+  margin-left: auto;
+  color: var(--cwyc-fg-subtle);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* Announced to screen readers, never painted. */
+#cwyc-root .cwyc-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 #cwyc-root .cwyc-approval-resolved {
   border-color: var(--cwyc-border);

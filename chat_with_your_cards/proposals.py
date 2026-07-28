@@ -774,7 +774,11 @@ class ProposalManager:
                     {"label": items[-1]["label"], "old": fields[name], "new": changes[name]}
                 )
         if not items:
-            raise ProposalError("no notes match that search/replacement")
+            raise ProposalError(
+                self._empty_query_error(
+                    col, query, "no notes match that search/replacement"
+                )
+            )
         scope = f" in field {field_name!r}" if field_name else ""
         proposal = Proposal(
             id=self._next_id(),
@@ -810,7 +814,9 @@ class ProposalManager:
         except Exception as exc:
             raise ProposalError(f"bad query {query!r}: {exc}") from None
         if not card_ids:
-            raise ProposalError(f"no cards match {query!r}")
+            raise ProposalError(
+                self._empty_query_error(col, query, f"no cards match {query!r}")
+            )
         deck_id = self._find_deck_id(col, deck)
         if deck_id is not None:
             self._require_normal_deck(col, deck, deck_id)
@@ -887,6 +893,18 @@ class ProposalManager:
         }
 
     # ---- deck operations (create/rename/options + filtered decks) ----
+
+    @staticmethod
+    def _empty_query_error(col: Any, query: str, fallback: str) -> str:
+        """`fallback`, plus WHY the query is empty when a term names nothing.
+
+        A bulk write over zero rows is a dead end either way; the difference is
+        whether the assistant learns the deck name was wrong or concludes the
+        collection has nothing to change (search_terms.py)."""
+        from .search_terms import diagnose_collection
+
+        detail = diagnose_collection(col, query)
+        return f"{fallback}. {detail}" if detail else fallback
 
     def _deck_by_name(self, col: Any, name: str) -> tuple[int, dict[str, Any]]:
         did = self._find_deck_id(col, name)

@@ -150,6 +150,48 @@ class ApprovalBrokerTests(unittest.TestCase):
         # And the stale click must NOT leave consent lying around.
         self.assertEqual(PENDING, broker.request("get_note", "{}"))
 
+    def test_expiry_is_configurable_and_read_live(self) -> None:
+        """`approval_timeout_minutes` is a config key, so the broker resolves
+        it per use - editing it must apply to the next prompt, not the next
+        restart."""
+        ttl = [60.0]
+        pushed: list[dict] = []
+        broker = ApprovalBroker(
+            pushed.append, grace_s=0.05, pending_ttl_s=lambda: ttl[0]
+        )
+        broker.request("get_note", "{}")
+        time.sleep(0.05)
+        ttl[0] = 0.01  # the user shortens it while a prompt is live
+        broker.request("search_notes", "{}")
+        self.assertTrue(
+            any(p.get("reason") == "expired" for p in pushed),
+            "shortening the timeout should retire the already-live prompt",
+        )
+
+    def test_expiry_can_be_switched_off(self) -> None:
+        """0 = never expire, for someone who would rather answer late than
+        have the prompt vanish."""
+        broker, pushed = self._broker(grace=0.05, pending_ttl=0)
+        broker.request("get_note", "{}")
+        requests = [p for p in pushed if p["type"] == "tool_approval"]
+        time.sleep(0.05)
+        broker.request("search_notes", "{}")
+        self.assertFalse(any(p.get("reason") == "expired" for p in pushed))
+        # No deadline is advertised, which is how the chip knows to show none.
+        self.assertNotIn("expires_at_ms", requests[0])
+        broker.respond({"id": requests[0]["id"], "allow": True})
+        self.assertEqual(ALLOW, broker.request("get_note", "{}"))
+
+    def test_prompt_carries_its_deadline(self) -> None:
+        """The chip counts down from this; without it an abandoned prompt
+        looked answerable forever."""
+        broker, pushed = self._broker(grace=0.05, pending_ttl=300.0)
+        before_ms = time.time() * 1000
+        broker.request("get_note", "{}")
+        request = [p for p in pushed if p["type"] == "tool_approval"][0]
+        self.assertGreaterEqual(request["expires_at_ms"], before_ms + 299_000)
+        self.assertLessEqual(request["expires_at_ms"], time.time() * 1000 + 301_000)
+
     def test_unknown_response_ignored(self) -> None:
         broker, pushed = self._broker(grace=0.05)
         broker.respond({"id": "nope", "allow": True})  # no pending: no crash

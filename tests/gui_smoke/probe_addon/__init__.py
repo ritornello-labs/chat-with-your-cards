@@ -17,6 +17,7 @@ import time
 import traceback
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable, Iterator
 
 # Force the deterministic demo backend before the add-on builds one: the
@@ -2391,6 +2392,58 @@ def _run_checks() -> dict[str, Any]:
 
     check("ask-each-read: approval chip unblocks a real tool call",
           _tool_approval_round_trip)
+
+    def _empty_search_names_its_cause() -> dict[str, Any]:
+        """A search naming a deck that does not exist must not answer `0`.
+
+        Anki does not error on an unknown name, so a typo and an empty deck
+        look identical - which is how `deck:Default` was reported to the user
+        as an empty deck when the real one was `Decks::Default` (dogfood
+        2026-07-23). Run against the REAL collection so the diagnosis is
+        proven against Anki's own deck/tag/note-type APIs, not a fake.
+        """
+        from chat_with_your_cards.tools.collection import find_cards
+
+        ctx = SimpleNamespace(col=mw.col)
+        real_deck = mw.col.decks.all_names_and_ids()[0].name
+
+        # A real name still answers normally, whatever the count.
+        baseline = find_cards(ctx, {"query": f'deck:"{real_deck}"', "detail": "count"})
+
+        missing = "Zzq Deck That Does Not Exist"
+        raised = ""
+        try:
+            find_cards(ctx, {"query": f'deck:"{missing}"', "detail": "count"})
+        except ValueError as exc:
+            raised = str(exc)
+        if not raised:
+            raise AssertionError("unknown deck answered 0 instead of explaining")
+        if "no deck by that name" not in raised:
+            raise AssertionError(f"unhelpful diagnosis: {raised}")
+
+        # The exact reported bug: the user searched the LEAF of a nested deck.
+        # Nothing in a fresh profile is nested, so make one - and remove it
+        # again, so later checks see the deck list they expected.
+        leaf = "Zzq Nested Leaf"
+        did = mw.col.decks.id(f"Zzq Parent::{leaf}")
+        try:
+            find_cards(ctx, {"query": f'deck:"{leaf}"', "detail": "count"})
+            suggestion = ""
+        except ValueError as exc:
+            suggestion = str(exc)
+        finally:
+            mw.col.decks.remove([did])
+        if f"Zzq Parent::{leaf}" not in suggestion:
+            raise AssertionError(f"leaf search did not suggest the full path: {suggestion}")
+        return {
+            "real_deck_answers": baseline,
+            "unknown_deck_raised": raised[:160],
+            "leaf_probed": leaf,
+            "leaf_suggestion": suggestion[:160],
+        }
+
+    check("empty search explains an unknown deck instead of answering 0",
+          _empty_search_names_its_cause)
 
     def _hover_geometry_stable() -> dict[str, Any]:
         """Hovering a header button must change ONLY its background - never

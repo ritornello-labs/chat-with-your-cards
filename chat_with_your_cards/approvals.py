@@ -49,12 +49,18 @@ APPROVAL_GRACE_S = 45.0
 # call an hour later, which would quietly defeat the whole mode.
 DECISION_TTL_S = 300.0
 
-# How long an UNANSWERED prompt stays answerable. Past this it is dead: the
-# user has moved on, and an approval clicked hours later would resume work
-# nobody is waiting for any more. Without it the chip lived forever and the
-# agent kept re-raising "you still have requests parked behind prompts" long
-# after the user had given up on them (dogfood 2026-07-23).
-PENDING_TTL_S = 900.0
+# How long an UNANSWERED prompt stays answerable, in MINUTES. Past this it is
+# dead: the user has moved on, and an approval clicked hours later would resume
+# work nobody is waiting for any more. Without it the chip lived forever and
+# the agent kept re-raising "you still have requests parked behind prompts"
+# long after the user had given up on them (dogfood 2026-07-23).
+#
+# Five minutes, not fifteen: a prompt you have not answered in five minutes is
+# one you are not about to answer - you have moved to another window, or the
+# question stopped mattering. User-configurable via `approval_timeout_minutes`
+# (0 disables expiry entirely and restores the old forever-live behaviour).
+PENDING_TTL_MINUTES = 5.0
+PENDING_TTL_S = PENDING_TTL_MINUTES * 60.0
 
 ALLOW = "allow"
 DENY = "deny"
@@ -67,12 +73,14 @@ class ApprovalBroker:
         push_on_main: Callable[[dict[str, Any]], None],
         grace_s: float = APPROVAL_GRACE_S,
         decision_ttl_s: float = DECISION_TTL_S,
-        pending_ttl_s: float = PENDING_TTL_S,
+        pending_ttl_s: float | Callable[[], float] = PENDING_TTL_S,
     ) -> None:
         self._push_on_main = push_on_main
         self._grace_s = grace_s
         self._decision_ttl_s = decision_ttl_s
-        self._pending_ttl_s = pending_ttl_s
+        # Callable so a config edit applies to prompts raised from now on
+        # rather than only after a restart.
+        self._pending_ttl_src = pending_ttl_s
         self._lock = threading.Lock()
         self._counter = 0
         self._pending: dict[str, dict[str, Any]] = {}
@@ -82,6 +90,16 @@ class ApprovalBroker:
     @staticmethod
     def _key(tool: str, summary: str) -> str:
         return f"{tool}\x00{summary}"
+
+    def _pending_ttl(self) -> float:
+        """Seconds an unanswered prompt stays answerable; <= 0 means never
+        expire. Resolved per use so the setting is live."""
+        src = self._pending_ttl_src
+        try:
+            value = float(src() if callable(src) else src)
+        except Exception:
+            return PENDING_TTL_S
+        return value if value > 0 else 0.0
 
     def _take_decision(self, key: str) -> bool | None:
         """Consume a decision for `key` if one is fresh. Caller holds the lock."""
@@ -96,11 +114,14 @@ class ApprovalBroker:
     def _expire_stale(self) -> list[str]:
         """Drop prompts the user has clearly abandoned. Caller holds the lock;
         returns the ids to resolve (pushed outside the lock)."""
+        ttl = self._pending_ttl()
+        if ttl <= 0:
+            return []
         now = time.monotonic()
         stale = [
             approval_id
             for approval_id, entry in self._pending.items()
-            if now - float(entry.get("created_at", now)) > self._pending_ttl_s
+            if now - float(entry.get("created_at", now)) > ttl
         ]
         for approval_id in stale:
             entry = self._pending.pop(approval_id)
@@ -134,11 +155,22 @@ class ApprovalBroker:
                 }
                 self._pending[approval_id] = entry
                 self._by_key[key] = approval_id
-                push = {
+                # Wall-clock deadline so the chip can show the prompt is
+                # time-bound instead of looking answerable forever. Omitted
+                # when expiry is off, which is exactly what the chip needs to
+                # know to hide the countdown.
+                ttl = self._pending_ttl()
+                deadline = (
+                    {"expires_at_ms": int((time.time() + ttl) * 1000)}
+                    if ttl > 0
+                    else {}
+                )
+                push: dict[str, Any] | None = {
                     "type": "tool_approval",
                     "id": approval_id,
                     "tool": tool,
                     "summary": summary,
+                    **deadline,
                 }
             else:
                 # A retry of a call the user has not answered yet: wait on the
@@ -182,7 +214,8 @@ class ApprovalBroker:
             entry = self._pending.pop(approval_id, None)
             if entry is None:
                 return
-            if time.monotonic() - float(entry.get("created_at", 0)) > self._pending_ttl_s:
+            ttl = self._pending_ttl()
+            if ttl > 0 and time.monotonic() - float(entry.get("created_at", 0)) > ttl:
                 # Answered so long after the fact that nothing is waiting for
                 # it; treat as expired rather than silently resuming old work.
                 self._by_key.pop(str(entry["key"]), None)

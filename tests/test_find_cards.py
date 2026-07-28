@@ -64,11 +64,32 @@ class FakeCard:
         return {"name": self._template}
 
 
+class FakeNamed:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
 class FakeDecks:
     NAMES = {1: "Default", 9: "Preview targets"}
+    # Deliberately includes a nested deck whose leaf is a plausible thing to
+    # search for on its own, which is the shape of the reported bug.
+    ALL = ["Default", "Preview targets", "Decks::Spanish"]
 
     def name(self, deck_id: int) -> str:
         return self.NAMES[deck_id]
+
+    def all_names_and_ids(self) -> list[FakeNamed]:
+        return [FakeNamed(name) for name in self.ALL]
+
+
+class FakeModels:
+    def all_names_and_ids(self) -> list[FakeNamed]:
+        return [FakeNamed("Basic"), FakeNamed("Cloze")]
+
+
+class FakeTags:
+    def all(self) -> list[str]:
+        return ["probe", "leech"]
 
 
 class FakeCollection:
@@ -76,6 +97,8 @@ class FakeCollection:
         self.cards = {card.id: card for card in cards}
         self.matches = matches
         self.decks = FakeDecks()
+        self.models = FakeModels()
+        self.tags = FakeTags()
         self.queries: list[str] = []
 
     def find_cards(self, query: str) -> list[int]:
@@ -198,6 +221,35 @@ class FindCardsTests(unittest.TestCase):
         self.assertEqual(result["hidden_state"], "manually buried")
         self.assertEqual(result["scheduling"]["user_flag"], 2)
         self.assertEqual(col.queries, [])
+
+    def test_empty_result_from_a_bad_deck_name_is_an_error(self) -> None:
+        """Zero rows because the deck does not exist must not come back looking
+        like an answer - that is how `deck:Default` was reported as an empty
+        deck when the real one was `Decks::Default` (dogfood 2026-07-23)."""
+        col, ctx = _fixture()
+        col.matches = []
+
+        for detail in ("count", "ids", "full"):
+            with self.assertRaises(ValueError) as caught:
+                find_cards(ctx, {"query": "deck:Spanish", "detail": detail})
+            self.assertIn("Decks::Spanish", str(caught.exception))
+
+    def test_empty_result_from_a_real_deck_is_just_empty(self) -> None:
+        col, ctx = _fixture()
+        col.matches = []
+
+        result = find_cards(ctx, {"query": "deck:Decks::Spanish is:due"})
+
+        self.assertEqual(0, result["total"])
+
+    def test_diagnosis_never_breaks_a_search(self) -> None:
+        """It only ever runs on an already-failed search, so a collection that
+        cannot answer name queries must degrade to a plain empty result."""
+        col, ctx = _fixture()
+        col.matches = []
+        del col.models
+
+        self.assertEqual(0, find_cards(ctx, {"query": "deck:Nonsense"})["total"])
 
     def test_registry_exposes_find_cards_as_a_read_tool(self) -> None:
         spec = next(spec for spec in build_registry().specs() if spec.name == "find_cards")

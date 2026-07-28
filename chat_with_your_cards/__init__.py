@@ -336,7 +336,19 @@ def _ensure_mcp() -> tuple[str, str]:
                 lambda: state.dock.bridge.push(payload) if state.dock else None
             )
 
-        state.approvals = ApprovalBroker(push_on_main)
+        def pending_ttl_s() -> float:
+            # Read live: editing the config must apply to the next prompt,
+            # not require a restart.
+            raw = state.config.get(
+                "approval_timeout_minutes", approvals_mod.PENDING_TTL_MINUTES
+            )
+            try:
+                minutes = float(raw)
+            except (TypeError, ValueError):
+                minutes = approvals_mod.PENDING_TTL_MINUTES
+            return max(0.0, minutes) * 60.0
+
+        state.approvals = ApprovalBroker(push_on_main, pending_ttl_s=pending_ttl_s)
 
         def execute_tool(name: str, args: dict[str, Any]) -> Any:
             # The MCP server is the security boundary: enforce the LIVE

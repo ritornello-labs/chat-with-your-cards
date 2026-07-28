@@ -109,6 +109,34 @@ class RepositoryHygieneTest(unittest.TestCase):
                 py_compile.compile(str(ROOT / path), doraise=True)
 
 
+    def test_every_addon_module_is_packaged(self) -> None:
+        """Every top-level module must be in the workbench `include` list.
+
+        A module missing from it is invisible until runtime: unit tests import
+        from the source tree and pass, then the packaged add-on dies on the
+        first import of the omitted file - as a probe crash, not as a build
+        error. This has bitten twice; the list is now checked, not remembered.
+        """
+        text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        section = text.split("[tool.anki-addon-workbench]", 1)[1]
+        include = section.split("include = [", 1)[1].split("]", 1)[0]
+        packaged = {
+            line.strip().strip(",").strip('"')
+            for line in include.splitlines()
+            if line.strip().startswith('"')
+        }
+        on_disk = {
+            path.name
+            for path in (ROOT / "chat_with_your_cards").glob("*.py")
+            if path.name != "__init__.py"
+        }
+        self.assertEqual(
+            set(),
+            on_disk - packaged,
+            "add these to [tool.anki-addon-workbench].include in pyproject.toml",
+        )
+
+
 def run_path_check() -> int:
     suite = unittest.TestSuite()
     suite.addTest(RepositoryHygieneTest("test_no_workspace_absolute_paths_in_portable_files"))

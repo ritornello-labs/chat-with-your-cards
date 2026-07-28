@@ -166,13 +166,28 @@
   asking and gates all writes behind proposal cards; `read-only` removes the
   write tools entirely; `ask-each-read` additionally shows an inline
   Allow/Deny chip for every collection read (for chats about untrusted
-  shared decks) - denials and 120s timeouts refuse the call; `auto-accept` applies the assistant's note *creations*
+  shared decks) - a denial refuses the call, and an unanswered prompt neither
+  approves nor refuses it: the call reports back that it did not run, and the
+  chip stays answerable until `approval_timeout_minutes`; `auto-accept` applies the assistant's note *creations*
   and native card grading immediately (up to `auto_accept_cap` affected
   notes/cards per session) while edits stay behind proposals;
   `trusted-writes` applies creations, edits, bulk operations, change sets,
   and native grading directly (an Anki backup checkpoint is forced before bulk
   applies) up to `write_budget` notes per session — after that everything
   falls back to manual review. Deleting notes always asks, in every mode.
+- `approval_timeout_minutes` (default `5`): in `ask-each-read` mode, how long an
+  unanswered Allow/Deny prompt stays answerable. The chip shows the deadline
+  counting down; past it the chip reads "Expired, no answer" (never "Denied" -
+  you refused nothing) and clicking it no longer resumes anything. This is
+  deliberately short: a prompt you have not answered in five minutes is one you
+  have moved on from, and without an expiry the assistant kept re-raising
+  abandoned requests hours later. Set `0` to disable expiry and let prompts stay
+  live indefinitely. Applies to the next prompt raised, no restart needed.
+
+  Note this is *not* how long a tool call waits: a call blocks for at most 45s
+  (`approvals.APPROVAL_GRACE_S`, kept under the MCP client's own per-request
+  ceiling) and then reports that it did not run. Answering later is still
+  useful - an Allow inside the window is picked up and the work resumes.
 - `auto_accept_cap` (default `20`): in `auto-accept` mode, how many notes may be
   created and how many cards may be natively graded without review per chat
   session. The two operations keep separate counters, so a card-writing run

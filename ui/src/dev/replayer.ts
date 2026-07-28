@@ -32,7 +32,14 @@ type Step =
   | { kind: "image"; src: string; caption: string }
   | { kind: "widget"; html: string; title: string }
   | { kind: "widget_offer"; title: string }
-  | { kind: "tool_approval"; approvalId: string; tool: string; summary: string }
+  | {
+      kind: "tool_approval";
+      approvalId: string;
+      tool: string;
+      summary: string;
+      /** Seconds until the prompt stops being answerable; omit for "never". */
+      expiresInS?: number;
+    }
   | { kind: "error"; message: string };
 
 const DEMO_CSS =
@@ -114,6 +121,12 @@ function compile(steps: readonly Step[]): Array<[number, ChatEvent]> {
           id: step.approvalId,
           tool: step.tool,
           summary: step.summary,
+          // approvals.py sends a wall-clock deadline (approval_timeout_minutes);
+          // the dev harness uses a short one so the countdown and the expired
+          // state are both reachable by hand.
+          ...(step.expiresInS === undefined
+            ? {}
+            : { expires_at_ms: Date.now() + step.expiresInS * 1000 }),
         },
       ]);
     } else if (step.kind === "error") {
@@ -453,6 +466,7 @@ function slowApprovalScript(): Step[] {
       approvalId: id,
       tool: "search_notes",
       summary: '{"query": "deck:\\"Math::Analysis\\"", "limit": 20}',
+      expiresInS: 15,
     },
     {
       kind: "text",
@@ -476,6 +490,7 @@ function approvalScript(): Step[] {
       // Faithful to __init__.py: the summary is json.dumps(args)[:120].
       tool: "search_notes",
       summary: '{"query": "deck:\\"Math::Analysis\\"", "limit": 20}',
+      expiresInS: 300,
     },
   ];
 }
