@@ -2514,6 +2514,71 @@ def _run_checks() -> dict[str, Any]:
     check("wrong argument name is refused with a message that names it",
           _bad_arguments_explain_themselves)
 
+
+    def _deck_dropdown_rows_are_not_squashed() -> dict[str, Any]:
+        """A dropdown with more options than fit must SCROLL, not squash.
+
+        .cwyc-combo-list is a column flexbox with max-height, so its children
+        were flex-shrinkable: past ~8 decks every row compressed to share the
+        space and the names smeared into each other, unreadable (dogfood
+        2026-07-27). Seeds more decks than fit on purpose - the bug is
+        invisible with a short list, which is why it survived a browser check.
+        """
+        for i in range(20):
+            mw.col.decks.id(f"Zzq Dropdown::Group {i}::Sub deck {i}")
+        addon._push_collection_meta()
+        QTest.qWait(200)
+        _eval_js(
+            dock.web,
+            "(function(){ document.querySelector('[data-testid=pins-button]').click();"
+            " return true; })();",
+            DOM_TIMEOUT_MS, "open pins panel",
+        )
+        QTest.qWait(250)
+        _eval_js(
+            dock.web,
+            "(function(){ var b = document.querySelector("
+            "'.cwyc-panel-pins .cwyc-combo-input'); if (!b) return false;"
+            " b.focus(); b.dispatchEvent(new Event('focus', {bubbles: true}));"
+            " return true; })();",
+            DOM_TIMEOUT_MS, "focus the deck combo",
+        )
+        QTest.qWait(300)
+        state_js = _eval_js(
+            dock.web,
+            "(function(){"
+            "  var items = [].slice.call(document.querySelectorAll('.cwyc-combo-item'));"
+            "  var list = document.querySelector('.cwyc-combo-list');"
+            "  if (!items.length || !list) return {items: items.length};"
+            "  var r = items[0].getBoundingClientRect();"
+            "  return {items: items.length, rowHeight: Math.round(r.height),"
+            "    fontSize: parseInt(getComputedStyle(items[0]).fontSize, 10),"
+            "    scrolls: list.scrollHeight > list.clientHeight,"
+            "    sample: items[0].textContent};"
+            "})();",
+            DOM_TIMEOUT_MS, "deck dropdown rows",
+        )
+        _eval_js(
+            dock.web,
+            "(function(){ document.querySelector('[data-testid=pins-button]').click();"
+            " return true; })();",
+            DOM_TIMEOUT_MS, "close pins panel",
+        )
+        if not state_js.get("items"):
+            raise AssertionError(f"deck dropdown never opened: {state_js}")
+        # A row must be taller than its own text, or the glyphs are clipped.
+        if state_js["rowHeight"] <= state_js["fontSize"]:
+            raise AssertionError(
+                f"dropdown rows squashed to {state_js['rowHeight']}px for "
+                f"{state_js['fontSize']}px text: {state_js}"
+            )
+        if not state_js["scrolls"]:
+            raise AssertionError(f"overflowing dropdown did not scroll: {state_js}")
+        return state_js
+
+    check("deck dropdown scrolls instead of squashing its rows",
+          _deck_dropdown_rows_are_not_squashed)
+
     def _hover_geometry_stable() -> dict[str, Any]:
         """Hovering a header button must change ONLY its background - never
         padding, font, size, or radius. A geometry change on hover shrinks the

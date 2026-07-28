@@ -2779,6 +2779,7 @@ body {
   flex-direction: column;
 }
 .cwyc-combo-overflow {
+  flex: 0 0 auto; /* same squash as .cwyc-combo-item */
   padding: 4px 8px;
   font-size: 11px;
   color: var(--cwyc-fg-faint);
@@ -2787,6 +2788,13 @@ body {
 #cwyc-root .cwyc-combo-item {
   display: block;
   width: 100%;
+  /* The list is a column flexbox with a max-height, so its children are
+     flex-shrinkable by default: once there are more options than fit, EVERY
+     row is squashed to share the space instead of the list scrolling. At 30
+     decks each row collapsed to 8px and the names overlapped into an
+     unreadable smear (dogfood 2026-07-27). Rows keep their height; the list
+     already has overflow-y: auto to do the actual work. */
+  flex: 0 0 auto;
   border: none;
   border-radius: 5px;
   background: transparent;
