@@ -532,7 +532,14 @@ def build_registry() -> ToolRegistry:
             {
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string"},
+                    # Described, not bare: on a tool called get_note_TYPE a
+                    # nameless `name` invited `{"type": "0 Cloze"}`, which is
+                    # a reasonable guess (dogfood 2026-07-27).
+                    "name": {
+                        "type": "string",
+                        "description": "The note type's name, e.g. 'Basic' or "
+                        "'0 Cloze'. List them with list_note_types.",
+                    },
                     "max_chars": {
                         "type": "integer",
                         "description": "Widen the per-string source window "

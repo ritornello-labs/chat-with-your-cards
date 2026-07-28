@@ -46,6 +46,11 @@ class ToolSpec:
     func: ToolFunc
     writes: bool = False
     trusted_only: bool = False  # advertised only in trusted-writes mode
+    # Accepted but deliberately NOT advertised in input_schema - aliases kept
+    # working for compatibility without inviting their use (propose_note_edit
+    # takes `fields` as an alias for `field_changes`). Anything here is exempt
+    # from the unknown-argument check; everything else must be in the schema.
+    extra_args: frozenset[str] = frozenset()
 
 
 class ToolRegistry:
@@ -71,4 +76,63 @@ class ToolRegistry:
         spec = self._specs.get(name)
         if spec is None:
             raise KeyError(f"unknown tool: {name}")
+        check_args(spec, args)
         return spec.func(ctx, args)
+
+
+def check_args(spec: ToolSpec, args: dict[str, Any]) -> None:
+    """Enforce the schema's `required` and property list before dispatch.
+
+    We advertise `required` to the model and, until now, never checked it: the
+    args dict went straight to the handler, so a wrong argument name surfaced
+    as whatever exception the handler happened to hit. `get_note_type` called
+    with `{"type": "0 Cloze"}` died on `args["name"]`, and a KeyError's message
+    is *only the key it could not find* - so the entire error the agent got
+    back was the string `'name'`. It could not tell a missing argument from an
+    unknown note type from an internal bug, and recovered by guessing again
+    (dogfood 2026-07-27).
+
+    Unknown keys are rejected rather than ignored for the same reason a
+    misnamed `fields` was rejected locally in proposals.py: a silently dropped
+    argument makes the tool answer a question nobody asked. That check now
+    lives here, once, instead of per-tool.
+
+    Types are deliberately NOT checked. Handlers coerce (`int(args["note_id"])`
+    accepts "123"), and tightening that here would reject calls that work today
+    for no gain in safety.
+    """
+    schema = spec.input_schema or {}
+    properties = schema.get("properties") or {}
+    allowed = set(properties) | set(spec.extra_args)
+    unknown = sorted(set(args) - allowed)
+    missing = [key for key in schema.get("required") or [] if key not in args]
+    if not unknown and not missing:
+        return
+
+    # Both halves in ONE message. Reported separately, the `{"type": ...}`
+    # call would have been told only that `type` is unknown - leaving the
+    # caller to notice on its own that the argument it meant is still missing.
+    problems = []
+    if missing:
+        problems.append(f"missing required argument(s) {missing}")
+    if unknown:
+        problems.append(f"unknown argument(s) {unknown}{_did_you_mean(unknown, allowed)}")
+    got = f"[{', '.join(repr(k) for k in sorted(args))}]" if args else "nothing"
+    raise ValueError(
+        f"{spec.name}: {'; '.join(problems)}. "
+        f"Received {got}; valid arguments: {', '.join(sorted(properties)) or '(none)'}."
+    )
+
+
+def _did_you_mean(unknown: list[str], allowed: set[str]) -> str:
+    """Near-miss hints for a genuine typo (`max_char` -> `max_chars`). A wrong
+    *concept* (`type` for `name`) is nowhere near, which is why the caller
+    always prints the full valid list rather than relying on this."""
+    from ..search_terms import suggest
+
+    hints = []
+    for key in unknown:
+        best = suggest(key, sorted(allowed))
+        if best:
+            hints.append(f"{key} -> {best[0]}")
+    return f" (did you mean {'; '.join(hints)}?)" if hints else ""

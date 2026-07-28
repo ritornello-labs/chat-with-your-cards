@@ -151,6 +151,10 @@ def register_proposal_tools(registry: ToolRegistry) -> None:
             },
             propose_note_edit,
             writes=True,
+            # Accepted as an alias for `field_changes` (proposals.py resolves
+            # it), but deliberately unadvertised: the schema names one
+            # argument so the model is not invited to pick between two.
+            extra_args=frozenset({"fields"}),
         )
     )
     registry.register(

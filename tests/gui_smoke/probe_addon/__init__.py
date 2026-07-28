@@ -2481,6 +2481,39 @@ def _run_checks() -> dict[str, Any]:
     check("empty search explains an unknown deck instead of answering 0",
           _empty_search_names_its_cause)
 
+    def _bad_arguments_explain_themselves() -> dict[str, Any]:
+        """A wrong argument name must not reach the handler.
+
+        `get_note_type` called with `{"type": "0 Cloze"}` used to die on
+        `args["name"]`, and a KeyError's whole message is the key it could not
+        find - so the agent got back the string `'name'` (dogfood 2026-07-27).
+        Driven through registry.call, the single dispatch path __init__.py
+        uses, so this fails if the check is not wired at the chokepoint.
+        """
+        from chat_with_your_cards.tools import build_registry
+
+        registry = build_registry()
+        ctx = addon._ToolCtx()
+        raised = ""
+        try:
+            registry.call(ctx, "get_note_type", {"type": "Basic"})
+        except ValueError as exc:
+            raised = str(exc)
+        except KeyError as exc:  # the exact regression this closes
+            raise AssertionError(f"bare KeyError reached the caller: {exc!r}") from None
+        if not raised:
+            raise AssertionError("a wrong argument name was accepted")
+        for expected in ("get_note_type", "'name'", "'type'", "max_chars"):
+            if expected not in raised:
+                raise AssertionError(f"unhelpful message, missing {expected!r}: {raised}")
+        # And a correct call still goes through, against the real collection.
+        real = str(mw.col.models.all_names_and_ids()[0].name)
+        ok = registry.call(ctx, "get_note_type", {"name": real})
+        return {"raised": raised[:200], "valid_call_returned": sorted(ok)}
+
+    check("wrong argument name is refused with a message that names it",
+          _bad_arguments_explain_themselves)
+
     def _hover_geometry_stable() -> dict[str, Any]:
         """Hovering a header button must change ONLY its background - never
         padding, font, size, or radius. A geometry change on hover shrinks the
