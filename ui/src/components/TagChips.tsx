@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { MAX_SUGGESTIONS, highlightMatch } from "./ComboBox";
+import { MAX_SUGGESTIONS, OptionLabel, useAnchoredList } from "./ComboBox";
 
 /**
  * Anki-editor-like tag entry: removable chips plus an inline text input with
@@ -20,6 +20,8 @@ export function TagChips({ tags, onChange, suggestions, testid }: TagChipsProps)
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const listStyle = useAnchoredList(open, inputRef);
 
   useEffect(() => {
     if (!open) return;
@@ -111,6 +113,7 @@ export function TagChips({ tags, onChange, suggestions, testid }: TagChipsProps)
         </span>
       ))}
       <input
+        ref={inputRef}
         type="text"
         className="cwyc-tagchips-input"
         value={text}
@@ -129,7 +132,12 @@ export function TagChips({ tags, onChange, suggestions, testid }: TagChipsProps)
         onKeyDown={onKeyDown}
       />
       {open && filtered.length > 0 ? (
-        <div className="cwyc-combo-list cwyc-tagchips-list" role="listbox" onMouseDown={(e) => e.preventDefault()}>
+        <div
+          className="cwyc-combo-list cwyc-tagchips-list"
+          style={listStyle}
+          role="listbox"
+          onMouseDown={(e) => e.preventDefault()}
+        >
           {filtered.map((option, i) => (
             <button
               key={option}
@@ -137,7 +145,7 @@ export function TagChips({ tags, onChange, suggestions, testid }: TagChipsProps)
               className={"cwyc-combo-item" + (i === activeIndex ? " cwyc-combo-active" : "")}
               onClick={() => addTag(option)}
             >
-              {highlightMatch(option, text)}
+              <OptionLabel value={option} query={text} />
             </button>
           ))}
           {overflow > 0 ? (

@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 
 /**
  * A typeable, in-DOM-only autocomplete input. Anki's real webview renders
@@ -39,11 +47,84 @@ export function highlightMatch(text: string, query: string): ReactNode {
   );
 }
 
+/**
+ * One option, LEAF FIRST.
+ *
+ * Deck and tag names are `::`-separated paths, and the part that tells them
+ * apart is the LAST component - but a single truncated line ellipsises from
+ * the right, so every deep sibling rendered as the identical
+ * "Decks::Geography…" and the choice was blind (user, 2026-07-27). The leaf
+ * gets the readable line; the parent path sits under it, dimmed, and is the
+ * only thing allowed to truncate.
+ */
+export function OptionLabel({ value, query }: { value: string; query: string }) {
+  const cut = value.lastIndexOf("::");
+  if (cut < 0) return <span className="cwyc-combo-leaf">{highlightMatch(value, query)}</span>;
+  return (
+    <>
+      <span className="cwyc-combo-leaf">{highlightMatch(value.slice(cut + 2), query)}</span>
+      <span className="cwyc-combo-path">{highlightMatch(value.slice(0, cut), query)}</span>
+    </>
+  );
+}
+
+/**
+ * Position the dropdown in VIEWPORT coordinates instead of inside the input.
+ *
+ * The pins panel is `overflow-y: auto`, which clips any absolutely positioned
+ * descendant - the tag list was sliced off mid-row at the panel edge (user,
+ * 2026-07-27). `position: fixed` escapes that, and while we are measuring
+ * anyway the list can be wider than the narrow input it hangs off, which is
+ * what makes long paths readable at all. Recomputed on scroll/resize so it
+ * cannot drift away from its input.
+ */
+export function useAnchoredList(open: boolean, anchor: React.RefObject<HTMLElement | null>) {
+  const [style, setStyle] = useState<CSSProperties>();
+  useEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const el = anchor.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const gap = 3;
+      const below = window.innerHeight - r.bottom - gap - 8;
+      const above = r.top - gap - 8;
+      const dropUp = below < 140 && above > below;
+      // Wider than the input when there is room, so a deep path has somewhere
+      // to go; never wider than the window.
+      const width = Math.min(Math.max(r.width, 260), window.innerWidth - 16);
+      const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
+      // BOTH edges, always. Leaving `top` to the stylesheet while setting
+      // `bottom` here over-constrains a fixed box: the browser then derives
+      // the height from the two edges instead of the content, and the list
+      // collapsed to its padding (10px) whenever it opened upward.
+      setStyle({
+        position: "fixed",
+        left,
+        width,
+        maxHeight: Math.max(120, Math.min(220, dropUp ? above : below)),
+        top: dropUp ? "auto" : r.bottom + gap,
+        bottom: dropUp ? window.innerHeight - r.top + gap : "auto",
+      });
+    };
+    place();
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [open, anchor]);
+  return style;
+}
+
 export function ComboBox({ value, onChange, options, placeholder, testid, allowFreeText }: ComboBoxProps) {
   const [text, setText] = useState(value);
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const listStyle = useAnchoredList(open, inputRef);
   const lastValidRef = useRef(value);
 
   // Re-seed from the authoritative value whenever it changes from outside
@@ -152,6 +233,7 @@ export function ComboBox({ value, onChange, options, placeholder, testid, allowF
   return (
     <div className="cwyc-combo" ref={rootRef}>
       <input
+        ref={inputRef}
         type="text"
         className="cwyc-combo-input"
         value={text}
@@ -166,7 +248,12 @@ export function ComboBox({ value, onChange, options, placeholder, testid, allowF
         aria-autocomplete="list"
       />
       {open && itemCount > 0 ? (
-        <div className="cwyc-combo-list" role="listbox" onMouseDown={(e) => e.preventDefault()}>
+        <div
+          className="cwyc-combo-list"
+          style={listStyle}
+          role="listbox"
+          onMouseDown={(e) => e.preventDefault()}
+        >
           {showClear ? (
             <button
               type="button"
@@ -185,7 +272,7 @@ export function ComboBox({ value, onChange, options, placeholder, testid, allowF
                 className={"cwyc-combo-item" + (index === activeIndex ? " cwyc-combo-active" : "")}
                 onClick={() => commit(option)}
               >
-                {highlightMatch(option, text)}
+                <OptionLabel value={option} query={text} />
               </button>
             );
           })}

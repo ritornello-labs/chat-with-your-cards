@@ -2762,12 +2762,19 @@ body {
   border-color: var(--cwyc-accent);
   box-shadow: 0 0 0 2px var(--cwyc-accent-soft);
 }
+/* Positioned in VIEWPORT coordinates by useAnchoredList (top/left/width/
+   max-height come from it as inline style). It must NOT be absolute inside
+   the pins panel: that panel scrolls, and a scrolling ancestor clips its
+   absolutely positioned descendants - the tag list was sliced off mid-row at
+   the panel edge (dogfood 2026-07-27). The declarations below are the
+   fallback for the brief first paint before the hook measures. */
 .cwyc-combo-list {
-  position: absolute;
+  position: fixed;
   z-index: 50;
-  top: calc(100% + 3px);
-  left: 0;
-  right: 0;
+  /* No top/left/bottom here on purpose: useAnchoredList owns every edge, and
+     a stylesheet `top` left behind would over-constrain the box the moment
+     the hook sets `bottom` to open upward. */
+  min-width: 0;
   max-height: 180px;
   overflow-y: auto;
   background: var(--cwyc-surface-raised);
@@ -2811,6 +2818,31 @@ body {
 #cwyc-root .cwyc-combo-item.cwyc-combo-active {
   background: var(--cwyc-accent-soft);
   color: var(--cwyc-accent-ink);
+}
+/* Leaf first, parent path under it. The leaf is what distinguishes siblings,
+   so it is the line that must never be truncated; the path may be. */
+.cwyc-combo-leaf {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cwyc-combo-path {
+  display: block;
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--cwyc-fg-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* The distinguishing end of a long parent path is its TAIL, so clip the
+     head: flip direction for the truncation and isolate so the `::` and any
+     RTL text inside still read in logical order. */
+  direction: rtl;
+  unicode-bidi: isolate;
+}
+#cwyc-root .cwyc-combo-item:hover .cwyc-combo-path,
+#cwyc-root .cwyc-combo-item.cwyc-combo-active .cwyc-combo-path {
+  color: inherit;
+  opacity: 0.75;
 }
 #cwyc-root .cwyc-combo-clear {
   color: var(--cwyc-fg-subtle);
