@@ -353,7 +353,15 @@ class ProposalManager:
 
     def _next_id(self) -> str:
         self._counter += 1
-        return f"p{self._counter}"
+        # Session-scoped, NOT just a counter. Restoring a chat replays its
+        # saved proposal cards into the UI with their original ids while this
+        # manager starts a fresh session at p1 - so a plain counter handed the
+        # next live proposal an id that was already on screen, and the UI's
+        # upsert quietly REPLACED that old card somewhere up the scrollback
+        # instead of appending a new one. The tool returned ok, the assistant
+        # said "proposed as p2", and no card ever appeared (dogfood
+        # 2026-07-27).
+        return f"p{self.session_id}-{self._counter}"
 
     # ---- pins ----
 

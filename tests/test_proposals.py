@@ -675,6 +675,29 @@ class CreateFlowTests(unittest.TestCase):
         self.assertIn("mine", note.tags)
         self.assertEqual(col.decks.name(note.cards()[0].did), "Other")
 
+    def test_proposal_ids_never_repeat_across_sessions(self) -> None:
+        """Restoring a chat replays its saved cards with their ORIGINAL ids
+        while the manager restarts at 1. With a bare counter the next live
+        proposal reused an id already on screen, and the UI's upsert replaced
+        that old card instead of adding a new one - the tool reported ok and
+        no card appeared (dogfood 2026-07-27)."""
+        manager, _col, pushed = make_manager()
+        manager.submit_create(dict(CREATE_ARGS))
+        first = pushes_of(pushed, "proposal")[-1]["proposal"]["id"]
+
+        manager.new_session()
+        manager.submit_create(dict(CREATE_ARGS))
+        second = pushes_of(pushed, "proposal")[-1]["proposal"]["id"]
+
+        self.assertNotEqual(first, second)
+
+    def test_ids_are_still_unique_within_one_session(self) -> None:
+        manager, _col, pushed = make_manager()
+        manager.submit_create(dict(CREATE_ARGS))
+        manager.submit_create({**CREATE_ARGS, "fields": {"Front": "Q2?", "Back": "A2."}})
+        ids = [push["proposal"]["id"] for push in pushes_of(pushed, "proposal")]
+        self.assertEqual(len(ids), len(set(ids)))
+
     def test_clearing_every_tag_on_the_card_strips_them(self) -> None:
         """`[]` means the user emptied the card's tag editor, which must strip
         the assistant's tags rather than fall back to them. Absent means "no

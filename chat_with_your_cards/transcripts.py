@@ -37,6 +37,25 @@ RECORDED_TYPES = {
 MAX_LIST = 50
 
 
+def _set_aside_if_pending(event: dict[str, Any]) -> dict[str, Any]:
+    """Replay a saved `pending` proposal as SET ASIDE, not as live.
+
+    A restored chat's proposals no longer exist in the ProposalManager (a new
+    session starts empty), so their Accept/Reject buttons silently do nothing
+    - the card looks actionable and is a zombie. DESIGN.md always said replayed
+    pending proposals render set-aside; nothing implemented it.
+
+    Only the REPLAYED copy is changed. The stored buffer keeps what actually
+    happened, so the transcript stays a faithful record.
+    """
+    if event.get("type") != "proposal":
+        return event
+    proposal = event.get("proposal")
+    if not isinstance(proposal, dict) or proposal.get("status") != "pending":
+        return event
+    return {**event, "proposal": {**proposal, "status": "superseded"}}
+
+
 def _short_title(text: str, limit: int = 60) -> str:
     text = " ".join(text.split())
     return text[: limit - 1] + "…" if len(text) > limit else text
@@ -71,7 +90,7 @@ class TranscriptStore:
             return None
         self._meta = data["meta"]
         self._events = list(data["events"])
-        return self._events
+        return [_set_aside_if_pending(event) for event in self._events]
 
     def record(self, payload: dict[str, Any]) -> None:
         if payload.get("type") not in RECORDED_TYPES:

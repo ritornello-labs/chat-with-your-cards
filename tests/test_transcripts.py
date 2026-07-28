@@ -59,6 +59,30 @@ class TranscriptStoreTests(unittest.TestCase):
         data = store.load(old_id)
         self.assertEqual(2, len(data["events"]))
 
+    def test_replayed_pending_proposal_is_set_aside(self) -> None:
+        """A restored chat's proposals are gone from the ProposalManager, so a
+        card replayed as `pending` is a zombie: it looks actionable and its
+        buttons do nothing."""
+        store, _ = make_store()
+        store.record({"type": "user_message", "text": "add a card"})
+        store.record(
+            {"type": "proposal", "proposal": {"id": "p1", "status": "pending"}}
+        )
+        store.record(
+            {"type": "proposal", "proposal": {"id": "p2", "status": "accepted"}}
+        )
+        store.flush()
+        old_id = store.current_id
+
+        store.begin()
+        events = store.continue_from(old_id)
+        assert events is not None
+        self.assertEqual("superseded", events[1]["proposal"]["status"])
+        # Anything already resolved is replayed untouched.
+        self.assertEqual("accepted", events[2]["proposal"]["status"])
+        # The stored transcript still records what actually happened.
+        self.assertEqual("pending", store.load(old_id)["events"][1]["proposal"]["status"])
+
     def test_list_sorted_newest_first(self) -> None:
         store, _ = make_store()
         store.record({"type": "user_message", "text": "first chat"})
