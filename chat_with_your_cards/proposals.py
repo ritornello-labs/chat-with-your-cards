@@ -215,6 +215,13 @@ class LedgerEntry:
     label: str
     prior_fields: dict[str, str] = field(default_factory=dict)  # edit revert data
     prior_tags: list[str] | None = None
+    # What the proposal actually WROTE. Prior state alone cannot tell "nobody
+    # touched this since" from "someone edited it after us" - both look like
+    # `current != prior`. Without this, revert blind-wrote the prior values
+    # over whatever was there and silently destroyed any later edit, including
+    # one synced in from another device (user-found 2026-07-23).
+    written_fields: dict[str, str] = field(default_factory=dict)
+    written_tags: list[str] | None = None
     undone: bool = False
     # bulk/change_set revert data: op-specific priors
     # rename_tag: {"old_tag","new_tag"}; move_cards: {"card_decks":{cid:did}};
@@ -2179,15 +2186,14 @@ class ProposalManager:
             ):
                 skipped.append(item.get("label", str(item["note_id"])))
                 continue
-            priors.append(
-                {
-                    "note_id": item["note_id"],
-                    "base_fields": {
-                        name: current[name] for name in item["field_changes"]
-                    },
-                    "prior_tags": list(note.tags),
-                }
-            )
+            prior_entry = {
+                "note_id": item["note_id"],
+                "base_fields": {
+                    name: current[name] for name in item["field_changes"]
+                },
+                "prior_tags": list(note.tags),
+            }
+            priors.append(prior_entry)
             for name, value in item["field_changes"].items():
                 note[name] = value
             for tag in item.get("add_tags", []):
@@ -2196,6 +2202,13 @@ class ProposalManager:
             note.tags = [t for t in note.tags if t not in item.get("remove_tags", [])]
             self._tag_edit(note)
             col.update_note(note)
+            # Same reason as the single-note edit: revert needs to know what we
+            # wrote, or it cannot tell an untouched note from an edited one.
+            stored = col.get_note(item["note_id"])
+            prior_entry["written_fields"] = {
+                name: stored[name] for name in item["field_changes"]
+            }
+            prior_entry["written_tags"] = list(stored.tags)
             applied.append(item["note_id"])
         if not applied:
             raise ProposalError(
@@ -2303,6 +2316,10 @@ class ProposalManager:
             self._tag_edit(note)
             col.update_note(note)
             first = next(iter(prior_fields.values()), "")
+            # Re-read so `written_*` is what Anki STORED, not what we handed
+            # it: a revert compares against the stored value, and any
+            # normalisation would otherwise read as divergence.
+            stored = col.get_note(note_id)
             self._ledger.append(
                 LedgerEntry(
                     id=proposal.id,
@@ -2311,6 +2328,8 @@ class ProposalManager:
                     label=_short_label(next(iter(apply_fields.values()), first)),
                     prior_fields=prior_fields,
                     prior_tags=prior_tags,
+                    written_fields={n: stored[n] for n in apply_fields},
+                    written_tags=list(stored.tags),
                 )
             )
             cards = tuple(int(c.id) for c in note.cards())
@@ -2401,6 +2420,7 @@ class ProposalManager:
                 note.tags = [t for t in note.tags if t not in proposal.remove_tags]
                 self._tag_edit(note)
                 col.update_note(note)
+                stored = col.get_note(proposal.note_id)
                 self._ledger.append(
                     LedgerEntry(
                         id=proposal.id,
@@ -2409,6 +2429,8 @@ class ProposalManager:
                         label=_short_label(next(iter(proposal.fields.values()), "")),
                         prior_fields=prior_fields,
                         prior_tags=prior_tags,
+                        written_fields={n: stored[n] for n in prior_fields},
+                        written_tags=list(stored.tags),
                     )
                 )
                 self._observe(
@@ -2464,7 +2486,7 @@ class ProposalManager:
         if entry is None:
             return
         try:
-            self._revert_entry(entry)
+            self._revert_entry(entry, force=bool(msg.get("force")))
         except ProposalError as exc:
             self._push({"type": "notice", "text": f"Could not revert: {exc}"})
             return
@@ -2503,14 +2525,66 @@ class ProposalManager:
             self._push(
                 {
                     "type": "notice",
+                    # Session undo never forces: a bulk sweep is exactly where
+                    # silently overwriting someone's later edit would do the
+                    # most damage. Diverged entries stay applied and revertible
+                    # one at a time, where the conflict can be read.
                     "text": f"Session undo finished; {errors} change(s) could not be "
-                    "reverted (studied or missing notes are kept).",
+                    "reverted and were left as they are (studied or deleted "
+                    "notes, or notes edited since).",
                 }
             )
         self._push_ledger()
         self._after_write([e.note_id for e in self._ledger])
 
-    def _revert_entry(self, entry: LedgerEntry) -> None:
+    @staticmethod
+    def _diverged(
+        note: Any, written_fields: dict[str, str], written_tags: list[str] | None
+    ) -> list[str]:
+        """Which parts of the note no longer hold what the proposal wrote.
+
+        A revert is a COMPENSATION, not a plain write: it may only undo its own
+        change. Comparing against the prior value cannot detect interference -
+        `current != prior` is equally true whether nobody touched the note or
+        somebody rewrote it. Comparing against what we WROTE distinguishes the
+        two, so a later edit (yours, another proposal's, or one synced in from
+        another device) is seen instead of silently overwritten.
+        """
+        # dict(note.items()), not `name in note`: a Note defines __getitem__
+        # for FIELD NAMES but no __contains__, so `in` falls back to the
+        # sequence protocol and probes note[0], note[1], ... - which raises.
+        current = dict(note.items())
+        names = [
+            name
+            for name, value in written_fields.items()
+            if name in current and current[name] != value
+        ]
+        if written_tags is not None and sorted(note.tags) != sorted(written_tags):
+            names.append("tags")
+        return names
+
+    def _guard_stale(
+        self,
+        note: Any,
+        written_fields: dict[str, str],
+        written_tags: list[str] | None,
+        force: bool,
+        label: str = "",
+    ) -> None:
+        """Refuse a revert that would clobber a change made after ours."""
+        if force:
+            return
+        names = self._diverged(note, written_fields, written_tags)
+        if not names:
+            return
+        where = f" on {label}" if label else ""
+        raise ProposalError(
+            f"{', '.join(names)}{where} changed after this was applied, so "
+            "reverting would discard that newer change. Review the note and "
+            "revert again with force to overwrite it anyway."
+        )
+
+    def _revert_entry(self, entry: LedgerEntry, force: bool = False) -> None:
         col = self._col()
         if not entry.revertible:
             raise ProposalError(
@@ -2580,6 +2654,22 @@ class ProposalManager:
         elif entry.kind == "change_set":
             missing_box = {"n": 0}
 
+            # Whole-batch precondition: check every item BEFORE writing any of
+            # them, so a conflict on note 40 cannot leave notes 1-39 reverted.
+            if not force:
+                for item in entry.data.get("items", []):
+                    try:
+                        note = col.get_note(item["note_id"])
+                    except Exception:
+                        continue  # missing notes are skipped below, not a conflict
+                    self._guard_stale(
+                        note,
+                        item.get("written_fields", {}),
+                        item.get("written_tags"),
+                        force,
+                        label=str(item.get("label") or f"note {item['note_id']}"),
+                    )
+
             def mutate_change_set() -> None:
                 missing = 0
                 for item in entry.data.get("items", []):
@@ -2618,6 +2708,13 @@ class ProposalManager:
                 col.get_note(entry.note_id)
             except Exception:
                 raise ProposalError("note no longer exists") from None
+
+            self._guard_stale(
+                col.get_note(entry.note_id),
+                entry.written_fields,
+                entry.written_tags,
+                force,
+            )
 
             def mutate_edit() -> None:
                 note = col.get_note(entry.note_id)

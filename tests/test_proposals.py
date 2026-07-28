@@ -1030,6 +1030,101 @@ class LedgerTests(unittest.TestCase):
         undone = pushes_of(pushed, "proposal_resolved")[-1]
         self.assertEqual(undone["status"], "undone")
 
+    def _accepted_edit(self, manager, col, pushed, changes):
+        """A note with one accepted edit behind it, ready to revert."""
+        create = manager.submit_create(dict(CREATE_ARGS))
+        manager.accept({"id": create["proposal_id"]})
+        nid = pushes_of(pushed, "proposal_resolved")[-1]["note_id"]
+        edit = manager.submit_edit({"note_id": nid, "field_changes": changes})
+        manager.accept({"id": edit["proposal_id"]})
+        return nid, edit["proposal_id"]
+
+    def test_revert_refuses_to_clobber_a_later_edit(self) -> None:
+        """The compensation hole: revert used to blind-write prior_fields over
+        whatever was there. Prior state alone cannot tell "untouched" from
+        "someone edited it after us" - both read as current != prior - so a
+        later edit (yours, another proposal's, or one synced from another
+        device) was silently destroyed."""
+        manager, col, pushed = make_manager()
+        nid, edit_id = self._accepted_edit(
+            manager, col, pushed, {"Front": "New Q?"}
+        )
+
+        note = col.get_note(nid)  # the user edits the note afterwards
+        note["Front"] = "Hand-written afterwards"
+        col.update_note(note)
+
+        manager.revert({"id": edit_id})
+
+        self.assertEqual("Hand-written afterwards", col.get_note(nid)["Front"])
+        notice = pushes_of(pushed, "notice")[-1]["text"]
+        self.assertIn("Front", notice)
+        self.assertIn("newer change", notice)
+        # Still revertible: the entry is refused, not consumed.
+        self.assertFalse(pushes_of(pushed, "ledger")[-1]["entries"][-1]["undone"])
+
+    def test_force_overwrites_the_later_edit_when_asked(self) -> None:
+        manager, col, pushed = make_manager()
+        nid, edit_id = self._accepted_edit(
+            manager, col, pushed, {"Front": "New Q?"}
+        )
+        note = col.get_note(nid)
+        note["Front"] = "Hand-written afterwards"
+        col.update_note(note)
+
+        manager.revert({"id": edit_id, "force": True})
+
+        self.assertEqual("Q?", col.get_note(nid)["Front"])
+
+    def test_untouched_note_still_reverts(self) -> None:
+        """The guard must not make ordinary reverts fail - the value we wrote
+        is still there, so there is nothing to protect."""
+        manager, col, pushed = make_manager()
+        nid, edit_id = self._accepted_edit(
+            manager, col, pushed, {"Front": "New Q?"}
+        )
+        manager.revert({"id": edit_id})
+        self.assertEqual("Q?", col.get_note(nid)["Front"])
+
+    def test_editing_an_untouched_field_does_not_block_revert(self) -> None:
+        """Divergence is judged per FIELD we wrote. Touching a field the
+        proposal never wrote is not a conflict with it."""
+        manager, col, pushed = make_manager()
+        nid, edit_id = self._accepted_edit(
+            manager, col, pushed, {"Front": "New Q?"}
+        )
+        note = col.get_note(nid)
+        note["Back"] = "unrelated later edit"
+        col.update_note(note)
+
+        manager.revert({"id": edit_id})
+
+        self.assertEqual("Q?", col.get_note(nid)["Front"])
+        self.assertEqual("unrelated later edit", col.get_note(nid)["Back"])
+
+    def test_session_undo_never_forces(self) -> None:
+        """A bulk sweep is where silently overwriting a later edit would do the
+        most damage, so undo_session leaves diverged entries applied."""
+        manager, col, pushed = make_manager()
+        # A pre-existing note, NOT one this session created: undoing a session
+        # walks backwards, so a note the session also created would simply be
+        # deleted by its own create-revert before the edit entry is reached.
+        seeded = FakeNote(col.models.by_name("Basic"))
+        seeded["Front"], seeded["Back"] = "Seeded Q?", "Seeded A."
+        col.add_note(seeded, 1)
+        nid = seeded.id
+        edit = manager.submit_edit({"note_id": nid, "field_changes": {"Front": "New Q?"}})
+        manager.accept({"id": edit["proposal_id"]})
+
+        note = col.get_note(nid)
+        note["Front"] = "Hand-written afterwards"
+        col.update_note(note)
+
+        manager.undo_session()
+
+        self.assertEqual("Hand-written afterwards", col.get_note(nid)["Front"])
+        self.assertIn("could not be reverted", pushes_of(pushed, "notice")[-1]["text"])
+
     def test_revert_create_deletes_unstudied_note_only(self) -> None:
         manager, col, pushed = make_manager()
         create = manager.submit_create(dict(CREATE_ARGS))
@@ -1403,6 +1498,34 @@ class BackupWarningTests(unittest.TestCase):
         self.assertTrue(
             any("backup checkpoint failed" in w for w in resolved["warnings"])
         )
+
+    def test_change_set_revert_is_all_or_nothing_on_conflict(self) -> None:
+        """Every item is checked BEFORE any is written: a conflict on the last
+        note must not leave the earlier ones half-reverted."""
+        manager, col, pushed = make_manager()
+        ids = _seed_notes(manager, col, pushed, n=2)
+        cs = manager.open_change_set({"title": "Tidy"})
+        for nid in ids:
+            manager.add_to_change_set(
+                {"change_set_id": cs["change_set_id"], "note_id": nid,
+                 "field_changes": {"Back": "tidy"}}
+            )
+        manager.close_change_set({"change_set_id": cs["change_set_id"]})
+        manager.accept({"id": cs["change_set_id"]})
+
+        # Someone edits the SECOND note afterwards.
+        note = col.get_note(ids[1])
+        note["Back"] = "hand-written afterwards"
+        col.update_note(note)
+
+        manager.revert({"id": cs["change_set_id"]})
+
+        self.assertEqual("tidy", col.get_note(ids[0])["Back"], "first note half-reverted")
+        self.assertEqual("hand-written afterwards", col.get_note(ids[1])["Back"])
+        self.assertIn("newer change", pushes_of(pushed, "notice")[-1]["text"])
+
+        manager.revert({"id": cs["change_set_id"], "force": True})
+        self.assertNotEqual("tidy", col.get_note(ids[0])["Back"])
 
     def test_change_set_warns_but_still_applies(self) -> None:
         manager, col, pushed = make_manager(checkpoint_ok=False)
