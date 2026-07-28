@@ -1,4 +1,3 @@
-import { useState } from "react";
 import type { ChatStore, ProposalCardData } from "../store";
 
 /**
@@ -20,7 +19,6 @@ export function ProposalActions({
   data: ProposalCardData;
   store: ChatStore;
 }) {
-  const [confirmForce, setConfirmForce] = useState(false);
   const status = data.status;
 
   if (status === "accepted" || status === "auto-accepted") {
@@ -39,29 +37,28 @@ export function ProposalActions({
     }
     return (
       <div className="cwyc-proposal-actions cwyc-proposal-after" data-testid="proposal-after" data-proposal-id={data.id}>
-        {/* The conflict path. Python refuses a revert that would discard a
-            change made after ours and says which fields moved; the second
-            click is the explicit "yes, overwrite it" the guard asks for. */}
-        {confirmForce ? (
+        {/* The override appears only once Python has actually REFUSED, and
+            says what it would cost. It is driven by the refusal itself
+            (proposals.py's StaleRevert -> proposal_error{conflict:true}), not
+            by a hidden gesture: an override nobody can find is the same as no
+            override, and one offered up front invites skipping the check. */}
+        {data.revertConflict ? (
           <>
-            <span className="cwyc-proposal-after-note">Overwrite the newer change?</span>
             <button
               type="button"
               className="cwyc-btn-reject"
-              onClick={() => setConfirmForce(false)}
+              data-testid="proposal-revert-keep"
+              onClick={() => store.dismissProposalError(data.id)}
             >
-              Keep it
+              Keep the newer change
             </button>
             <button
               type="button"
-              className="cwyc-btn-accept"
+              className="cwyc-btn-suggest"
               data-testid="proposal-revert-force"
-              onClick={() => {
-                setConfirmForce(false);
-                store.revertProposal(data.id, true);
-              }}
+              onClick={() => store.revertProposal(data.id, true)}
             >
-              Overwrite
+              Undo anyway
             </button>
           </>
         ) : (
@@ -70,11 +67,7 @@ export function ProposalActions({
             className="cwyc-btn-suggest"
             data-testid="proposal-revert"
             onClick={() => store.revertProposal(data.id)}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              setConfirmForce(true);
-            }}
-            title="Undo this change. If the note changed since, you will be asked before overwriting."
+            title="Undo this change. If the note changed since, you will be asked first."
           >
             Undo
           </button>

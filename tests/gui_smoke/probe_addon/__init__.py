@@ -2666,6 +2666,86 @@ def _run_checks() -> dict[str, Any]:
     check("an applied change can be undone from the dock",
           _applied_change_can_be_undone_from_the_dock)
 
+    def _stale_revert_offers_an_override_on_the_card() -> dict[str, Any]:
+        """The refusal and the override must both reach the user.
+
+        proposals.py refuses a revert that would discard a change made after
+        the proposal was applied. That is only useful if the refusal is
+        visible AND overridable where the user clicked - the first cut hid the
+        override behind a right-click nobody would find, and the flag carrying
+        the refusal to the card was dead code.
+        """
+        note = mw.col.new_note(mw.col.models.by_name("Basic"))
+        note["Front"], note["Back"] = "Zzq conflict probe", "original"
+        mw.col.add_note(note, mw.col.decks.id("Zzq Undo"))
+        result = state.proposals.submit_edit(
+            {"note_id": note.id, "field_changes": {"Back": "agent wrote this"},
+             "rationale": "conflict probe"}
+        )
+        state.proposals.accept({"id": result["proposal_id"]})
+
+        # Somebody edits the note afterwards - the case revert must not eat.
+        after = mw.col.get_note(note.id)
+        after["Back"] = "user wrote this later"
+        mw.col.update_note(after)
+
+        sel = '[data-proposal-id="%s"] ' % result["proposal_id"]
+        _wait_until(
+            lambda: _eval_js(
+                dock.web,
+                "document.querySelectorAll('%s[data-testid=proposal-revert]').length;" % sel,
+                DOM_TIMEOUT_MS, "undo button",
+            ) > 0,
+            DOM_TIMEOUT_MS, "the Undo control",
+        )
+        _eval_js(
+            dock.web,
+            "(function(){ document.querySelector('%s[data-testid=proposal-revert]')"
+            ".click(); return true; })();" % sel,
+            DOM_TIMEOUT_MS, "click Undo",
+        )
+        # Refused: the note keeps the newer text and the card offers a choice.
+        _wait_until(
+            lambda: _eval_js(
+                dock.web,
+                "document.querySelectorAll('%s[data-testid=proposal-revert-force]').length;" % sel,
+                DOM_TIMEOUT_MS, "override button",
+            ) > 0,
+            DOM_TIMEOUT_MS, "an 'Undo anyway' override after the refusal",
+        )
+        if mw.col.get_note(note.id)["Back"] != "user wrote this later":
+            raise AssertionError("refused revert still wrote to the note")
+        # From the override button up to the card: data-proposal-id and
+        # data-testid sit on the SAME element, so a descendant combinator
+        # between them matches nothing.
+        shown = _eval_js(
+            dock.web,
+            "(function(){ var b = document.querySelector('%s[data-testid=proposal-revert-force]');"
+            " if (!b) return null;"
+            " var card = b.closest('.cwyc-proposal');"
+            " var e = card && card.querySelector('.cwyc-proposal-error');"
+            " return e ? e.textContent : null; })();" % sel,
+            DOM_TIMEOUT_MS, "conflict message",
+        )
+        if not shown or "newer change" not in shown:
+            raise AssertionError(f"the refusal was not explained on the card: {shown!r}")
+
+        # Overriding deliberately does go through.
+        _eval_js(
+            dock.web,
+            "(function(){ document.querySelector('%s[data-testid=proposal-revert-force]')"
+            ".click(); return true; })();" % sel,
+            DOM_TIMEOUT_MS, "click Undo anyway",
+        )
+        _wait_until(
+            lambda: mw.col.get_note(note.id)["Back"] == "original",
+            DOM_TIMEOUT_MS, "the forced revert to land",
+        )
+        return {"refusal": shown[:120], "after_force": mw.col.get_note(note.id)["Back"]}
+
+    check("a revert that would discard a newer change is refused, and overridable",
+          _stale_revert_offers_an_override_on_the_card)
+
     def _hover_geometry_stable() -> dict[str, Any]:
         """Hovering a header button must change ONLY its background - never
         padding, font, size, or radius. A geometry change on hover shrinks the

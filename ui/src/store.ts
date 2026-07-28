@@ -536,6 +536,22 @@ export class ChatStore {
     postCommand({ type: "proposal_restore", id });
   }
 
+  /** Drop a refused-revert error once the user has decided to keep the newer
+   *  change, so the card stops offering an override it no longer needs. */
+  dismissProposalError(id: string): void {
+    const messageId = this.findProposalMessageId(id);
+    if (!messageId) return;
+    this.updateMessage(messageId, (msg) => ({
+      ...msg,
+      content: msg.content.map((part) =>
+        part.type === "data" && part.name === "proposal" && part.data.id === id
+          ? { ...part, data: { ...part.data, errorMessage: undefined, revertConflict: undefined } }
+          : part
+      ),
+    }));
+    this.emit();
+  }
+
   undoSession(): void {
     postCommand({ type: "undo_session" });
   }
