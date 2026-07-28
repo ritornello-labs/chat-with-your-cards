@@ -171,9 +171,15 @@ export function PinsButton({ store }: { store: ChatStore }) {
 
   return (
     <div className="cwyc-ctl" ref={ref}>
+      {/* Deliberately NOT a mode pill. The other three chips all answer "how
+          should the agent behave" and show a current setting; pins are
+          CONTEXT that rides with the next message - the same category the
+          attachment control will join (task #15). Sat between two mode chips,
+          it read as a fourth setting (user, 2026-07-27), so the shape carries
+          the distinction, not just the position. */}
       <button
         type="button"
-        className={"cwyc-chip" + (pinCount ? " cwyc-chip-on" : "")}
+        className={"cwyc-chip cwyc-chip-pin" + (pinCount ? " cwyc-chip-on" : "")}
         title="Pin the deck, note type, tags, or field defaults every proposal must use"
         data-testid="pins-button"
         onClick={() => {
@@ -181,7 +187,14 @@ export function PinsButton({ store }: { store: ChatStore }) {
           setOpen((o) => !o);
         }}
       >
-        Pins{pinCount ? ` · ${pinCount}` : ""}
+        <svg viewBox="0 0 14 14" width="11" height="11" aria-hidden="true">
+          <path
+            d="M5.2 1.4h3.6l-.5 3.3 2.3 2.1v1.1H7.7v4.2l-.7 1-.7-1V7.9H2.4V6.8l2.3-2.1z"
+            fill="currentColor"
+          />
+        </svg>
+        Pins
+        {pinCount ? <span className="cwyc-chip-count">{pinCount}</span> : null}
       </button>
       {open ? (
         <div

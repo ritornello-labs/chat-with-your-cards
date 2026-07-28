@@ -138,9 +138,15 @@ function Composer({ store }: { store: ChatStore }) {
         />
       )}
       <div className="cwyc-composer-bar">
+        {/* Context first, then behaviour. Pins says what rides WITH the
+            message; the rest say how the agent should act. Its own group so
+            the attachment control (task #15) has a home next to it rather
+            than being wedged among the mode chips. */}
+        <div className="cwyc-composer-context">
+          <PinsButton store={store} />
+        </div>
         <div className="cwyc-composer-left">
           <ModeChip store={store} />
-          <PinsButton store={store} />
           <ToolsChip store={store} />
         </div>
         <div className="cwyc-composer-right">

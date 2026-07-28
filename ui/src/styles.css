@@ -2097,7 +2097,9 @@ body {
 }
 
 /* The framed writing surface. Both faces of the composer (plain textarea and
-   the vim/CodeMirror editor) share it, so focus styling lives in one place. */
+   the vim/CodeMirror editor) share it, so focus styling lives in one place.
+   The height cap is NOT shared: a textarea scrolls itself, while the vim face
+   has a separate scrolling child that has to own it (see .cwyc-vim-editor). */
 .cwyc-composer-input,
 .cwyc-vim-editor {
   width: 100%;
@@ -2111,6 +2113,9 @@ body {
   font-family: var(--cwyc-font);
   font-size: 13.5px;
   line-height: 1.45;
+}
+
+.cwyc-composer-input {
   max-height: 160px;
 }
 
@@ -2166,6 +2171,15 @@ body {
 .cwyc-vim-editor .cm-editor.cm-focused {
   outline: none;
 }
+/* The scroller owns BOTH the padding and the height cap, and the frame owns
+   neither. They used to be set on the frame (padding) and on the scroller
+   (max-height:160) at the same time: with box-sizing:border-box the frame's
+   content box was 160-18=142px while its scrolling child was a full 160px, so
+   the text painted 10px outside the rounded border, top and bottom (dogfood
+   2026-07-27). Any cap here must live on exactly one of the two. */
+.cwyc-vim-editor {
+  padding: 0;
+}
 .cwyc-vim-editor .cm-scroller {
   /* Monospace when vim keys are on (user-requested 2026-07-14): uniform
      glyph widths give the block cursor a constant size and column motions
@@ -2173,6 +2187,7 @@ body {
   font-family: var(--cwyc-mono);
   font-size: 12.5px;
   line-height: 1.5;
+  padding: 9px 11px;
   max-height: 160px;
   overflow-y: auto;
 }
@@ -2473,6 +2488,15 @@ body {
      Only the chips wrap, inside their own groups. */
   flex-wrap: nowrap;
 }
+/* Context group (pins today, attachments next). Never shrinks and never
+   wraps: it is one or two controls, and it anchors the left edge so the mode
+   chips reflow around it. The extra margin is the category break - a divider
+   RULE would have to wrap along with the chips, which it cannot do sanely. */
+.cwyc-composer-context {
+  flex: 0 0 auto;
+  margin-right: 4px;
+}
+.cwyc-composer-context,
 .cwyc-composer-left,
 .cwyc-composer-right {
   display: flex;
@@ -2502,6 +2526,38 @@ body {
   cursor: pointer;
   white-space: nowrap;
 }
+/* Pins is not a mode. The other chips are pills showing a current SETTING;
+   this one carries context that rides with the message, so it takes a
+   rounded-rect + icon form instead. Shape, not just position, is what stops
+   it reading as a fourth setting (user, 2026-07-27). */
+#cwyc-root .cwyc-chip-pin {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 8px;
+  padding: 3px 8px;
+}
+#cwyc-root .cwyc-chip-pin svg {
+  flex: 0 0 auto;
+  opacity: 0.75;
+}
+#cwyc-root .cwyc-chip-pin.cwyc-chip-on svg {
+  opacity: 1;
+}
+/* How many constraints are pinned - a value, so it gets the emphasis the
+   label does not. */
+.cwyc-chip-count {
+  min-width: 14px;
+  padding: 0 4px;
+  border-radius: 7px;
+  background: var(--cwyc-accent-soft);
+  color: var(--cwyc-accent);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 15px;
+  text-align: center;
+}
+
 /* Long model labels ("Default model · high · fast · full") ellipsize instead
    of shoving the send button around. */
 #cwyc-root .cwyc-composer-bar .cwyc-chip {
