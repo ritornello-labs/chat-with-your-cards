@@ -2832,7 +2832,7 @@ def _run_checks() -> dict[str, Any]:
         note = mw.col.new_note(mw.col.models.by_name("Basic"))
         note["Front"], note["Back"] = "Zzq vim field probe", "before"
         mw.col.add_note(note, mw.col.decks.id("Zzq Undo"))
-        result = state.proposals.submit_edit(
+        state.proposals.submit_edit(
             {"note_id": note.id, "field_changes": {"Back": "after"},
              "rationale": "vim field probe"}
         )
