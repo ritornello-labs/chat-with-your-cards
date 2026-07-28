@@ -166,6 +166,17 @@ function baseProposal(overrides: Partial<ProposalPayload> & Pick<ProposalPayload
   };
 }
 
+/** One side out of a proposal's `previews: unknown`, without pretending to
+ *  know more about the shape than the dev harness needs. */
+function asSide(
+  previews: unknown,
+  side: "before" | "after"
+): { question?: string; answer?: string; css?: string } | null {
+  if (!previews || typeof previews !== "object") return null;
+  const value = (previews as Record<string, unknown>)[side];
+  return value && typeof value === "object" ? (value as { question?: string }) : null;
+}
+
 let proposalCounter = 0;
 function nextProposalId(prefix: string): string {
   proposalCounter += 1;
@@ -278,6 +289,122 @@ function editProposalScript(): Step[] {
         add_tags: ["definitions"],
         remove_tags: ["todo"],
         rationale: "The current back drops the positivity constraints and the puncture.",
+        previews: {
+          before: { question: "Define the limit of f at a.", answer: oldBack, css: DEMO_CSS },
+          after: { question: "Define the limit of f at a.", answer: newBack, css: DEMO_CSS },
+        },
+      }),
+    },
+  ];
+}
+
+/** A TAG-ONLY edit: no field changes, no preview change. Before task #20 this
+ *  rendered as a card with literally nothing on it to review. */
+function tagEditProposalScript(): Step[] {
+  const id = nextProposalId("t");
+  return [
+    { kind: "text", text: "This one is mis-tagged - the content is fine:\n\n" },
+    {
+      kind: "proposal",
+      proposal: baseProposal({
+        id,
+        kind: "edit",
+        note_type: "Basic",
+        deck: "Math::Analysis",
+        tags: ["analysis", "todo", "imported"],
+        note_id: 1234568,
+        fields: [],
+        add_tags: ["definitions", "analysis"],
+        remove_tags: ["todo"],
+        rationale: "It is a definition, and the todo tag is left over from the import.",
+      }),
+    },
+  ];
+}
+
+/** bulk find_replace: op + per-note old/new samples + the affected notes. */
+function bulkProposalScript(): Step[] {
+  const id = nextProposalId("b");
+  const labels = [
+    "Cauchy sequence", "Uniform continuity", "Compactness", "Heine-Borel",
+    "Bolzano-Weierstrass", "Monotone convergence", "Squeeze theorem",
+    "Nested intervals", "Cantor set", "Lebesgue measure",
+  ];
+  return [
+    { kind: "text", text: "Ten notes still spell it the old way:\n\n" },
+    {
+      kind: "proposal",
+      proposal: baseProposal({
+        id,
+        kind: "bulk",
+        op: "find_replace",
+        op_args: { search: "epsilon", replacement: "\u03b5", field: "Back", query: "deck:Math::Analysis" },
+        rationale: "Use the symbol rather than the word, matching the rest of the deck.",
+        count: labels.length,
+        samples: labels.slice(0, 4).map((label) => ({
+          label,
+          old: `For every epsilon > 0 there is a delta > 0 (${label}).`,
+          new: `For every \u03b5 > 0 there is a delta > 0 (${label}).`,
+        })),
+        items: labels.map((label, i) => ({ note_id: 1500000 + i, label, fields: ["Back"] })),
+      }),
+    },
+  ];
+}
+
+/** delete: the blast radius, by name. */
+function deleteProposalScript(): Step[] {
+  const id = nextProposalId("d");
+  const labels = ["Duplicate: Cauchy sequence", "Duplicate: Compactness", "Empty note"];
+  return [
+    { kind: "text", text: "These three are duplicates or empty:\n\n" },
+    {
+      kind: "proposal",
+      proposal: baseProposal({
+        id,
+        kind: "delete",
+        rationale: "Duplicates of notes you already have, plus one with no content.",
+        count: labels.length,
+        samples: labels.map((text) => ({ text })),
+        op_args: { note_ids: [1500001, 1500002, 1500003] },
+        warnings: [
+          "Deleting notes cannot be undone from the chat ledger. A backup checkpoint is created first (File > Switch Profile restores it).",
+        ],
+      }),
+    },
+  ];
+}
+
+/** skill_update: patterns plus the unified diff proposals.py already builds. */
+function skillProposalScript(): Step[] {
+  const id = nextProposalId("s");
+  const diff = [
+    "--- skill (current)",
+    "+++ skill (proposed)",
+    "@@ -4,7 +4,9 @@",
+    " ## Card style",
+    " ",
+    "-Keep answers short.",
+    "+Keep answers to one recallable fact.",
+    "+Put the shortest useful label in the answer zone.",
+    " ",
+    " ## Tagging",
+  ].join("\n");
+  return [
+    { kind: "text", text: "Your last ten edits share a pattern worth writing down:\n\n" },
+    {
+      kind: "proposal",
+      proposal: baseProposal({
+        id,
+        kind: "skill_update",
+        title: "Update the card-authoring skill",
+        rationale: "You consistently shorten answer text and add a label to the answer zone.",
+        count: 10,
+        samples: [
+          { text: "Answers trimmed to a single recallable fact (7 of 10 edits)" },
+          { text: "A short label added above the answer (5 of 10 edits)" },
+        ],
+        op_args: { diff, new_content: "", observation_ids: [] },
       }),
     },
   ];
@@ -559,6 +686,10 @@ function selectScript(userText: string): Step[] {
   if (text.includes("image") || text.includes("picture")) return IMAGE_SCRIPT;
   if (text.includes("think") || text.includes("reason")) return REASONING_SCRIPT;
   if (text.includes("grade") || text.includes("fail") || text.includes("again")) return gradingScript();
+  if (text.includes("tag")) return tagEditProposalScript();
+  if (text.includes("bulk") || text.includes("replace")) return bulkProposalScript();
+  if (text.includes("delete")) return deleteProposalScript();
+  if (text.includes("skill")) return skillProposalScript();
   if (text.includes("edit")) return editProposalScript();
   if (text.includes("propose") || text.includes("note") || text.includes("card")) return createProposalScript();
   if (text.includes("tool")) return TOOL_SCRIPT;
@@ -927,6 +1058,28 @@ export function installDevReplayer(): void {
           warnings: [],
         });
         break;
+      // proposals.py's preview_request: re-render the card from the draft the
+      // user is typing and push it back as `preview_update`. Mirrors the real
+      // contract exactly - previews only, never status/fields/revision.
+      case "proposal_preview": {
+        const current = devProposals.get(String(msg.id));
+        if (!current) break;
+        const fields = (msg.fields ?? {}) as Record<string, string>;
+        const question = fields.Front ?? String(asSide(current.previews, "after")?.question ?? "");
+        const answer = Object.entries(fields)
+          .filter(([name]) => name !== "Front")
+          .map(([, value]) => value)
+          .join("<hr id=answer>");
+        window.chatUI?.dispatch({
+          type: "preview_update",
+          id: current.id,
+          previews: {
+            before: asSide(current.previews, "before"),
+            after: { question, answer, css: DEMO_CSS },
+          },
+        });
+        break;
+      }
       case "proposal_revise": {
         const current = devProposals.get(String(msg.id));
         if (!current) break;

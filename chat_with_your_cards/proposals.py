@@ -2214,9 +2214,12 @@ class ProposalManager:
         orig_tags = list(proposal.tags)
         orig_deck = proposal.deck
         proposal.deck = str(msg.get("deck") or proposal.deck)
-        proposal.tags = [
-            str(t).strip() for t in (msg.get("tags") or proposal.tags) if str(t).strip()
-        ]
+        # `None` = the card sent no opinion; `[]` = the user cleared every tag
+        # in the editor, which must strip them rather than silently restore the
+        # assistant's choice.
+        tags_override = msg.get("tags")
+        chosen_tags = proposal.tags if tags_override is None else tags_override
+        proposal.tags = [str(t).strip() for t in chosen_tags if str(t).strip()]
         model = self._validate_note_type_and_fields(col, proposal.note_type, final_fields)
         field_names = [f["name"] for f in model["flds"]]
         if not final_fields.get(field_names[0], "").strip():

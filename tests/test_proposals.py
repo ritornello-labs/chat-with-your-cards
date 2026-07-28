@@ -675,6 +675,26 @@ class CreateFlowTests(unittest.TestCase):
         self.assertIn("mine", note.tags)
         self.assertEqual(col.decks.name(note.cards()[0].did), "Other")
 
+    def test_clearing_every_tag_on_the_card_strips_them(self) -> None:
+        """`[]` means the user emptied the card's tag editor, which must strip
+        the assistant's tags rather than fall back to them. Absent means "no
+        opinion" and DOES fall back - the two cases used to be the same."""
+        manager, col, pushed = make_manager()
+        result = manager.submit_create(dict(CREATE_ARGS))
+        manager.accept({"id": result["proposal_id"], "tags": []})
+        (resolved,) = pushes_of(pushed, "proposal_resolved")
+        note = col.get_note(resolved["note_id"])
+        self.assertNotIn("analysis", note.tags)
+        # The add-on's own bookkeeping tags are not the user's to clear here.
+        self.assertIn(AI_TAG, note.tags)
+
+    def test_omitting_tags_keeps_the_proposals_own(self) -> None:
+        manager, col, pushed = make_manager()
+        result = manager.submit_create(dict(CREATE_ARGS))
+        manager.accept({"id": result["proposal_id"]})
+        (resolved,) = pushes_of(pushed, "proposal_resolved")
+        self.assertIn("analysis", col.get_note(resolved["note_id"]).tags)
+
     def test_shared_review_saves_revision_before_exact_accept(self) -> None:
         manager, col, pushed = make_manager()
         result = manager.submit_create(dict(CREATE_ARGS))

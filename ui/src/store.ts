@@ -464,12 +464,35 @@ export class ChatStore {
     postCommand(cmd);
   }
 
-  acceptProposalRevision(id: string, revision: number): void {
-    postCommand({ type: "proposal_accept", id, revision });
+  /**
+   * `overrides` carries the destination the user chose on the card itself -
+   * deck and tags, which _accept_create already honours over the proposal's
+   * own values. Omitted keys leave the proposal's choice alone; sending an
+   * empty tag list is meaningful (strip them all) and is preserved as such.
+   */
+  acceptProposalRevision(
+    id: string,
+    revision: number,
+    overrides?: { deck?: string; tags?: readonly string[] }
+  ): void {
+    const cmd: BridgeCommand = { type: "proposal_accept", id, revision };
+    if (overrides?.deck) cmd.deck = overrides.deck;
+    if (overrides?.tags) cmd.tags = [...overrides.tags];
+    postCommand(cmd);
   }
 
   reviseProposal(id: string, expectedRevision: number, fields: Record<string, string>): void {
     postCommand({ type: "proposal_revise", id, expected_revision: expectedRevision, fields });
+  }
+
+  /**
+   * Ask Python to re-render the card preview from an in-progress draft
+   * (proposals.py preview_request -> `preview_update`). Fire-and-forget and
+   * safe to spam - the caller debounces; a stale answer only ever repaints a
+   * preview, never the proposal itself.
+   */
+  previewProposal(id: string, fields: Record<string, string>): void {
+    postCommand({ type: "proposal_preview", id, fields });
   }
 
   rejectProposal(id: string): void {
@@ -640,6 +663,9 @@ export class ChatStore {
         break;
       case "proposal_error":
         this.errorProposal(event as ProposalErrorEvent);
+        break;
+      case "preview_update":
+        this.updateProposalPreview(event as { id?: string; previews?: unknown });
         break;
       case "grading":
         this.upsertGrading((event as GradingEvent).grading);
@@ -1216,6 +1242,28 @@ export class ChatStore {
             warnings: event.warnings ?? part.data.warnings,
           },
         };
+      }),
+    }));
+    this.emit();
+  }
+
+  /**
+   * proposals.py's preview_request answering our debounced `proposal_preview`:
+   * the card preview re-rendered from what the user is typing. Only `previews`
+   * changes - status, fields and revision are NOT ours to move here, and a
+   * preview that arrives after the proposal resolved is dropped rather than
+   * repainting a settled card.
+   */
+  private updateProposalPreview(event: { id?: string; previews?: unknown }): void {
+    const id = String(event.id ?? "");
+    const messageId = this.findProposalMessageId(id);
+    if (!messageId || !event.previews) return;
+    this.updateMessage(messageId, (msg) => ({
+      ...msg,
+      content: msg.content.map((part) => {
+        if (part.type !== "data" || part.name !== "proposal" || part.data.id !== id) return part;
+        if (part.data.status !== "pending") return part;
+        return { ...part, data: { ...part.data, previews: event.previews } };
       }),
     }));
     this.emit();

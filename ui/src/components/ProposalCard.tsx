@@ -1,8 +1,18 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { InteractionCard, wordDiff } from "@elvis-labs/interaction-ui-react";
 import "@elvis-labs/interaction-ui-react/styles.css";
 import type { ChatStore, ProposalCardData } from "../store";
+import { useChatState } from "../ChatRuntimeProvider";
 import { createProposalInteraction } from "../interactionAdapter";
+import { ComboBox } from "./ComboBox";
+import { TagChips } from "./TagChips";
+import { ProposalBody } from "./ProposalBody";
+import { ProposalTagDiff } from "./ProposalTags";
+
+/** Debounce before asking Python to re-render the preview from a draft. Same
+ *  400ms the classic card used: long enough that typing a word does not fire
+ *  a render per keystroke, short enough to feel live. */
+const PREVIEW_DEBOUNCE_MS = 400;
 
 const KIND_LABELS: Record<string, string> = {
   create: "New note",
@@ -30,12 +40,11 @@ const STATUS_LABELS: Record<string, string> = {
  * commands app.js sends (proposal_accept / proposal_reject), so the Python
  * side (ProposalManager.accept/reject) needs no changes.
  *
- * Only "create" and "edit" get field-level editing here, matching the
- * task's explicit Approve/Edit/Reject scope. Other kinds (bulk/delete/
- * change_set/deck_op/skill_update) still render - rationale, warnings,
- * count - and can still be accepted/rejected, just without per-field
- * editing or the word-diff/preview-iframe/tag-editor treatment app.js gives
- * them. That parity gap is intentional; see ui/README.md.
+ * Only "create" and "edit" get field-level EDITING; the other kinds
+ * (bulk/delete/change_set/deck_op/skill_update) have no per-field concept to
+ * edit. They are not silent about what they do, though - ProposalBody.tsx
+ * renders the operation, the affected notes, and the diffs (task #20d, which
+ * replaced the "{count} item(s)" placeholder).
  */
 interface PreviewSide {
   question?: string | null;
@@ -193,22 +202,145 @@ interface ProposalCardProps {
   store: ChatStore;
 }
 
+/**
+ * Where a new note lands: deck and tags, both editable on the card.
+ *
+ * Both were read-only text after the migration, which quietly made the card
+ * worse than the tool it replaced - the assistant guesses a deck, and the one
+ * moment you can cheaply correct that guess is while you are already looking
+ * at the note. `_accept_create` has always honoured a `deck`/`tags` override on
+ * the accept message; only the control was missing.
+ *
+ * Held locally rather than round-tripped through `proposal_revise`: neither
+ * value changes what the card renders, so a revision bump would cost a
+ * re-render and a preview refresh to show nothing new.
+ */
+function ProposalDestination({
+  deck,
+  tags,
+  noteType,
+  decks,
+  tagSuggestions,
+  editable,
+  onDeckChange,
+  onTagsChange,
+}: {
+  deck: string;
+  tags: readonly string[];
+  noteType: string;
+  decks: readonly string[];
+  tagSuggestions: readonly string[];
+  editable: boolean;
+  onDeckChange: (deck: string) => void;
+  onTagsChange: (tags: string[]) => void;
+}) {
+  if (!editable) {
+    return (
+      <div className="cwyc-proposal-dest" data-testid="proposal-destination">
+        <div className="cwyc-proposal-dest-row">
+          <span className="cwyc-proposal-dest-label">Deck</span>
+          <span className="cwyc-proposal-dest-value">{deck}</span>
+        </div>
+        <div className="cwyc-proposal-dest-row">
+          <span className="cwyc-proposal-dest-label">Note type</span>
+          <span className="cwyc-proposal-dest-value">{noteType}</span>
+        </div>
+        {tags.length ? (
+          <div className="cwyc-proposal-dest-row">
+            <span className="cwyc-proposal-dest-label">Tags</span>
+            <span className="cwyc-proposal-dest-value">{tags.join(", ")}</span>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+  return (
+    <div className="cwyc-proposal-dest" data-testid="proposal-destination">
+      <label className="cwyc-proposal-dest-row">
+        <span className="cwyc-proposal-dest-label">Deck</span>
+        {/* allowFreeText is required, not a nicety: a proposal routinely
+            targets a deck that does not exist yet ("deck X does not exist;
+            it will be created"). Without it, ComboBox's blur handler snaps
+            any non-matching text back - which would silently erase the
+            assistant's own choice the moment you clicked away. */}
+        <ComboBox
+          value={deck}
+          onChange={onDeckChange}
+          options={[...decks]}
+          placeholder="Deck…"
+          testid="proposal-deck"
+          allowFreeText
+        />
+      </label>
+      {/* Note type stays fixed: it decides which fields exist, so changing it
+          here would invalidate the very values under review. */}
+      <div className="cwyc-proposal-dest-row">
+        <span className="cwyc-proposal-dest-label">Note type</span>
+        <span className="cwyc-proposal-dest-value">{noteType}</span>
+      </div>
+      <label className="cwyc-proposal-dest-row">
+        <span className="cwyc-proposal-dest-label">Tags</span>
+        <TagChips
+          tags={tags}
+          onChange={onTagsChange}
+          suggestions={tagSuggestions}
+          testid="proposal-tag-input"
+        />
+      </label>
+    </div>
+  );
+}
+
 function SharedCreateProposalCard({ data, store }: ProposalCardProps) {
   const interaction = useMemo(() => createProposalInteraction(data), [data]);
   const previews = asPreviews(data.previews);
+  const { ui } = useChatState(store);
+  const pending = data.status === "pending";
+  // Seeded once per proposal identity: a status/warning re-push must not
+  // discard a deck the user just picked.
+  const [deck, setDeck] = useState(data.deck);
+  const [tags, setTags] = useState<readonly string[]>(data.tags ?? []);
+  const seeded = useRef(data.id);
+  if (seeded.current !== data.id) {
+    seeded.current = data.id;
+    setDeck(data.deck);
+    setTags(data.tags ?? []);
+  }
+
   return (
     <InteractionCard
       interaction={interaction}
       className="cwyc-interaction-card"
       error={data.errorMessage}
-      renderBlock={(block) => block.type === "card_preview" && previews ? <PreviewFlip previews={previews} /> : undefined}
+      renderBlock={(block) => {
+        if (block.type === "card_preview" && previews) return <PreviewFlip previews={previews} />;
+        // The schema's key_value block is read-only by definition; swap in the
+        // editable destination rather than pushing editability upstream into a
+        // vocabulary that is shared with other hosts.
+        if (block.type === "key_value") {
+          return (
+            <ProposalDestination
+              deck={deck}
+              tags={tags}
+              noteType={data.note_type}
+              decks={ui.meta.decks}
+              tagSuggestions={ui.meta.tags}
+              editable={pending}
+              onDeckChange={setDeck}
+              onTagsChange={setTags}
+            />
+          );
+        }
+        return undefined;
+      }}
       // The renderer echoes `revision` as an OPAQUE string token (schema
       // contract); the bridge protocol speaks numbers, so Number() exactly at
       // this boundary - the same place the Mini App converts for its broker.
       onRevise={({ interactionId, revision, fields }) => store.reviseProposal(interactionId, Number(revision), fields)}
       onAction={({ interactionId, revision, actionId }) => {
-        if (actionId === "approve") store.acceptProposalRevision(interactionId, Number(revision));
-        else if (actionId === "reject") store.rejectProposal(interactionId);
+        if (actionId === "approve") {
+          store.acceptProposalRevision(interactionId, Number(revision), { deck, tags });
+        } else if (actionId === "reject") store.rejectProposal(interactionId);
       }}
     />
   );
@@ -232,6 +364,20 @@ function LegacyProposalCard({ data, store }: ProposalCardProps) {
   const [editing, setEditing] = useState(false);
 
   const pending = data.status === "pending";
+
+  // Live preview while typing (proposals.py preview_request). Without it an
+  // edit is reviewed against the preview the ASSISTANT proposed, so the card
+  // silently disagrees with the textareas right above it the moment you touch
+  // them. Debounced, and only while actually editing a pending proposal.
+  const previewValues = editing && pending && data.kind === "edit" ? values : null;
+  useEffect(() => {
+    if (!previewValues) return;
+    const timer = window.setTimeout(
+      () => store.previewProposal(data.id, previewValues),
+      PREVIEW_DEBOUNCE_MS
+    );
+    return () => window.clearTimeout(timer);
+  }, [previewValues, data.id, store]);
   const kindLabel = KIND_LABELS[data.kind] ?? data.kind;
   const statusLabel = STATUS_LABELS[data.status] ?? data.status;
   const where =
@@ -263,7 +409,9 @@ function LegacyProposalCard({ data, store }: ProposalCardProps) {
 
       {previews ? <PreviewFlip previews={previews} /> : null}
 
-      {editableFields ? (
+      {!editableFields ? (
+        <ProposalBody data={data} />
+      ) : fields.length > 0 ? (
         <div className="cwyc-proposal-fields">
           {fields.map((field) => (
             <div className="cwyc-field" key={field.name}>
@@ -301,15 +449,24 @@ function LegacyProposalCard({ data, store }: ProposalCardProps) {
             </div>
           ))}
         </div>
-      ) : (
-        <div className="cwyc-proposal-count">{data.count} item(s)</div>
-      )}
+      ) : null}
+
+      {/* A tag-only edit changes no field and no preview, so without this the
+          card shows nothing at all to review. */}
+      {data.kind === "edit" ? (
+        <ProposalTagDiff
+          tags={data.tags ?? []}
+          addTags={data.add_tags ?? []}
+          removeTags={data.remove_tags ?? []}
+        />
+      ) : null}
 
       {data.errorMessage ? <div className="cwyc-proposal-error">{data.errorMessage}</div> : null}
 
       {pending ? (
         <div className="cwyc-proposal-actions">
-          {editableFields ? (
+          {/* No fields = nothing this button could open (a tag-only edit). */}
+          {editableFields && fields.length > 0 ? (
             <button
               type="button"
               className="cwyc-btn-suggest"

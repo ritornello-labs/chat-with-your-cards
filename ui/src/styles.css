@@ -1624,6 +1624,209 @@ body {
   font-weight: 600;
 }
 
+/* -- what a non-note proposal actually does (ProposalBody.tsx) --
+   Bulk/delete/change-set/deck/skill cards used to render as "{n} item(s)".
+   These styles carry the operation, the examples, and the affected notes. */
+
+.cwyc-proposal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cwyc-proposal-summary {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.cwyc-proposal-op {
+  font-size: 13px;
+  font-weight: 600;
+}
+.cwyc-proposal-summary .cwyc-proposal-count {
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--cwyc-fg-subtle);
+}
+.cwyc-proposal-samples {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.cwyc-proposal-sample-line {
+  color: var(--cwyc-fg);
+  overflow-wrap: anywhere;
+}
+.cwyc-proposal-sample {
+  border-left: 2px solid var(--cwyc-border);
+  padding-left: 8px;
+}
+.cwyc-proposal-sample-label {
+  font-size: 11px;
+  color: var(--cwyc-fg-subtle);
+  margin-bottom: 2px;
+}
+.cwyc-proposal-items {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+.cwyc-proposal-item {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  overflow-wrap: anywhere;
+}
+.cwyc-proposal-item-head {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* A row carrying a diff stacks: name on top, the change beneath it, with a
+   rule tying them together. Rows without one stay single-line and dense. */
+.cwyc-proposal-item-wide {
+  flex-direction: column;
+  gap: 2px;
+  border-left: 2px solid var(--cwyc-border);
+  padding-left: 8px;
+  margin: 2px 0;
+}
+.cwyc-proposal-item-wide .cwyc-proposal-item-label {
+  color: var(--cwyc-fg-subtle);
+  font-size: 11px;
+}
+.cwyc-proposal-item-fields {
+  flex: 0 0 auto;
+  color: var(--cwyc-fg-subtle);
+  font-family: var(--cwyc-mono);
+  font-size: 11px;
+}
+#cwyc-root .cwyc-proposal-more {
+  align-self: flex-start;
+  border: none;
+  background: none;
+  padding: 2px 0;
+  color: var(--cwyc-accent);
+  font-size: 11.5px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+/* Unified diff of a proposed skill change (proposals.py builds it already). */
+.cwyc-proposal-diff {
+  margin: 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--cwyc-surface);
+  font-family: var(--cwyc-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.cwyc-diff-line {
+  display: block;
+}
+.cwyc-diff-ins {
+  background: var(--cwyc-green-soft);
+  color: var(--cwyc-green);
+}
+.cwyc-diff-del {
+  background: var(--cwyc-red-soft);
+  color: var(--cwyc-red);
+}
+.cwyc-diff-hunk,
+.cwyc-diff-meta {
+  color: var(--cwyc-fg-subtle);
+}
+
+/* -- tags on an edit proposal (ProposalTags.tsx) --
+   A tag-only edit changes no field and no preview; these chips are the ONLY
+   thing on the card that shows what would happen. */
+
+.cwyc-proposal-tags {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-size: 12px;
+}
+.cwyc-proposal-tags-label {
+  flex: 0 0 auto;
+  color: var(--cwyc-fg-subtle);
+}
+.cwyc-proposal-tags-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.cwyc-proposal-tags-empty {
+  color: var(--cwyc-fg-subtle);
+  font-style: italic;
+}
+/* Static = no delete affordance, so the padding the editable chip reserves
+   for its × would read as a lopsided gap. */
+.cwyc-tagchip-static {
+  padding: 1px 8px;
+  font-size: 12px;
+}
+.cwyc-tagchip-static.cwyc-tag-added {
+  border-color: var(--cwyc-green);
+  background: var(--cwyc-green-soft);
+  color: var(--cwyc-green);
+}
+.cwyc-tagchip-static.cwyc-tag-removed {
+  border-color: var(--cwyc-red);
+  background: var(--cwyc-red-soft);
+  color: var(--cwyc-red);
+  text-decoration: line-through;
+}
+
+/* -- destination of a new note (ProposalCard's ProposalDestination) --
+   Deck and tags, editable on the card: the assistant guesses the deck, and
+   this is the one moment correcting it is free. */
+
+.cwyc-proposal-dest {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cwyc-proposal-dest-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  min-width: 0;
+}
+.cwyc-proposal-dest-label {
+  flex: 0 0 62px;
+  color: var(--cwyc-fg-subtle);
+}
+.cwyc-proposal-dest-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* The two controls own the rest of the row; without this the ComboBox's
+   intrinsic width pushes the label off a narrow dock. */
+.cwyc-proposal-dest-row > .cwyc-combo,
+.cwyc-proposal-dest-row > .cwyc-tagchips {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 /* -- actions: decisive, physical-feeling buttons -- */
 
 .cwyc-proposal-actions {

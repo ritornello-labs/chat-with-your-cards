@@ -2088,6 +2088,33 @@ def _run_checks() -> dict[str, Any]:
         if card["preview_tabs"] != 2:
             raise AssertionError(f"expected Front/Back preview tabs: {card}")
 
+        # Task #20(c): deck and tags are EDITABLE on a create card. They were
+        # read-only text after the React migration, which made the card worse
+        # than the tool it replaced - the assistant guesses the deck, and this
+        # is the one moment correcting it is free. Retype the deck here and
+        # assert below that the note really landed there, so a control that
+        # renders but does not reach _accept_create still fails.
+        chosen_deck = "Zzq Probe Chosen Deck"
+        card["destination"] = _eval_js(
+            dock.web,
+            "(function() {"
+            "  var box = document.querySelector('[data-testid=proposal-deck]');"
+            "  var tags = document.querySelector('[data-testid=proposal-tag-input]');"
+            "  if (!box || !tags) return {deck_input: !!box, tag_input: !!tags};"
+            "  var set = Object.getOwnPropertyDescriptor("
+            "    window.HTMLInputElement.prototype, 'value').set;"
+            "  set.call(box, " + json.dumps(chosen_deck) + ");"
+            "  box.dispatchEvent(new Event('input', {bubbles: true}));"
+            "  return {deck_input: true, tag_input: true, typed: box.value};"
+            "})();",
+            DOM_TIMEOUT_MS,
+            "proposal destination controls",
+        )
+        if not card["destination"].get("tag_input"):
+            raise AssertionError(f"create card has no tag editor: {card['destination']}")
+        if card["destination"].get("typed") != chosen_deck:
+            raise AssertionError(f"deck control did not take input: {card['destination']}")
+
         before_ids = set(mw.col.find_notes('tag:"ai-created"'))
         _eval_js(
             dock.web,
@@ -2106,6 +2133,15 @@ def _run_checks() -> dict[str, Any]:
         session_tag = state.proposals.session_tag
         if session_tag not in note.tags:
             raise AssertionError(f"session tag missing: {note.tags}")
+
+        # The deck retyped on the card is where the note actually went. A
+        # control that renders but never reaches the accept message would pass
+        # every DOM assertion above and still be useless.
+        landed = {mw.col.decks.name(c.did) for c in note.cards()}
+        if landed != {chosen_deck}:
+            raise AssertionError(
+                f"deck chosen on the card was ignored: wanted {chosen_deck!r}, got {landed}"
+            )
 
         # The card must flip to the resolved read-only state: badge
         # "Completed" (the adapter's accepted label, same string the old

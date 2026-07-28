@@ -365,9 +365,10 @@ given late is consumed by the agent's next attempt.
   on from stays `pending` forever. (The old "Suggest change" button did this;
   its CSS class was reused for the in-card Edit toggle and the supersede half
   was dropped.)
-- **Tags are invisible on proposals** — `add_tags`/`remove_tags` reach the UI
-  types but nothing renders them, so a *tag-only edit proposal shows no visible
-  change at all*.
+- ~~**Tags are invisible on proposals**~~ — **fixed 2026-07-27 (task #20a)**.
+  `ProposalTags.tsx` draws the note's current tags plus the `+ added` /
+  `− removed` delta on edit proposals, filtered against what the note actually
+  carries so a no-op add/remove is not drawn as a change.
 - The **`open` flag is ignored**, so Accept is clickable on a change set that
   is still collecting edits (Python rejects it, so it is a dead button rather
   than data loss).
@@ -380,19 +381,26 @@ given late is consumed by the agent's next attempt.
 
 **Known gaps, previously recorded and still open:**
 
-- Live preview-while-typing on **edit** proposals (`proposal_preview` /
-  `preview_update` are implemented in Python, unused by the UI).
-- Deck is read-only on a create proposal (was a `<select>`).
+- ~~Live preview-while-typing on **edit** proposals~~ — **fixed 2026-07-27
+  (#20b)**: `ProposalCard` debounces 400ms and posts `proposal_preview`;
+  the store applies `preview_update` to `previews` only (never status,
+  fields, or revision) and drops one that arrives after the card resolved.
+- ~~Deck is read-only on a create proposal~~ — **fixed 2026-07-27 (#20c)**:
+  deck (a free-text ComboBox — a proposal often targets a deck that does not
+  exist yet) and tags are both editable, and ride the accept message that
+  `_accept_create` already honoured.
 - Friendly tool-name labels + hiding internal tools — every call still renders
   its raw tool name.
 - Bulk accept/reject bar, learning nudge, suggested-questions ghost text,
   context chip.
 - Proposal keyboard review: Cmd+Enter accept, Cmd+Backspace reject,
   Cmd+Up/Down to cycle.
-- Bulk/delete/change_set/deck_op/skill_update kinds render the shared chrome
-  (kind badge, rationale, warnings, count, Accept/Reject) but not their
-  kind-specific body — no diff samples, change-set item list, or skill diff.
-  Only `create`/`edit` get field-level editing.
+- ~~Bulk/delete/change_set/deck_op/skill_update kinds have no kind-specific
+  body~~ — **fixed 2026-07-27 (#20d)**: `ProposalBody.tsx` renders the
+  operation label, a counted noun that says what is counted, one collapsible
+  list of affected notes with word-level diffs inline on the sampled ones, and
+  the unified diff for a skill update. Field-level *editing* is still
+  `create`/`edit` only.
 
 ## Integration status
 
@@ -419,5 +427,7 @@ Still open:
   future pass.
 - Everything under "Not ported from `app.js`" above — re-audited 2026-07-23
   and filed in the working backlog. Note that several of those are *not*
-  cosmetic parity: the unreachable ledger/revert
-  path, and invisible proposal tags all affect correctness or safety.
+  cosmetic parity: the unreachable ledger/revert path affects correctness and
+  safety. (Invisible proposal tags, the stale edit preview, the read-only deck,
+  and the missing kind bodies were closed on 2026-07-27; the strikethroughs
+  above mark them.)

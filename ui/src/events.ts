@@ -55,10 +55,10 @@ export interface ProposalFieldPayload {
 
 /**
  * Proposal.to_payload() (chat_with_your_cards/proposals.py) - the dict
- * app.js's renderProposal() consumes. Only "create" and "edit" kinds get a
- * dedicated card in this scaffold (Approve / Edit / Reject, per the task);
- * other kinds (bulk/delete/change_set/deck_op/skill_update) render through
- * the same generic fallback so nothing throws, but without kind-specific UI.
+ * app.js's renderProposal() consumes. "create" and "edit" get field-level
+ * editing; the other kinds (bulk/delete/change_set/deck_op/skill_update) share
+ * one card whose body is built from `op`, `op_args`, `samples` and `items`
+ * (ProposalBody.tsx).
  */
 export interface ProposalPayload {
   id: string;
@@ -127,6 +127,19 @@ export interface ProposalErrorEvent {
   type: "proposal_error";
   id: string;
   message: string;
+}
+
+/**
+ * proposals.py's preview_request answering a debounced `proposal_preview`:
+ * the card re-rendered from the draft the user is typing, so an edit is
+ * reviewed against what it will actually look like rather than against the
+ * preview the assistant proposed. Carries `previews` and nothing else - it
+ * must never move status, fields, or revision.
+ */
+export interface PreviewUpdateEvent {
+  type: "preview_update";
+  id: string;
+  previews: unknown;
 }
 
 export interface GradingCardSummary {
@@ -334,6 +347,7 @@ export type KnownChatEvent =
   | ProposalEvent
   | ProposalResolvedEvent
   | ProposalErrorEvent
+  | PreviewUpdateEvent
   | GradingEvent
   | UsageEvent
   | DockStateEvent
