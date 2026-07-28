@@ -10,6 +10,7 @@ import { TagChips } from "./TagChips";
 import { ProposalBody } from "./ProposalBody";
 import { ProposalTagDiff } from "./ProposalTags";
 import { ProposalActions } from "./ProposalActions";
+import { VimTextArea } from "./VimTextArea";
 
 /**
  * "Suggest change": seed the composer with a reference to this proposal and
@@ -326,6 +327,7 @@ function SharedCreateProposalCard({ data, store }: ProposalCardProps) {
   const { ui } = useChatState(store);
   const suggestChange = useSuggestChange(store);
   const pending = data.status === "pending";
+  const vimMode = !!ui.settings?.vimMode;
   // Seeded once per proposal identity: a status/warning re-push must not
   // discard a deck the user just picked.
   const [deck, setDeck] = useState(data.deck);
@@ -368,6 +370,20 @@ function SharedCreateProposalCard({ data, store }: ProposalCardProps) {
       // contract); the bridge protocol speaks numbers, so Number() exactly at
       // this boundary - the same place the Mini App converts for its broker.
       onRevise={({ interactionId, revision, fields }) => store.reviseProposal(interactionId, Number(revision), fields)}
+      // The renderer's click-to-edit control, supplied by us so vim keys reach
+      // the create card's fields too (#31). The package stays free of any
+      // editor dependency: it owns the draft, the host owns the control.
+      renderFieldEditor={
+        vimMode
+          ? ({ name, value, onChange }) => (
+              <VimTextArea
+                value={value}
+                onChange={onChange}
+                testid={`field-input-vim-${name}`}
+              />
+            )
+          : undefined
+      }
       onAction={({ interactionId, revision, actionId }) => {
         if (actionId === "approve") {
           store.acceptProposalRevision(interactionId, Number(revision), { deck, tags });
@@ -400,6 +416,7 @@ function LegacyProposalCard({ data, store }: ProposalCardProps) {
   const [values, setValues] = useState<Record<string, string>>(initialValues);
   const [editing, setEditing] = useState(false);
   const suggestChange = useSuggestChange(store);
+  const vimMode = !!useChatState(store).ui.settings?.vimMode;
 
   // `open` = a change set still collecting edits. Python refuses to accept
   // one, so the row must not offer it (#19).
@@ -464,13 +481,28 @@ function LegacyProposalCard({ data, store }: ProposalCardProps) {
             <div className="cwyc-field" key={field.name}>
               <div className="cwyc-field-name">{field.name}</div>
               {editing ? (
-                <textarea
-                  className="cwyc-field-input"
-                  value={values[field.name] ?? field.new}
-                  onChange={(e) => setValues((prev) => ({ ...prev, [field.name]: e.target.value }))}
-                  disabled={!pending}
-                  rows={3}
-                />
+                // Vim keys reach the field editor too, not just the composer:
+                // this is where the real text work happens (#31). Same
+                // onChange either way, so the 400ms live-preview debounce
+                // fires identically.
+                vimMode ? (
+                  <VimTextArea
+                    value={values[field.name] ?? field.new}
+                    onChange={(text) =>
+                      setValues((prev) => ({ ...prev, [field.name]: text }))
+                    }
+                    disabled={!pending}
+                    testid={`field-input-vim-${field.name}`}
+                  />
+                ) : (
+                  <textarea
+                    className="cwyc-field-input"
+                    value={values[field.name] ?? field.new}
+                    onChange={(e) => setValues((prev) => ({ ...prev, [field.name]: e.target.value }))}
+                    disabled={!pending}
+                    rows={3}
+                  />
+                )
               ) : (
                 <div className="cwyc-field-value">
                   {data.kind === "edit" && field.old ? (

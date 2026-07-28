@@ -1619,6 +1619,51 @@ body {
   box-shadow: 0 0 0 2px var(--cwyc-accent-soft);
 }
 
+/* The vim field editor (VimTextArea) wearing the plain textarea's clothes, so
+   turning vim keys on changes the KEYS and not the card. Same frame and focus
+   ring; the scroller owns the padding and the height cap, because splitting
+   them across the frame and its scrolling child is what pushed text outside
+   the composer's border (see .cwyc-vim-editor). */
+.cwyc-vim-field {
+  width: 100%;
+  border: 1px solid var(--cwyc-border);
+  border-radius: 6px;
+  background: var(--cwyc-bg);
+  color: var(--cwyc-fg);
+}
+.cwyc-vim-field:focus-within {
+  border-color: var(--cwyc-accent);
+  box-shadow: 0 0 0 2px var(--cwyc-accent-soft);
+}
+.cwyc-vim-field .cm-editor {
+  background: transparent;
+  outline: none;
+}
+.cwyc-vim-field .cm-scroller {
+  font-family: var(--cwyc-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 5px 7px;
+  min-height: 54px; /* ~ the textarea's rows={3} */
+  max-height: 220px;
+  overflow-y: auto;
+}
+.cwyc-vim-field .cm-content {
+  padding: 0;
+  caret-color: var(--cwyc-fg);
+}
+.cwyc-vim-field .cm-line {
+  padding: 0;
+}
+.cwyc-vim-field .cm-cursor {
+  border-left-color: var(--cwyc-fg);
+}
+/* Block cursor in normal mode - the one intentional tell that vim is on,
+   matching the composer's. */
+.cwyc-vim-field .cm-fat-cursor {
+  background: var(--cwyc-warn) !important;
+}
+
 .cwyc-proposal-count {
   font-size: 13px;
   font-weight: 600;

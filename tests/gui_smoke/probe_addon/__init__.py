@@ -2816,6 +2816,80 @@ def _run_checks() -> dict[str, Any]:
     check("Suggest change seeds the composer and sets the proposal aside",
           _suggest_change_sets_the_proposal_aside)
 
+    def _vim_reaches_the_field_editor() -> dict[str, Any]:
+        """`vim_mode` must reach the note-FIELD editors, not just the composer.
+
+        It only ever wired the composer, so the one place the most text work
+        happens - a card's fields on an edit proposal - dropped back to a bare
+        textarea (user, 2026-07-27). Driven in real Anki because the create
+        card's editor comes from the vendored renderer's renderFieldEditor
+        slot, which only exists in the built bundle.
+        """
+        state.config["vim_mode"] = True
+        addon._push_settings()
+        QTest.qWait(300)
+
+        note = mw.col.new_note(mw.col.models.by_name("Basic"))
+        note["Front"], note["Back"] = "Zzq vim field probe", "before"
+        mw.col.add_note(note, mw.col.decks.id("Zzq Undo"))
+        result = state.proposals.submit_edit(
+            {"note_id": note.id, "field_changes": {"Back": "after"},
+             "rationale": "vim field probe"}
+        )
+        _wait_until(
+            lambda: _eval_js(
+                dock.web,
+                "document.querySelectorAll('[data-testid=proposal-edit]').length;",
+                DOM_TIMEOUT_MS, "edit toggle",
+            ) > 0,
+            DOM_TIMEOUT_MS, "the Edit toggle on the pending card",
+        )
+        _eval_js(
+            dock.web,
+            "(function(){"
+            "  var cards = [].slice.call(document.querySelectorAll('[data-testid=proposal-card]'));"
+            "  var b = cards[cards.length - 1].querySelector('[data-testid=proposal-edit]');"
+            "  if (!b) return false; b.click(); return true; })();",
+            DOM_TIMEOUT_MS, "open the field editors",
+        )
+        _wait_until(
+            lambda: _eval_js(
+                dock.web,
+                "document.querySelectorAll('.cwyc-vim-field').length;",
+                DOM_TIMEOUT_MS, "vim field count",
+            ) > 0,
+            DOM_TIMEOUT_MS, "a vim field editor instead of a textarea",
+        )
+        shape = _eval_js(
+            dock.web,
+            "(function(){"
+            "  return {vimFields: document.querySelectorAll('.cwyc-vim-field').length,"
+            "    plain: document.querySelectorAll('.cwyc-field-input').length,"
+            "    hasCodeMirror: !!document.querySelector('.cwyc-vim-field .cm-content'),"
+            "    composerIsVim: !!document.querySelector('[data-testid=composer-input-vim]')};"
+            "})();",
+            DOM_TIMEOUT_MS, "field editor shape",
+        )
+        if shape["plain"]:
+            raise AssertionError(f"a plain textarea survived vim mode: {shape}")
+        if not shape["hasCodeMirror"]:
+            raise AssertionError(f"the vim field editor did not mount: {shape}")
+
+        state.config["vim_mode"] = False
+        addon._push_settings()
+        QTest.qWait(200)
+        back = _eval_js(
+            dock.web,
+            "document.querySelectorAll('.cwyc-vim-field').length;",
+            DOM_TIMEOUT_MS, "vim fields after switching off",
+        )
+        if back:
+            raise AssertionError("field editors stayed vim after vim_mode was turned off")
+        return shape
+
+    check("vim mode reaches the proposal field editors",
+          _vim_reaches_the_field_editor)
+
     def _hover_geometry_stable() -> dict[str, Any]:
         """Hovering a header button must change ONLY its background - never
         padding, font, size, or radius. A geometry change on hover shrinks the

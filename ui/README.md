@@ -174,7 +174,13 @@ necessarily mounted) that maps the `ChatEvent` stream onto assistant-ui's
 New-note proposals are adapted by `interactionAdapter.ts` to the interaction
 *presentation standard* — an `InteractionPresentation` from the vendored
 `@elvis-labs/interaction-schema` package — and rendered by the vendored
-`@elvis-labs/interaction-ui-react` package (the 2026-07-16 split of the old
+`@elvis-labs/interaction-ui-react` package — vendored as a tarball; bumped to
+**0.6.0** on 2026-07-27 to add `renderFieldEditor`, a host-supplied
+click-to-edit control (same contract as `renderBlock`: return a node to take
+over, `undefined` to keep the built-in textarea). That is how vim keys reach
+the create card's fields without the shared package growing an editor
+dependency — it owns the draft, the host owns the control.
+The package is (the 2026-07-16 split of the old
 combined `@elvis-labs/interaction-ui` 0.1.0; visuals unchanged). The renderer
 is presentation-only: it treats `revision`/`digest`/ids as opaque tokens and
 echoes them byte-for-byte; the adapter owns status→badge labels and offers
