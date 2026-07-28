@@ -1856,34 +1856,41 @@ body {
 
 /* ---------- composer ---------- */
 
+/* The composer is a WRITING SURFACE plus a settings strip, not one box
+   containing both. Previously the border wrapped the textarea AND five
+   controls, which made it heavy and left the chips competing with the text
+   field inside the same frame (user, 2026-07-23). Now only the input is
+   framed; the strip below it is chrome. */
 .cwyc-composer {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin: 6px 12px 12px;
+  gap: 5px;
+  margin: 6px 12px 10px;
+}
+
+/* The framed writing surface. Both faces of the composer (plain textarea and
+   the vim/CodeMirror editor) share it, so focus styling lives in one place. */
+.cwyc-composer-input,
+.cwyc-vim-editor {
+  width: 100%;
   border: 1px solid var(--cwyc-border);
   border-radius: 14px;
   background: var(--cwyc-surface-raised);
-  padding: 8px 10px 7px;
-}
-
-.cwyc-composer:focus-within {
-  border-color: var(--cwyc-accent);
-  box-shadow: 0 0 0 2px var(--cwyc-accent-soft);
-}
-
-.cwyc-composer-input {
-  width: 100%;
-  border: none;
+  padding: 9px 11px;
   outline: none;
   resize: none;
-  background: transparent;
   color: var(--cwyc-fg);
   font-family: var(--cwyc-font);
   font-size: 13.5px;
   line-height: 1.45;
   max-height: 160px;
+}
+
+.cwyc-composer-input:focus,
+.cwyc-vim-editor:focus-within {
+  border-color: var(--cwyc-accent);
+  box-shadow: 0 0 0 2px var(--cwyc-accent-soft);
 }
 
 .cwyc-composer-input::placeholder {
@@ -2226,6 +2233,9 @@ body {
 /* ---- composer control row ------------------------------------------------ */
 
 .cwyc-composer-bar {
+  /* Chrome, not part of the writing surface: no frame of its own, and sitting
+     just outside the input's box. */
+  padding: 0 2px;
   justify-content: space-between;
   /* Send sits on the LAST line of a wrapped chip block, not centred against
      it. */

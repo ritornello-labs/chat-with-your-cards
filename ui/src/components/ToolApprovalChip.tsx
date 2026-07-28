@@ -32,7 +32,17 @@ export function ToolApprovalChip({
   }, [data.resolved]);
 
   if (data.resolved) {
-    const verdict = data.allow ? "Allowed" : data.reason ? `Denied (${data.reason})` : "Denied";
+    // "expired" is NOT a refusal - the user never answered - so it must not
+    // read as one. Anything else that carries a reason is a genuine denial
+    // with a cause (e.g. session ended).
+    const verdict =
+      data.reason === "expired"
+        ? "Expired, no answer"
+        : data.allow
+          ? "Allowed"
+          : data.reason
+            ? `Denied (${data.reason})`
+            : "Denied";
     return (
       <div
         className="cwyc-approval cwyc-approval-resolved"

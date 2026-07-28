@@ -49,6 +49,13 @@ APPROVAL_GRACE_S = 45.0
 # call an hour later, which would quietly defeat the whole mode.
 DECISION_TTL_S = 300.0
 
+# How long an UNANSWERED prompt stays answerable. Past this it is dead: the
+# user has moved on, and an approval clicked hours later would resume work
+# nobody is waiting for any more. Without it the chip lived forever and the
+# agent kept re-raising "you still have requests parked behind prompts" long
+# after the user had given up on them (dogfood 2026-07-23).
+PENDING_TTL_S = 900.0
+
 ALLOW = "allow"
 DENY = "deny"
 PENDING = "pending"
@@ -60,10 +67,12 @@ class ApprovalBroker:
         push_on_main: Callable[[dict[str, Any]], None],
         grace_s: float = APPROVAL_GRACE_S,
         decision_ttl_s: float = DECISION_TTL_S,
+        pending_ttl_s: float = PENDING_TTL_S,
     ) -> None:
         self._push_on_main = push_on_main
         self._grace_s = grace_s
         self._decision_ttl_s = decision_ttl_s
+        self._pending_ttl_s = pending_ttl_s
         self._lock = threading.Lock()
         self._counter = 0
         self._pending: dict[str, dict[str, Any]] = {}
@@ -84,6 +93,21 @@ class ApprovalBroker:
             return None
         return allow
 
+    def _expire_stale(self) -> list[str]:
+        """Drop prompts the user has clearly abandoned. Caller holds the lock;
+        returns the ids to resolve (pushed outside the lock)."""
+        now = time.monotonic()
+        stale = [
+            approval_id
+            for approval_id, entry in self._pending.items()
+            if now - float(entry.get("created_at", now)) > self._pending_ttl_s
+        ]
+        for approval_id in stale:
+            entry = self._pending.pop(approval_id)
+            self._by_key.pop(str(entry["key"]), None)
+            entry["event"].set()  # release anything still parked on it
+        return stale
+
     def request(self, tool: str, summary: str) -> str:
         """Called on the MCP thread. Returns ALLOW, DENY, or PENDING.
 
@@ -92,6 +116,7 @@ class ApprovalBroker:
         """
         key = self._key(tool, summary)
         with self._lock:
+            expired = self._expire_stale()
             decided = self._take_decision(key)
             if decided is not None:
                 return ALLOW if decided else DENY
@@ -102,7 +127,11 @@ class ApprovalBroker:
                 # No live chip for this exact call: make one.
                 self._counter += 1
                 approval_id = f"a{self._counter}"
-                entry = {"event": threading.Event(), "key": key}
+                entry = {
+                    "event": threading.Event(),
+                    "key": key,
+                    "created_at": time.monotonic(),
+                }
                 self._pending[approval_id] = entry
                 self._by_key[key] = approval_id
                 push = {
@@ -116,6 +145,15 @@ class ApprovalBroker:
                 # SAME chip instead of stacking another identical prompt.
                 push = None
 
+        for stale_id in expired:
+            self._push_on_main(
+                {
+                    "type": "tool_approval_resolved",
+                    "id": stale_id,
+                    "allow": False,
+                    "reason": "expired",
+                }
+            )
         if push is not None:
             self._push_on_main(push)
 
@@ -143,6 +181,26 @@ class ApprovalBroker:
         with self._lock:
             entry = self._pending.pop(approval_id, None)
             if entry is None:
+                return
+            if time.monotonic() - float(entry.get("created_at", 0)) > self._pending_ttl_s:
+                # Answered so long after the fact that nothing is waiting for
+                # it; treat as expired rather than silently resuming old work.
+                self._by_key.pop(str(entry["key"]), None)
+                entry["event"].set()
+                stale_id = approval_id
+                expired_now = True
+            else:
+                expired_now = False
+                stale_id = ""
+            if expired_now:
+                self._push_on_main(
+                    {
+                        "type": "tool_approval_resolved",
+                        "id": stale_id,
+                        "allow": False,
+                        "reason": "expired",
+                    }
+                )
                 return
             key = str(entry["key"])
             self._by_key.pop(key, None)

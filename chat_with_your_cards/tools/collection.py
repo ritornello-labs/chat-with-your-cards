@@ -111,26 +111,44 @@ def _card_summary(col: Any, card_id: int) -> dict[str, Any]:
     }
 
 
+DETAIL_LEVELS = ("count", "ids", "full")
+
+
 def find_cards(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    """Search without collapsing card-level matches to their parent notes."""
+    """Search without collapsing card-level matches to their parent notes.
+
+    `detail` says HOW MUCH to return, `limit`/`offset` say HOW MANY. Keeping
+    them separate matters: asking for a bare count used to mean passing
+    limit=1 and ignoring the row, an int standing in for a verbosity setting
+    (user, 2026-07-23).
+    """
     query = str(args["query"])
+    detail = str(args.get("detail", "full"))
+    if detail not in DETAIL_LEVELS:
+        raise ValueError(f"detail must be one of {list(DETAIL_LEVELS)}; got {detail!r}")
     limit = max(1, min(int(args.get("limit", DEFAULT_SEARCH_LIMIT)), MAX_SEARCH_LIMIT))
     offset = max(0, int(args.get("offset", 0)))
     card_ids = [int(card_id) for card_id in ctx.col.find_cards(query)]
+    if detail == "count":
+        return {"query": query, "total": len(card_ids)}
     page_ids = card_ids[offset : offset + limit]
     next_offset = offset + len(page_ids)
-    return {
+    result: dict[str, Any] = {
         "query": query,
         "total": len(card_ids),
         "offset": offset,
         "shown": len(page_ids),
         "next_offset": next_offset if next_offset < len(card_ids) else None,
-        "cards": [_card_summary(ctx.col, card_id) for card_id in page_ids],
         "selection_note": (
             "These are exact card matches, not authorization to modify every result. "
             "Inspect and select only the intended card IDs before a card-level write."
         ),
     }
+    if detail == "ids":
+        result["card_ids"] = page_ids
+    else:
+        result["cards"] = [_card_summary(ctx.col, card_id) for card_id in page_ids]
+    return result
 
 
 def get_note(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
@@ -375,20 +393,30 @@ def build_registry() -> ToolRegistry:
             "operation when exact IDs are not already known. Results are "
             "candidates: inspect and select the intended cards instead of "
             "blindly modifying every broad-search match. Page with offset. "
-            "COUNTING: `total` is always the full number of matches, whatever "
-            "`limit` is - so for a count alone pass limit=1 and read `total`, "
-            "rather than fetching a page you do not need.",
+            "Use `detail` to say how much you need back: 'count' for just the "
+            "number, 'ids' when you only need card IDs to act on, 'full' for "
+            "card summaries. `total` is always the full match count regardless "
+            "of `limit`.",
             {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Anki search query"},
+                    "detail": {
+                        "type": "string",
+                        "enum": list(DETAIL_LEVELS),
+                        "default": "full",
+                        "description": "How much to return per match: 'count' "
+                        "(no rows at all), 'ids' (card IDs only), or 'full' "
+                        "(card summaries). Separate from limit/offset, which "
+                        "control HOW MANY rows.",
+                    },
                     "limit": {
                         "type": "integer",
                         "minimum": 1,
                         "maximum": MAX_SEARCH_LIMIT,
                         "default": DEFAULT_SEARCH_LIMIT,
-                        "description": "How many cards to return in this page. "
-                        "Does NOT affect `total`; use 1 when you only need the count.",
+                        "description": "Page size for 'ids'/'full'. Ignored for "
+                        "detail='count', and never affects `total`.",
                     },
                     "offset": {
                         "type": "integer",

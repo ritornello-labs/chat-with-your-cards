@@ -372,9 +372,12 @@ def _ensure_mcp() -> tuple[str, str]:
                     # 2026-07-23).
                     raise PermissionError(
                         f"Approval pending: the user has not answered the prompt for "
-                        f"{name} yet. It is still waiting in the chat. Tell them a "
-                        "prompt needs their answer and stop - do NOT retry this call "
-                        "or try a different tool to work around it."
+                        f"{name}. This call did NOT run. Mention once that a prompt "
+                        "needs their answer, then DROP IT - do not retry, do not work "
+                        "around it with another tool, and do not carry it forward as "
+                        "outstanding work in later replies. If they approve it you "
+                        "will be told explicitly and can pick it up then; if they "
+                        "never do, it is abandoned and re-raising it is just nagging."
                     )
                 if verdict == approvals_mod.DENY:
                     raise PermissionError(f"the user declined this {name} call")

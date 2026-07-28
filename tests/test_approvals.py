@@ -19,9 +19,17 @@ from chat_with_your_cards.approvals import (  # noqa: E402
 
 
 class ApprovalBrokerTests(unittest.TestCase):
-    def _broker(self, grace=5.0, ttl=300.0):
+    def _broker(self, grace=5.0, ttl=300.0, pending_ttl=900.0):
         pushed: list[dict] = []
-        return ApprovalBroker(pushed.append, grace_s=grace, decision_ttl_s=ttl), pushed
+        return (
+            ApprovalBroker(
+                pushed.append,
+                grace_s=grace,
+                decision_ttl_s=ttl,
+                pending_ttl_s=pending_ttl,
+            ),
+            pushed,
+        )
 
     def _answer_from_thread(self, broker, pushed, allow: bool):
         def responder():
@@ -113,6 +121,34 @@ class ApprovalBrokerTests(unittest.TestCase):
         broker.request("search_notes", '{"q": "a"}')
         broker.request("search_notes", '{"q": "b"}')
         self.assertEqual(2, len([p for p in pushed if p["type"] == "tool_approval"]))
+
+    def test_abandoned_prompt_expires(self) -> None:
+        """An unanswered prompt must not stay live forever: the user moves on,
+        and the agent kept re-raising it hours later (dogfood 2026-07-23)."""
+        broker, pushed = self._broker(grace=0.05, pending_ttl=0.01)
+        broker.request("get_note", "{}")
+        time.sleep(0.05)
+        # Any later activity sweeps it and resolves the chip.
+        broker.request("search_notes", "{}")
+        expired = [
+            p
+            for p in pushed
+            if p["type"] == "tool_approval_resolved" and p.get("reason") == "expired"
+        ]
+        self.assertEqual(1, len(expired))
+        self.assertFalse(expired[0]["allow"])
+
+    def test_answering_an_expired_prompt_does_not_resume_work(self) -> None:
+        broker, pushed = self._broker(grace=0.05, pending_ttl=0.01)
+        broker.request("get_note", "{}")
+        requests = [p for p in pushed if p["type"] == "tool_approval"]
+        time.sleep(0.05)
+        broker.respond({"id": requests[0]["id"], "allow": True})
+        resolved = [p for p in pushed if p["type"] == "tool_approval_resolved"]
+        self.assertTrue(resolved and resolved[-1].get("reason") == "expired")
+        self.assertFalse(resolved[-1]["allow"])
+        # And the stale click must NOT leave consent lying around.
+        self.assertEqual(PENDING, broker.request("get_note", "{}"))
 
     def test_unknown_response_ignored(self) -> None:
         broker, pushed = self._broker(grace=0.05)

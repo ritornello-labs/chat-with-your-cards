@@ -128,6 +128,41 @@ class FindCardsTests(unittest.TestCase):
         self.assertNotIn("Extra", result["cards"][0]["fields_preview"])
         self.assertIn("not authorization", result["selection_note"])
 
+    # ---- detail levels (user, 2026-07-23: `limit` was doing verbosity duty) ----
+
+    def test_detail_count_returns_only_the_number(self) -> None:
+        """The whole point: asking "how many?" should say so, not smuggle it
+        through limit=1 and discard the row."""
+        _col, ctx = _fixture()
+
+        result = find_cards(ctx, {"query": "*", "detail": "count"})
+
+        self.assertEqual(result["total"], 3)
+        self.assertNotIn("cards", result)
+        self.assertNotIn("card_ids", result)
+
+    def test_detail_ids_returns_ids_without_summaries(self) -> None:
+        _col, ctx = _fixture()
+
+        result = find_cards(ctx, {"query": "*", "detail": "ids", "limit": 2})
+
+        # Native match order, same as the summaries path (fixture: 102,103,101).
+        self.assertEqual(result["card_ids"], [102, 103])
+        self.assertNotIn("cards", result)
+        self.assertEqual(result["total"], 3)
+
+    def test_detail_defaults_to_full_summaries(self) -> None:
+        _col, ctx = _fixture()
+
+        self.assertIn("cards", find_cards(ctx, {"query": "*"}))
+
+    def test_unknown_detail_is_a_clear_error(self) -> None:
+        _col, ctx = _fixture()
+
+        with self.assertRaises(ValueError) as caught:
+            find_cards(ctx, {"query": "*", "detail": "verbose"})
+        self.assertIn("detail", str(caught.exception))
+
     def test_pagination_reaches_remaining_matches(self) -> None:
         _col, ctx = _fixture()
 
