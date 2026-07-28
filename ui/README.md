@@ -363,17 +363,17 @@ given late is consumed by the agent's next attempt.
   explanation instead of a button when only an Anki backup can undo it.
   Revert also refuses to discard a change made after ours and offers an
   explicit override (see proposals.py's `StaleRevert`).
-- **`proposal_supersede` is never sent**, so a proposal you discussed and moved
-  on from stays `pending` forever. (The old "Suggest change" button did this;
-  its CSS class was reused for the in-card Edit toggle and the supersede half
-  was dropped.)
+- ~~**`proposal_supersede` is never sent**~~ — **fixed 2026-07-27 (#19)**:
+  "Suggest change" seeds the composer with a reference to the proposal and
+  arms the supersede, which fires when the message is actually SENT (until
+  then the proposal is still the live offer).
 - ~~**Tags are invisible on proposals**~~ — **fixed 2026-07-27 (task #20a)**.
   `ProposalTags.tsx` draws the note's current tags plus the `+ added` /
   `− removed` delta on edit proposals, filtered against what the note actually
   carries so a no-op add/remove is not drawn as a change.
-- The **`open` flag is ignored**, so Accept is clickable on a change set that
-  is still collecting edits (Python rejects it, so it is a dead button rather
-  than data loss).
+- ~~The **`open` flag is ignored**~~ — **fixed 2026-07-27 (#19)**: a change
+  set still collecting edits says "Collecting edits… N note(s) so far" and
+  offers no actions, on both card variants.
 - ⚠ **Accessibility**: the transcript lost its `aria-live="polite"`, and the
   vendored assistant-ui primitives supply none, so streamed replies are not
   announced.

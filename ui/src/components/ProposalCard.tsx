@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useThreadRuntime } from "@assistant-ui/react";
 import { InteractionCard, wordDiff } from "@elvis-labs/interaction-ui-react";
 import "@elvis-labs/interaction-ui-react/styles.css";
 import type { ChatStore, ProposalCardData } from "../store";
@@ -9,6 +10,33 @@ import { TagChips } from "./TagChips";
 import { ProposalBody } from "./ProposalBody";
 import { ProposalTagDiff } from "./ProposalTags";
 import { ProposalActions } from "./ProposalActions";
+
+/**
+ * "Suggest change": seed the composer with a reference to this proposal and
+ * arm the supersede, so the old card is set aside the moment the user actually
+ * asks for something different. Prefilled rather than sent, because the user
+ * has to say what they want changed - and until they do, the proposal is still
+ * the live offer.
+ */
+function useSuggestChange(store: ChatStore) {
+  // The THREAD composer, explicitly. useComposerRuntime() resolves to the
+  // nearest composer, and inside a message part that is the message's own
+  // EDIT composer - setText there updates a composer nobody is looking at.
+  const thread = useThreadRuntime();
+  return (data: ProposalCardData) => {
+    const what =
+      data.kind === "create" || data.kind === "edit"
+        ? data.fields?.[0]?.new || data.note_type
+        : data.title || KIND_LABELS[data.kind] || data.kind;
+    thread.composer.setText(`About the proposed ${KIND_LABELS[data.kind] ?? data.kind} ("${String(what).slice(0, 60)}"), please `);
+    // ComposerRuntime has setText but no focus(); the same selector main.tsx
+    // uses covers both composer faces (plain textarea and the vim editor).
+    document
+      .querySelector<HTMLElement>(".cwyc-composer-input, .cwyc-vim-editor .cm-content")
+      ?.focus();
+    store.markForSupersede(data.id);
+  };
+}
 
 /** Debounce before asking Python to re-render the preview from a draft. Same
  *  400ms the classic card used: long enough that typing a word does not fire
@@ -296,6 +324,7 @@ function SharedCreateProposalCard({ data, store }: ProposalCardProps) {
   const interaction = useMemo(() => createProposalInteraction(data), [data]);
   const previews = asPreviews(data.previews);
   const { ui } = useChatState(store);
+  const suggestChange = useSuggestChange(store);
   const pending = data.status === "pending";
   // Seeded once per proposal identity: a status/warning re-push must not
   // discard a deck the user just picked.
@@ -343,6 +372,7 @@ function SharedCreateProposalCard({ data, store }: ProposalCardProps) {
         if (actionId === "approve") {
           store.acceptProposalRevision(interactionId, Number(revision), { deck, tags });
         } else if (actionId === "reject") store.rejectProposal(interactionId);
+        else if (actionId === "discuss") suggestChange(data);
       }}
     />
     {/* The shared renderer has no footer slot and drops its own action row
@@ -369,8 +399,12 @@ function LegacyProposalCard({ data, store }: ProposalCardProps) {
   );
   const [values, setValues] = useState<Record<string, string>>(initialValues);
   const [editing, setEditing] = useState(false);
+  const suggestChange = useSuggestChange(store);
 
-  const pending = data.status === "pending";
+  // `open` = a change set still collecting edits. Python refuses to accept
+  // one, so the row must not offer it (#19).
+  const collecting = !!data.open;
+  const pending = data.status === "pending" && !collecting;
 
   // Live preview while typing (proposals.py preview_request). Without it an
   // edit is reviewed against the preview the ASSISTANT proposed, so the card
@@ -407,7 +441,13 @@ function LegacyProposalCard({ data, store }: ProposalCardProps) {
         <span className={"cwyc-proposal-status cwyc-status-" + data.status}>{statusLabel}</span>
       </div>
 
-      {data.rationale ? <div className="cwyc-proposal-rationale">{data.rationale}</div> : null}
+      {collecting ? (
+        <div className="cwyc-proposal-rationale" data-testid="proposal-collecting">
+          Collecting edits… {data.count} note(s) so far.
+        </div>
+      ) : data.rationale ? (
+        <div className="cwyc-proposal-rationale">{data.rationale}</div>
+      ) : null}
       {warnings.map((warning, i) => (
         <div className="cwyc-proposal-warning" key={i}>
           {warning}
@@ -487,6 +527,14 @@ function LegacyProposalCard({ data, store }: ProposalCardProps) {
               {editing ? "Preview" : "Edit"}
             </button>
           ) : null}
+          <button
+            type="button"
+            className="cwyc-btn-suggest"
+            onClick={() => suggestChange(data)}
+            data-testid="proposal-suggest"
+          >
+            Suggest change
+          </button>
           <button
             type="button"
             className="cwyc-btn-reject"

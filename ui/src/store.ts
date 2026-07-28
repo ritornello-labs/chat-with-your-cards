@@ -448,6 +448,12 @@ export class ChatStore {
 
   sendUserMessage(text: string): void {
     if (this.isRunning || !text.trim()) return;
+    // The message IS the revision request, so the proposal it replaces stops
+    // being the live offer exactly now - not when the button was clicked.
+    if (this.pendingSupersedeId) {
+      postCommand({ type: "proposal_supersede", id: this.pendingSupersedeId });
+      this.pendingSupersedeId = null;
+    }
     const userMsg: StoreMessage = {
       id: nextId("u"),
       role: "user",
@@ -534,6 +540,22 @@ export class ChatStore {
   /** Put a rejected or superseded proposal back up for review. */
   restoreProposal(id: string): void {
     postCommand({ type: "proposal_restore", id });
+  }
+
+  /**
+   * The next message the user sends is a request for a DIFFERENT proposal, so
+   * set the current one aside when it goes.
+   *
+   * The classic UI's "Suggest change" did exactly this and the React port kept
+   * only the button's CSS class (reused for the in-card Edit toggle), leaving
+   * proposal_supersede orphaned in __init__.py - so a proposal you discussed
+   * and moved on from stayed `pending` forever (task #19).
+   *
+   * Deliberately at SEND, not at click: until you actually ask for something
+   * else, the old proposal is still the live offer and must stay acceptable.
+   */
+  markForSupersede(id: string): void {
+    this.pendingSupersedeId = id;
   }
 
   /** Drop a refused-revert error once the user has decided to keep the newer
@@ -1263,6 +1285,7 @@ export class ChatStore {
   }
 
   private pendingAutoSend: string | null = null;
+  private pendingSupersedeId: string | null = null;
 
   private flushPendingAutoSend(): void {
     const note = this.pendingAutoSend;

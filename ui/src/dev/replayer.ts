@@ -376,6 +376,31 @@ function deleteProposalScript(): Step[] {
 }
 
 /** skill_update: patterns plus the unified diff proposals.py already builds. */
+/** A change set the assistant is STILL adding to: `open` is true, so the card
+ *  must say so and must not offer Accept (task #19). */
+function openChangeSetScript(): Step[] {
+  const id = nextProposalId("c");
+  return [
+    { kind: "text", text: "Working through the deck - I will keep adding to this set:\n\n" },
+    {
+      kind: "proposal",
+      proposal: baseProposal({
+        id,
+        kind: "change_set",
+        title: "Tidy analysis answers",
+        rationale: "Shorten answers to a single recallable fact.",
+        count: 3,
+        open: true,
+        items: [
+          { note_id: 1500001, label: "Cauchy sequence", fields: ["Back"] },
+          { note_id: 1500002, label: "Compactness", fields: ["Back"] },
+          { note_id: 1500003, label: "Heine-Borel", fields: ["Back"] },
+        ],
+      }),
+    },
+  ];
+}
+
 function skillProposalScript(): Step[] {
   const id = nextProposalId("s");
   const diff = [
@@ -689,6 +714,7 @@ function selectScript(userText: string): Step[] {
   if (text.includes("tag")) return tagEditProposalScript();
   if (text.includes("bulk") || text.includes("replace")) return bulkProposalScript();
   if (text.includes("delete")) return deleteProposalScript();
+  if (text.includes("collect") || text.includes("change set")) return openChangeSetScript();
   if (text.includes("skill")) return skillProposalScript();
   if (text.includes("edit")) return editProposalScript();
   if (text.includes("propose") || text.includes("note") || text.includes("card")) return createProposalScript();
@@ -1088,6 +1114,15 @@ export function installDevReplayer(): void {
         const revised = { ...current, revision, operation_digest: `dev:${current.id}:${revision}`, fields };
         devProposals.set(current.id, revised);
         window.chatUI?.dispatch({ type: "proposal", proposal: revised });
+        break;
+      }
+      // proposals.py's supersede(): a pending proposal set aside because the
+      // user asked for a different one.
+      case "proposal_supersede": {
+        const current = devProposals.get(String(msg.id));
+        if (!current || current.status !== "pending") break;
+        devProposals.set(current.id, { ...current, status: "superseded" });
+        window.chatUI?.dispatch({ type: "proposal_resolved", id: current.id, status: "superseded" });
         break;
       }
       case "proposal_reject":

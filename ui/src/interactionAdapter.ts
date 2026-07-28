@@ -82,7 +82,10 @@ export function createProposalInteraction(proposal: ProposalPayload): Interactio
   blocks.push(
     ...(proposal.warnings ?? []).map((text) => ({ type: "warning" as const, text, severity: "warning" }))
   );
-  const pending = proposal.status === "pending";
+  // `open` = a change set the assistant is still adding to. Accepting one is
+  // rejected by Python, so an enabled button here exists only to fail (#19).
+  const collecting = !!proposal.open;
+  const pending = proposal.status === "pending" && !collecting;
   return {
     // 1.1 = 1.0 + optional card-preview media; emitted unconditionally (an
     // additive version is valid with or without the new field).
@@ -92,7 +95,9 @@ export function createProposalInteraction(proposal: ProposalPayload): Interactio
     digest: proposal.operation_digest ?? `legacy:${proposal.id}:${revision}`,
     eyebrow: "anki.note.create",
     title: "Create Anki note",
-    summary: proposal.rationale,
+    summary: collecting
+      ? `Collecting edits… ${proposal.count} note(s) so far.`
+      : proposal.rationale,
     badge: BADGES[proposal.status] ?? { label: "Failed", tone: "negative" },
     blocks,
     // No "revise"/Edit action: the renderer is click-to-edit (click a field
@@ -100,6 +105,10 @@ export function createProposalInteraction(proposal: ProposalPayload): Interactio
     // so an explicit Edit button would be dead chrome.
     actions: pending
       ? [
+          // "Suggest change" sets this proposal aside when the next message
+          // goes, so discussing an alternative does not leave it pending
+          // forever (#19).
+          { id: "discuss", intent: "revise", label: "Suggest change" },
           { id: "reject", intent: "reject", label: "Reject" },
           { id: "approve", intent: "approve", label: "Add note" },
         ]

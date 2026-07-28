@@ -2746,6 +2746,76 @@ def _run_checks() -> dict[str, Any]:
     check("a revert that would discard a newer change is refused, and overridable",
           _stale_revert_offers_an_override_on_the_card)
 
+    def _suggest_change_sets_the_proposal_aside() -> dict[str, Any]:
+        """Discussing a proposal and moving on must not leave it pending.
+
+        The classic "Suggest change" prefilled the composer and superseded the
+        old proposal on send; the React port kept only its CSS class, leaving
+        proposal_supersede orphaned in __init__.py, so such a proposal stayed
+        `pending` forever (task #19).
+        """
+        note = mw.col.new_note(mw.col.models.by_name("Basic"))
+        note["Front"], note["Back"] = "Zzq supersede probe", "original"
+        mw.col.add_note(note, mw.col.decks.id("Zzq Undo"))
+        result = state.proposals.submit_edit(
+            {"note_id": note.id, "field_changes": {"Back": "first attempt"},
+             "rationale": "supersede probe"}
+        )
+        pid = result["proposal_id"]
+        sel = '[data-proposal-id="%s"]' % pid
+
+        _wait_until(
+            lambda: _eval_js(
+                dock.web,
+                "document.querySelectorAll('[data-testid=proposal-suggest]').length;",
+                DOM_TIMEOUT_MS, "suggest button",
+            ) > 0,
+            DOM_TIMEOUT_MS, "a Suggest change control on the pending card",
+        )
+        _eval_js(
+            dock.web,
+            "(function(){"
+            "  var cards = [].slice.call(document.querySelectorAll('[data-testid=proposal-card]'));"
+            "  var card = cards[cards.length - 1];"
+            "  var b = card.querySelector('[data-testid=proposal-suggest]');"
+            "  if (!b) return false;"
+            "  b.click(); return true;"
+            "})();",
+            DOM_TIMEOUT_MS, "click Suggest change",
+        )
+        # setText goes through React state: the composer's value is NOT updated
+        # in the same tick as the click, so poll instead of reading straight
+        # back (which is how the first version of this check "failed" a working
+        # feature).
+        _wait_until(
+            lambda: bool(
+                _eval_js(
+                    dock.web,
+                    "(document.querySelector('.cwyc-composer-input')||{}).value || '';",
+                    DOM_TIMEOUT_MS, "composer text",
+                )
+            ),
+            DOM_TIMEOUT_MS, "the composer to be seeded",
+        )
+        prefilled = _eval_js(
+            dock.web,
+            "(document.querySelector('.cwyc-composer-input')||{}).value || '';",
+            DOM_TIMEOUT_MS, "composer text",
+        )
+        if not prefilled or "About the proposed" not in prefilled:
+            raise AssertionError(f"composer was not seeded: {prefilled!r}")
+        # Still pending until the user actually asks for something else.
+        if state.proposals._proposals[pid].status != "pending":
+            raise AssertionError("superseded on click instead of on send")
+
+        state.dock.bridge._handlers["proposal_supersede"]({"id": pid})
+        if state.proposals._proposals[pid].status != "superseded":
+            raise AssertionError("supersede did not set the proposal aside")
+        return {"prefilled": prefilled[:80], "sel": sel}
+
+    check("Suggest change seeds the composer and sets the proposal aside",
+          _suggest_change_sets_the_proposal_aside)
+
     def _hover_geometry_stable() -> dict[str, Any]:
         """Hovering a header button must change ONLY its background - never
         padding, font, size, or radius. A geometry change on hover shrinks the
