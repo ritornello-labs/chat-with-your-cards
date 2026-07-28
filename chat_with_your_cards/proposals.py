@@ -86,6 +86,16 @@ class ProposalError(Exception):
     """Validation failure reported back to the agent as a tool error."""
 
 
+class StaleRevert(ProposalError):
+    """A revert would discard a change made AFTER the proposal was applied.
+
+    Distinct from an ordinary refusal because it is the one case the user can
+    legitimately override: they may decide the newer change should lose. The
+    UI surfaces it on the card with an explicit "undo anyway", so the override
+    is a decision rather than a retry.
+    """
+
+
 # rslib's UNDO_LIMIT (undo/mod.rs): the in-memory undo queue never holds more
 # than this many steps, so it is a safe absolute cap on how many times
 # _discard_dangling_undo will ever call col.undo() - see that method.
@@ -2487,6 +2497,19 @@ class ProposalManager:
             return
         try:
             self._revert_entry(entry, force=bool(msg.get("force")))
+        except StaleRevert as exc:
+            # Onto the CARD, flagged, so it can offer "undo anyway" right where
+            # the user clicked. A floating notice would explain the refusal and
+            # leave them no way to act on it.
+            self._push(
+                {
+                    "type": "proposal_error",
+                    "id": entry.id,
+                    "message": str(exc),
+                    "conflict": True,
+                }
+            )
+            return
         except ProposalError as exc:
             self._push({"type": "notice", "text": f"Could not revert: {exc}"})
             return
@@ -2578,10 +2601,9 @@ class ProposalManager:
         if not names:
             return
         where = f" on {label}" if label else ""
-        raise ProposalError(
-            f"{', '.join(names)}{where} changed after this was applied, so "
-            "reverting would discard that newer change. Review the note and "
-            "revert again with force to overwrite it anyway."
+        raise StaleRevert(
+            f"{', '.join(names)}{where} changed after this was applied. "
+            "Undoing now would discard that newer change."
         )
 
     def _revert_entry(self, entry: LedgerEntry, force: bool = False) -> None:

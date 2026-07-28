@@ -3104,3 +3104,96 @@ body {
   display: block;
   margin-top: 1px;
 }
+
+
+/* ---- session ledger + post-resolution proposal actions (task #18) --------
+   The safety net for changes ALREADY applied. Quiet by default: one line that
+   expands on request, because it must be visible without competing with the
+   conversation. */
+
+.cwyc-ledger {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--cwyc-fg-subtle);
+}
+.cwyc-ledger-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+#cwyc-root .cwyc-ledger-toggle {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--cwyc-fg-subtle);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+#cwyc-root .cwyc-ledger-toggle:hover {
+  color: var(--cwyc-fg);
+}
+.cwyc-ledger-actions {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+#cwyc-root .cwyc-ledger-link {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--cwyc-accent);
+  font: inherit;
+  cursor: pointer;
+}
+#cwyc-root .cwyc-ledger-link:hover {
+  text-decoration: underline;
+}
+#cwyc-root .cwyc-ledger-danger {
+  color: var(--cwyc-red);
+}
+.cwyc-ledger-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0 0 2px;
+  list-style: none;
+  max-height: 132px;
+  overflow-y: auto;
+}
+.cwyc-ledger-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  flex: 0 0 auto; /* the list caps its height; rows must scroll, not squash */
+}
+.cwyc-ledger-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cwyc-ledger-undone .cwyc-ledger-label {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+.cwyc-ledger-state {
+  flex: 0 0 auto;
+  color: var(--cwyc-fg-faint);
+}
+
+/* Undo / Re-apply / Put back, under a resolved card. */
+.cwyc-proposal-after {
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 4px;
+}
+.cwyc-proposal-after-note {
+  flex: 1 1 auto;
+  font-size: 11px;
+  color: var(--cwyc-fg-subtle);
+}

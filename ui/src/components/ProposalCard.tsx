@@ -8,6 +8,7 @@ import { ComboBox } from "./ComboBox";
 import { TagChips } from "./TagChips";
 import { ProposalBody } from "./ProposalBody";
 import { ProposalTagDiff } from "./ProposalTags";
+import { ProposalActions } from "./ProposalActions";
 
 /** Debounce before asking Python to re-render the preview from a draft. Same
  *  400ms the classic card used: long enough that typing a word does not fire
@@ -308,6 +309,7 @@ function SharedCreateProposalCard({ data, store }: ProposalCardProps) {
   }
 
   return (
+    <>
     <InteractionCard
       interaction={interaction}
       className="cwyc-interaction-card"
@@ -343,6 +345,11 @@ function SharedCreateProposalCard({ data, store }: ProposalCardProps) {
         } else if (actionId === "reject") store.rejectProposal(interactionId);
       }}
     />
+    {/* The shared renderer has no footer slot and drops its own action row
+        once a proposal leaves `pending` (we pass no actions), so the
+        post-resolution controls sit just below the card. */}
+    {!pending ? <ProposalActions data={data} store={store} /> : null}
+    </>
   );
 }
 
@@ -462,6 +469,10 @@ function LegacyProposalCard({ data, store }: ProposalCardProps) {
       ) : null}
 
       {data.errorMessage ? <div className="cwyc-proposal-error">{data.errorMessage}</div> : null}
+
+      {/* Everything you can still do once it is applied: undo, re-apply, put
+          back for review (task #18). */}
+      {!pending ? <ProposalActions data={data} store={store} /> : null}
 
       {pending ? (
         <div className="cwyc-proposal-actions">

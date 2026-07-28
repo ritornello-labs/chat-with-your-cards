@@ -2579,6 +2579,93 @@ def _run_checks() -> dict[str, Any]:
     check("deck dropdown scrolls instead of squashing its rows",
           _deck_dropdown_rows_are_not_squashed)
 
+    def _applied_change_can_be_undone_from_the_dock() -> dict[str, Any]:
+        """The safety net for APPLIED changes must be reachable from the UI.
+
+        Python has pushed `ledger` and bound undo_session/open_session_browser
+        since M2, and the React card rendered its action row only while
+        pending - so revert, re-apply and session undo were unreachable by any
+        means (task #18). Drives the real dock: apply an edit, undo it from the
+        card, and confirm the collection actually changed back.
+        """
+        note = mw.col.new_note(mw.col.models.by_name("Basic"))
+        note["Front"], note["Back"] = "Zzq undo probe", "before"
+        mw.col.add_note(note, mw.col.decks.id("Zzq Undo"))
+        result = state.proposals.submit_edit(
+            {"note_id": note.id, "field_changes": {"Back": "after"},
+             "rationale": "undo probe"}
+        )
+        state.proposals.accept({"id": result["proposal_id"]})
+        if mw.col.get_note(note.id)["Back"] != "after":
+            raise AssertionError("edit did not apply")
+
+        _wait_until(
+            lambda: _eval_js(
+                dock.web,
+                "document.querySelectorAll('[data-proposal-id=\"%s\"] [data-testid=proposal-revert]').length;" % result["proposal_id"],
+                DOM_TIMEOUT_MS, "undo button",
+            ) > 0,
+            DOM_TIMEOUT_MS,
+            "an Undo control on the resolved card",
+        )
+        ledger = _eval_js(
+            dock.web,
+            "(function(){"
+            "  var strip = document.querySelector('[data-testid=ledger-strip]');"
+            "  return {strip: !!strip,"
+            "    summary: strip ? (strip.querySelector('[data-testid=ledger-toggle]')||{}).textContent : null,"
+            "    undoAll: !!document.querySelector('[data-testid=ledger-undo]'),"
+            "    browse: !!document.querySelector('[data-testid=ledger-browse]')};"
+            "})();",
+            DOM_TIMEOUT_MS, "ledger strip",
+        )
+        if not ledger["strip"] or not ledger["undoAll"] or not ledger["browse"]:
+            raise AssertionError(f"ledger strip incomplete: {ledger}")
+
+        _eval_js(
+            dock.web,
+            "(function(){ document.querySelector('[data-proposal-id=\"%s\"] "
+            "[data-testid=proposal-revert]').click(); return true; })();"
+            % result["proposal_id"],
+            DOM_TIMEOUT_MS, "click Undo",
+        )
+        try:
+            _wait_until(
+                lambda: mw.col.get_note(note.id)["Back"] == "before",
+                DOM_TIMEOUT_MS,
+                "the edit to be undone in the collection",
+            )
+        except AssertionError:
+            diag = _eval_js(
+                dock.web,
+                "(function(){"
+                "  var err = document.querySelector('.cwyc-proposal-error');"
+                "  var last = [].slice.call(document.querySelectorAll('.cwyc-notice')).pop();"
+                "  return {cardError: err ? err.textContent : null,"
+                "    notice: last ? last.textContent : null,"
+                "    status: (document.querySelector('.cwyc-proposal-status')||{}).textContent};"
+                "})();",
+                DOM_TIMEOUT_MS, "revert failure diagnostics",
+            )
+            raise AssertionError(
+                f"undo did not reach the collection: {diag}; "
+                f"ledger={[e.to_payload() for e in state.proposals._ledger]}"
+            ) from None
+        # And the card now offers the way back.
+        _wait_until(
+            lambda: _eval_js(
+                dock.web,
+                "document.querySelectorAll('[data-proposal-id=\"%s\"] [data-testid=proposal-readd]').length;" % result["proposal_id"],
+                DOM_TIMEOUT_MS, "re-apply button",
+            ) > 0,
+            DOM_TIMEOUT_MS,
+            "a Re-apply control after undoing",
+        )
+        return {"ledger": ledger, "back_after_undo": mw.col.get_note(note.id)["Back"]}
+
+    check("an applied change can be undone from the dock",
+          _applied_change_can_be_undone_from_the_dock)
+
     def _hover_geometry_stable() -> dict[str, Any]:
         """Hovering a header button must change ONLY its background - never
         padding, font, size, or radius. A geometry change on hover shrinks the

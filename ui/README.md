@@ -354,13 +354,15 @@ given late is consumed by the agent's next attempt.
 
 **⚠ Functional breakage (was never recorded here):**
 
-- The **session ledger has no entry point at all** — Python still pushes
-  `ledger` events and binds `undo_session` / `open_session_browser`, but there
-  is no ledger strip and nothing on the Tools menu, so session-wide revert and
-  the Browser jump are unreachable.
-- **Per-proposal Revert / Re-add / Restore** are gone: the action row renders
-  only while `pending`, so a resolved card has no buttons, though the Python
-  handlers and the `revertible` flag on `proposal_resolved` both still exist.
+- ~~The **session ledger has no entry point at all**~~ — **fixed 2026-07-27
+  (#18)**: `LedgerStrip.tsx` sits above the composer with a one-line summary
+  that expands per change, plus Undo-all (confirmed) and the Browser jump.
+- ~~**Per-proposal Revert / Re-add / Restore**~~ — **fixed 2026-07-27 (#18)**:
+  `ProposalActions.tsx` renders under a resolved card — Undo when applied,
+  Re-apply when undone, Put-back-for-review when rejected/superseded, and an
+  explanation instead of a button when only an Anki backup can undo it.
+  Revert also refuses to discard a change made after ours and offers an
+  explicit override (see proposals.py's `StaleRevert`).
 - **`proposal_supersede` is never sent**, so a proposal you discussed and moved
   on from stays `pending` forever. (The old "Suggest change" button did this;
   its CSS class was reused for the in-card Edit toggle and the supersede half

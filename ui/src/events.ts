@@ -127,6 +127,9 @@ export interface ProposalErrorEvent {
   type: "proposal_error";
   id: string;
   message: string;
+  /** A revert refused because it would discard a change made after ours; the
+   *  card may offer an explicit override (proposals.py's StaleRevert). */
+  conflict?: boolean;
 }
 
 /**
@@ -140,6 +143,30 @@ export interface PreviewUpdateEvent {
   type: "preview_update";
   id: string;
   previews: unknown;
+}
+
+/** One applied change this session, from proposals.py's LedgerEntry. */
+export interface LedgerEntryPayload {
+  id: string;
+  kind: string;
+  note_id: number;
+  label: string;
+  undone: boolean;
+  /** False when only an Anki backup can undo it (bulk deletes, skill writes);
+   *  the UI must say so rather than offer a button that always fails. */
+  revertible: boolean;
+}
+
+/**
+ * The session ledger (proposals.py `_push_ledger`). Python has pushed this
+ * since M2 and nothing rendered it, so session-wide undo and the Browser jump
+ * were unreachable by any means (task #18).
+ */
+export interface LedgerEvent {
+  type: "ledger";
+  session_id: string;
+  session_tag: string;
+  entries: LedgerEntryPayload[];
 }
 
 export interface GradingCardSummary {
@@ -348,6 +375,7 @@ export type KnownChatEvent =
   | ProposalResolvedEvent
   | ProposalErrorEvent
   | PreviewUpdateEvent
+  | LedgerEvent
   | GradingEvent
   | UsageEvent
   | DockStateEvent

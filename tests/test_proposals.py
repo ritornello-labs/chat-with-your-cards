@@ -1057,9 +1057,13 @@ class LedgerTests(unittest.TestCase):
         manager.revert({"id": edit_id})
 
         self.assertEqual("Hand-written afterwards", col.get_note(nid)["Front"])
-        notice = pushes_of(pushed, "notice")[-1]["text"]
-        self.assertIn("Front", notice)
-        self.assertIn("newer change", notice)
+        # The refusal lands on the CARD (flagged), so it can offer "undo
+        # anyway" where the user clicked, not as a floating notice.
+        conflict = pushes_of(pushed, "proposal_error")[-1]
+        self.assertTrue(conflict["conflict"])
+        self.assertEqual(edit_id, conflict["id"])
+        self.assertIn("Front", conflict["message"])
+        self.assertIn("newer change", conflict["message"])
         # Still revertible: the entry is refused, not consumed.
         self.assertFalse(pushes_of(pushed, "ledger")[-1]["entries"][-1]["undone"])
 
@@ -1522,7 +1526,7 @@ class BackupWarningTests(unittest.TestCase):
 
         self.assertEqual("tidy", col.get_note(ids[0])["Back"], "first note half-reverted")
         self.assertEqual("hand-written afterwards", col.get_note(ids[1])["Back"])
-        self.assertIn("newer change", pushes_of(pushed, "notice")[-1]["text"])
+        self.assertIn("newer change", pushes_of(pushed, "proposal_error")[-1]["message"])
 
         manager.revert({"id": cs["change_set_id"], "force": True})
         self.assertNotEqual("tidy", col.get_note(ids[0])["Back"])

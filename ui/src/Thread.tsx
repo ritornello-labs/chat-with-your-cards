@@ -11,6 +11,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { TextPart } from "./components/TextPart";
 import { ModeChip, ModelPicker, PinsButton, ToolsChip } from "./components/ComposerControls";
 import { VimComposer } from "./components/VimComposer";
+import { LedgerStrip } from "./components/LedgerStrip";
 import { WidgetCard, WidgetOfferChip } from "./components/WidgetCard";
 import { SetupCard } from "./components/SetupCard";
 import { ToolApprovalChip } from "./components/ToolApprovalChip";
@@ -126,6 +127,9 @@ function Composer({ store }: { store: ChatStore }) {
 
   return (
     <ComposerPrimitive.Root className="cwyc-composer">
+      {/* What this chat changed, and the way back. Above the composer because
+          it is about the session, not any one message (task #18). */}
+      <LedgerStrip store={store} />
       {ui.settings?.vimMode ? (
         <VimComposer store={store} />
       ) : (

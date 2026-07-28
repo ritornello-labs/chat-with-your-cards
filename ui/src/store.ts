@@ -102,7 +102,14 @@ interface ToolCallPart {
 }
 
 /** The live ProposalPayload plus a client-only error message from proposal_error. */
-export type ProposalCardData = ProposalPayload & { errorMessage?: string };
+export type ProposalCardData = ProposalPayload & {
+  errorMessage?: string;
+  /** The error is a refused revert that would discard a newer change, so the
+   *  card may offer an explicit override (proposals.py's StaleRevert). */
+  revertConflict?: boolean;
+  /** From proposal_resolved: false = only an Anki backup can undo this. */
+  revertible?: boolean;
+};
 
 interface ProposalDataPart {
   readonly type: "data";
@@ -230,6 +237,18 @@ export interface NoteTypeMeta {
   readonly fields: readonly string[];
 }
 
+/** The session ledger: what this chat has actually applied. */
+export interface LedgerState {
+  readonly sessionTag: string;
+  readonly entries: readonly {
+    readonly id: string;
+    readonly kind: string;
+    readonly label: string;
+    readonly undone: boolean;
+    readonly revertible: boolean;
+  }[];
+}
+
 export interface CollectionMeta {
   readonly decks: readonly string[];
   readonly noteTypes: readonly NoteTypeMeta[];
@@ -316,6 +335,7 @@ export interface UiState {
   readonly agent: AgentState;
   readonly openTarget: "terminal" | "desktop";
   readonly meta: CollectionMeta;
+  readonly ledger: LedgerState;
   readonly pins: PinsState;
   readonly history: readonly HistoryEntry[] | null; // null = never fetched
   readonly doctor: readonly DoctorRow[] | null; // null = never run
@@ -339,6 +359,7 @@ const DEFAULT_UI_STATE: UiState = {
   agent: { backend: "auto", model: "", effort: "", mode: "default", fast: false, tools: "sandbox" },
   openTarget: "terminal",
   meta: { decks: [], noteTypes: [], tags: [] },
+  ledger: { sessionTag: "", entries: [] },
   pins: EMPTY_PINS,
   history: null,
   doctor: null,
@@ -497,6 +518,30 @@ export class ChatStore {
 
   rejectProposal(id: string): void {
     postCommand({ type: "proposal_reject", id });
+  }
+
+  /** Undo an APPLIED change. `force` overwrites a later edit that revert would
+   *  otherwise refuse to discard (proposals.py's stale-compensation guard). */
+  revertProposal(id: string, force = false): void {
+    postCommand(force ? { type: "proposal_revert", id, force } : { type: "proposal_revert", id });
+  }
+
+  /** Re-apply a change that was undone - one click back from a mis-click. */
+  readdProposal(id: string): void {
+    postCommand({ type: "proposal_readd", id });
+  }
+
+  /** Put a rejected or superseded proposal back up for review. */
+  restoreProposal(id: string): void {
+    postCommand({ type: "proposal_restore", id });
+  }
+
+  undoSession(): void {
+    postCommand({ type: "undo_session" });
+  }
+
+  openSessionBrowser(): void {
+    postCommand({ type: "open_session_browser" });
   }
 
   acceptGrading(id: string): void {
@@ -664,6 +709,27 @@ export class ChatStore {
       case "proposal_error":
         this.errorProposal(event as ProposalErrorEvent);
         break;
+      case "ledger": {
+        const ev = event as { session_tag?: string; entries?: unknown[] };
+        this.ui = {
+          ...this.ui,
+          ledger: {
+            sessionTag: String(ev.session_tag ?? ""),
+            entries: (Array.isArray(ev.entries) ? ev.entries : []).map((raw) => {
+              const e = raw as Record<string, unknown>;
+              return {
+                id: String(e.id ?? ""),
+                kind: String(e.kind ?? ""),
+                label: String(e.label ?? ""),
+                undone: !!e.undone,
+                revertible: e.revertible !== false,
+              };
+            }),
+          },
+        };
+        this.emit();
+        break;
+      }
       case "preview_update":
         this.updateProposalPreview(event as { id?: string; previews?: unknown });
         break;
@@ -1240,6 +1306,11 @@ export class ChatStore {
             status: event.status,
             note_id: event.note_id ?? part.data.note_id,
             warnings: event.warnings ?? part.data.warnings,
+            revertible: event.revertible ?? part.data.revertible,
+            // A fresh resolution clears any stale conflict from a previous
+            // undo attempt, so the override offer cannot outlive its reason.
+            errorMessage: undefined,
+            revertConflict: undefined,
           },
         };
       }),
@@ -1276,7 +1347,14 @@ export class ChatStore {
       ...msg,
       content: msg.content.map((part) => {
         if (part.type !== "data" || part.name !== "proposal" || part.data.id !== event.id) return part;
-        return { ...part, data: { ...part.data, errorMessage: event.message } };
+        return {
+          ...part,
+          data: {
+            ...part.data,
+            errorMessage: event.message,
+            revertConflict: !!(event as { conflict?: boolean }).conflict,
+          },
+        };
       }),
     }));
     this.emit();
