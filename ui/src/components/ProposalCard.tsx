@@ -11,6 +11,7 @@ import { ProposalBody } from "./ProposalBody";
 import { ProposalTagDiff } from "./ProposalTags";
 import { ProposalActions } from "./ProposalActions";
 import { VimTextArea } from "./VimTextArea";
+import { PROPOSAL_ACTION_EVENT, type ProposalActionDetail } from "../hooks/useKeyboardReview";
 
 /**
  * "Suggest change": seed the composer with a reference to this proposal and
@@ -37,6 +38,34 @@ function useSuggestChange(store: ChatStore) {
       ?.focus();
     store.markForSupersede(data.id);
   };
+}
+
+/**
+ * Run a keyboard accept/reject aimed at THIS card (task #21).
+ *
+ * The document-level handler cannot do it itself: an edit proposal's field
+ * values live in this component's state, so only the card knows what
+ * "accept" means. It listens for its own id and runs exactly what the button
+ * runs.
+ */
+function useProposalActionKeys(
+  id: string,
+  enabled: boolean,
+  handlers: { accept: () => void; reject: () => void }
+) {
+  const ref = useRef(handlers);
+  ref.current = handlers;
+  useEffect(() => {
+    if (!enabled) return;
+    const onAction = (event: Event) => {
+      const detail = (event as CustomEvent<ProposalActionDetail>).detail;
+      if (!detail || detail.id !== id) return;
+      if (detail.action === "accept") ref.current.accept();
+      else ref.current.reject();
+    };
+    document.addEventListener(PROPOSAL_ACTION_EVENT, onAction);
+    return () => document.removeEventListener(PROPOSAL_ACTION_EVENT, onAction);
+  }, [id, enabled]);
 }
 
 /** Debounce before asking Python to re-render the preview from a draft. Same
@@ -332,6 +361,11 @@ function SharedCreateProposalCard({ data, store }: ProposalCardProps) {
   // discard a deck the user just picked.
   const [deck, setDeck] = useState(data.deck);
   const [tags, setTags] = useState<readonly string[]>(data.tags ?? []);
+  const isActive = ui.activeProposalId === data.id;
+  useProposalActionKeys(data.id, pending, {
+    accept: () => store.acceptProposalRevision(data.id, Number(data.revision ?? 1), { deck, tags }),
+    reject: () => store.rejectProposal(data.id),
+  });
   const seeded = useRef(data.id);
   if (seeded.current !== data.id) {
     seeded.current = data.id;
@@ -343,7 +377,7 @@ function SharedCreateProposalCard({ data, store }: ProposalCardProps) {
     <>
     <InteractionCard
       interaction={interaction}
-      className="cwyc-interaction-card"
+      className={"cwyc-interaction-card" + (isActive ? " cwyc-proposal-active" : "")}
       error={data.errorMessage}
       renderBlock={(block) => {
         if (block.type === "card_preview" && previews) return <PreviewFlip previews={previews} />;
@@ -416,7 +450,9 @@ function LegacyProposalCard({ data, store }: ProposalCardProps) {
   const [values, setValues] = useState<Record<string, string>>(initialValues);
   const [editing, setEditing] = useState(false);
   const suggestChange = useSuggestChange(store);
-  const vimMode = !!useChatState(store).ui.settings?.vimMode;
+  const legacyUi = useChatState(store).ui;
+  const vimMode = !!legacyUi.settings?.vimMode;
+  const isActive = legacyUi.activeProposalId === data.id;
 
   // `open` = a change set still collecting edits. Python refuses to accept
   // one, so the row must not offer it (#19).
@@ -447,9 +483,20 @@ function LegacyProposalCard({ data, store }: ProposalCardProps) {
 
   const previews = asPreviews(data.previews);
 
+  useProposalActionKeys(data.id, pending, {
+    accept: () => store.acceptProposal(data.id, values, data.kind),
+    reject: () => store.rejectProposal(data.id),
+  });
+
   return (
     <div
-      className={"cwyc-proposal" + (pending ? "" : " cwyc-proposal-resolved")}
+      className={
+        "cwyc-proposal" +
+        (pending ? "" : " cwyc-proposal-resolved") +
+        (isActive ? " cwyc-proposal-active" : "")
+      }
+      data-proposal-card-id={data.id}
+      aria-current={isActive ? "true" : undefined}
       data-testid="proposal-card"
     >
       <div className="cwyc-proposal-head">

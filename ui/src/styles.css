@@ -1673,6 +1673,12 @@ body {
    Bulk/delete/change-set/deck/skill cards used to render as "{n} item(s)".
    These styles carry the operation, the examples, and the affected notes. */
 
+/* The card the keyboard is aimed at (#21). A shortcut that accepts a
+   proposal has to be visibly targeted, or Cmd+Enter is a blind write. */
+#cwyc-root .cwyc-proposal-active {
+  box-shadow: 0 0 0 2px var(--cwyc-accent-soft), 0 0 0 3px var(--cwyc-accent);
+}
+
 .cwyc-proposal-body {
   display: flex;
   flex-direction: column;

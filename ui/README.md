@@ -388,9 +388,12 @@ given late is consumed by the agent's next attempt.
   with anything now awaiting a decision / failed / stopped); the viewport is
   `role="log"` with an explicit `aria-live="off"` so the role does not smuggle
   the per-token announcements back in.
-- ⚠ **Escape returns focus to the reviewer only in vim mode.** The old handler
-  was deliberately *capture-phase* to beat AnkiWebView's own bubble-phase
-  Escape → `pycmd("close")`; preserve that detail in any fix.
+- ~~⚠ **Escape returns focus to the reviewer only in vim mode.**~~ — **fixed
+  2026-07-27 (#21)**: `hooks/useKeyboardReview.ts` is a document-level
+  CAPTURE-phase handler that stops propagation, so AnkiWebView's bubble-phase
+  `pycmd("close")` never sees it. It stands down inside a vim editor (vim owns
+  insert/visual Escape) and while a popover is open (Escape belongs to the
+  popover).
 
 **Known gaps, previously recorded and still open:**
 
@@ -406,8 +409,11 @@ given late is consumed by the agent's next attempt.
   its raw tool name.
 - Bulk accept/reject bar, learning nudge, suggested-questions ghost text,
   context chip.
-- Proposal keyboard review: Cmd+Enter accept, Cmd+Backspace reject,
-  Cmd+Up/Down to cycle.
+- ~~Proposal keyboard review~~ — **fixed 2026-07-27 (#21)**: Cmd+Enter
+  accept, Cmd+Backspace reject, Cmd+Up/Down cycle. The target card is
+  highlighted and `aria-current`, because a shortcut that accepts a proposal
+  must be visibly aimed at one. The CARD performs the action (its draft field
+  values live in its own state), driven by a `cwyc:proposal-action` event.
 - ~~Bulk/delete/change_set/deck_op/skill_update kinds have no kind-specific
   body~~ — **fixed 2026-07-27 (#20d)**: `ProposalBody.tsx` renders the
   operation label, a counted noun that says what is counted, one collapsible

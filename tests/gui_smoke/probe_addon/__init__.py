@@ -3074,6 +3074,68 @@ def _run_checks() -> dict[str, Any]:
     check("a streamed reply is announced once, not per token",
           _replies_are_announced_once)
 
+    def _keyboard_review_works() -> dict[str, Any]:
+        """Cmd+Enter accepts, and Escape returns focus instead of closing Anki.
+
+        Both were lost in the migration (task #21). The Escape half is the
+        subtle one: AnkiWebView installs its OWN bubble-phase Escape that
+        calls pycmd("close"), so the handler has to be capture-phase and stop
+        propagation - a bubble-phase fix loses the race and Anki closes.
+        """
+        note = mw.col.new_note(mw.col.models.by_name("Basic"))
+        note["Front"], note["Back"] = "Zzq keyboard probe", "before"
+        mw.col.add_note(note, mw.col.decks.id("Zzq Undo"))
+        state.proposals.submit_edit(
+            {"note_id": note.id, "field_changes": {"Back": "accepted by keyboard"},
+             "rationale": "keyboard probe"}
+        )
+        _wait_until(
+            lambda: _eval_js(
+                dock.web,
+                "document.querySelectorAll('[data-proposal-card-id]').length;",
+                DOM_TIMEOUT_MS, "proposal cards",
+            ) > 0,
+            DOM_TIMEOUT_MS, "the proposal card",
+        )
+        # Cmd+Enter, dispatched the way a real key arrives: at the document,
+        # so it has to travel through the capture handler.
+        _eval_js(
+            dock.web,
+            "(function(){ document.body.dispatchEvent(new KeyboardEvent('keydown',"
+            " {key:'Enter', metaKey:true, bubbles:true, cancelable:true}));"
+            " return true; })();",
+            DOM_TIMEOUT_MS, "Cmd+Enter",
+        )
+        _wait_until(
+            lambda: mw.col.get_note(note.id)["Back"] == "accepted by keyboard",
+            DOM_TIMEOUT_MS, "Cmd+Enter to accept the proposal",
+        )
+
+        # Escape: must reach Python as focus_reviewer AND be stopped before any
+        # bubble-phase listener (that is where Anki's pycmd("close") lives).
+        reached = _eval_js(
+            dock.web,
+            "(function(){"
+            "  window.__bubbled = 0;"
+            "  var spy = function(){ window.__bubbled++; };"
+            "  document.addEventListener('keydown', spy, false);"
+            "  document.body.dispatchEvent(new KeyboardEvent('keydown',"
+            "    {key:'Escape', bubbles:true, cancelable:true}));"
+            "  document.removeEventListener('keydown', spy, false);"
+            "  return window.__bubbled;"
+            "})();",
+            DOM_TIMEOUT_MS, "Escape bubble count",
+        )
+        if reached:
+            raise AssertionError(
+                f"Escape reached bubble phase ({reached}x) - AnkiWebView's own "
+                "handler would close the window instead of focus returning"
+            )
+        return {"back": mw.col.get_note(note.id)["Back"], "bubbled": reached}
+
+    check("Cmd+Enter accepts and Escape is caught before Anki sees it",
+          _keyboard_review_works)
+
     def _hover_geometry_stable() -> dict[str, Any]:
         """Hovering a header button must change ONLY its background - never
         padding, font, size, or radius. A geometry change on hover shrinks the

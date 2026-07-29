@@ -343,6 +343,9 @@ export interface UiState {
   readonly dock: DockUiState | null; // null = host has not reported yet
   readonly settings: SettingsState | null; // null = not pushed yet
   readonly setup: SetupState | null; // null = no onboarding needed (or resolved)
+  /** Which pending proposal the keyboard acts on. A shortcut that accepts a
+   *  card must be visibly aimed at one, or Cmd+Enter is a blind write. */
+  readonly activeProposalId: string | null;
 }
 
 export const PERMISSION_MODES: readonly { id: string; label: string; hint: string }[] = [
@@ -367,6 +370,7 @@ const DEFAULT_UI_STATE: UiState = {
   dock: null,
   settings: null,
   setup: null,
+  activeProposalId: null,
 };
 
 export interface ChatState {
@@ -572,6 +576,27 @@ export class ChatStore {
       ),
     }));
     this.emit();
+  }
+
+  /** Aim the keyboard at a specific pending proposal (task #21). */
+  setActiveProposal(id: string | null): void {
+    if (this.ui.activeProposalId === id) return;
+    this.ui = { ...this.ui, activeProposalId: id };
+    this.emit();
+  }
+
+  /** Every pending proposal, in transcript order — what the keyboard cycles. */
+  pendingProposalIds(): string[] {
+    const ids: string[] = [];
+    for (const msg of this.messages) {
+      if (msg.role !== "assistant") continue;
+      for (const part of msg.content) {
+        if (part.type === "data" && part.name === "proposal" && part.data.status === "pending") {
+          ids.push(part.data.id);
+        }
+      }
+    }
+    return ids;
   }
 
   undoSession(): void {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ChatRuntimeProvider, useChatState } from "./ChatRuntimeProvider";
 import { Thread } from "./Thread";
+import { useKeyboardReview } from "./hooks/useKeyboardReview";
 import { Header } from "./components/Header";
 import { Rail } from "./components/Rail";
 import { UsageFooter } from "./components/UsageFooter";
@@ -44,6 +45,9 @@ function NoticeStrip({ store }: { store: ChatStore }) {
 function Shell({ store }: { store: ChatStore }) {
   const { ui } = useChatState(store);
   const dock = ui.dock;
+
+  // Document-level, capture-phase: proposal review chords and Escape (#21).
+  useKeyboardReview(store);
 
   useEffect(() => {
     // The production bundle runs in <head>, before dock.py's body fragment
