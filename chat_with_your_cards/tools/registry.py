@@ -32,6 +32,9 @@ class ToolContext(Protocol):
     @property
     def learning(self) -> Any: ...  # learning.LearningStore or None
 
+    @property
+    def deferral(self) -> Any: ...  # deferral.DeferralManager or None
+
     def push_ui(self, payload: dict[str, Any]) -> None: ...  # record + push to the dock
 
 

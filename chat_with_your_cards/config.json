@@ -1,6 +1,7 @@
 {
   "toggle_shortcut": "Ctrl+J",
   "new_chat_shortcut": "Ctrl+Shift+J",
+  "defer_shortcut": "Ctrl+Shift+D",
   "dock_width": 420,
   "dock_collapsed": true,
   "dock_side": "right",

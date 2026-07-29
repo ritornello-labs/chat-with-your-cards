@@ -392,6 +392,35 @@ def find_related(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def defer_card(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    """Push a card to later in this review session, without burying it."""
+    manager = getattr(ctx, "deferral", None)
+    if manager is None:
+        raise ValueError("deferring is unavailable in this session")
+    card_id = int(args["card_id"])
+    ctx.col.get_card(card_id)  # existence check with a clean error
+    manager.defer(card_id)
+    return {
+        "card_id": card_id,
+        "deferred": True,
+        "note": "The card keeps its due date and scheduling; it is only moved "
+        "later in this session's order, and the marker expires today.",
+    }
+
+
+def undefer_card(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    """Bring a deferred card back - as the NEXT card if asked."""
+    manager = getattr(ctx, "deferral", None)
+    if manager is None:
+        raise ValueError("deferring is unavailable in this session")
+    card_id = int(args["card_id"])
+    if bool(args.get("show_next", True)):
+        manager.show_next(card_id)
+    else:
+        manager.undefer(card_id)
+    return {"card_id": card_id, "deferred": False}
+
+
 def build_registry() -> ToolRegistry:
     registry = ToolRegistry()
     specs = [
@@ -556,6 +585,42 @@ def build_registry() -> ToolRegistry:
                 "required": ["name"],
             },
             get_note_type,
+        ),
+        ToolSpec(
+            "defer_card",
+            "Push a card to later in the CURRENT review session - the user's "
+            "'not this one right now'. It is NOT a bury: the card keeps its "
+            "due date, interval and queue, and simply stops being served for "
+            "a while. The marker expires at the day rollover on its own.",
+            {
+                "type": "object",
+                "properties": {
+                    "card_id": {
+                        "type": "integer",
+                        "description": "The card to set aside; usually the one "
+                        "being reviewed (see the chat's card context).",
+                    }
+                },
+                "required": ["card_id"],
+                "additionalProperties": False,
+            },
+            defer_card,
+        ),
+        ToolSpec(
+            "undefer_card",
+            "Bring a deferred card back. By default it becomes the NEXT card "
+            "shown; pass show_next=false to just clear the deferral and let it "
+            "come round in the normal order.",
+            {
+                "type": "object",
+                "properties": {
+                    "card_id": {"type": "integer"},
+                    "show_next": {"type": "boolean", "default": True},
+                },
+                "required": ["card_id"],
+                "additionalProperties": False,
+            },
+            undefer_card,
         ),
         ToolSpec(
             "find_related",

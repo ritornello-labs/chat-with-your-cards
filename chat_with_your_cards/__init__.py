@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 DEFAULT_CONFIG: dict[str, Any] = {
     "toggle_shortcut": "Ctrl+J",
     "new_chat_shortcut": "Ctrl+Shift+J",
+    "defer_shortcut": "Ctrl+Shift+D",
     "dock_width": 420,
     # The dock is always visible; collapsed means the slim rail. Both persist
     # across sessions (saved at teardown alongside dock_width).
@@ -116,6 +117,7 @@ class AddonState:
     transcripts: Any = None
     approvals: Any = None
     learning: Any = None
+    deferral: Any = None
     last_checkpoint: Any = None
     shortcuts: list[Any] = field(default_factory=list)
     web_ready: bool = False
@@ -164,6 +166,70 @@ def _install_tools_menu(config: dict[str, Any]) -> None:
     menu.addAction(open_action)
     menu.addAction(new_action)
     mw.form.menuTools.addMenu(menu)
+
+
+DEFER_SHORTCUT = "Ctrl+Shift+D"
+
+
+def defer_current_card() -> str:
+    """Push the card on screen to later in this session. Returns a status
+    string for the caller to surface (a tooltip, or the agent's tool result).
+
+    Deliberately manual as well as agent-driven (user, 2026-07-27): the
+    judgement "not this one right now" is usually the reviewer's own, and
+    waiting for an assistant turn to make it would be absurd."""
+    if state.deferral is None or mw.col is None:
+        return "Deferring is unavailable."
+    card = getattr(mw.reviewer, "card", None)
+    if mw.state != "review" or card is None:
+        return "No card is being reviewed."
+    state.deferral.defer(int(card.id))
+    # Move on immediately - the point is to get it off the screen.
+    mw.reviewer.nextCard()
+    return "Card deferred - it comes back later in this session."
+
+
+def bring_back_deferred() -> str:
+    """Show a deferred card next (session-only pin), newest first."""
+    if state.deferral is None or mw.col is None:
+        return "Deferring is unavailable."
+    ids = state.deferral.deferred_card_ids()
+    if not ids:
+        return "No deferred cards."
+    state.deferral.show_next(ids[-1])
+    return "It will be the next card."
+
+
+def _install_defer_entry_points(config: dict[str, Any]) -> None:
+    """A chord, a Tools entry, and a right-click item on the card itself -
+    the last one is where a reviewer actually looks for a per-card action."""
+    from aqt import gui_hooks
+    from aqt.qt import QAction, QKeySequence, QShortcut
+    from aqt.utils import tooltip
+
+    def run(action: Any) -> None:
+        tooltip(action())
+
+    chord = str(config.get("defer_shortcut", DEFER_SHORTCUT))
+    shortcut = QShortcut(QKeySequence(chord), mw)
+    shortcut.activated.connect(lambda: run(defer_current_card))
+    state.shortcuts.append(shortcut)
+
+    defer_action = QAction(
+        f"Defer this card\t{QKeySequence(chord).toString(QKeySequence.SequenceFormat.NativeText)}",
+        mw,
+    )
+    defer_action.triggered.connect(lambda *_a: run(defer_current_card))
+    back_action = QAction("Bring back a deferred card", mw)
+    back_action.triggered.connect(lambda *_a: run(bring_back_deferred))
+    mw.form.menuTools.addAction(defer_action)
+    mw.form.menuTools.addAction(back_action)
+
+    def _context_menu(_webview: Any, menu: Any) -> None:
+        entry = menu.addAction("Defer this card (later today)")
+        entry.triggered.connect(lambda *_a: run(defer_current_card))
+
+    gui_hooks.reviewer_will_show_context_menu.append(_context_menu)
 
 
 def _setup() -> None:
@@ -273,6 +339,20 @@ def _setup() -> None:
     shortcuts_mod.register_shortcuts(state)
     _install_tools_menu(config)
 
+    # "Not now" for the card in front of you (task #32). Installed before any
+    # review starts so the reviewer wrap is in place for the first card.
+    from .deferral import DeferralManager
+
+    state.deferral = DeferralManager(lambda: mw.col)
+    try:
+        from aqt.reviewer import Reviewer
+
+        state.deferral.install(Reviewer)
+    except Exception:
+        state.deferral = None  # never let this break reviewing
+    if state.deferral is not None:
+        _install_defer_entry_points(config)
+
     # Live context chip: refresh as the user moves between screens/cards.
     def _chip(*_args: Any) -> None:
         if state.controller is not None:
@@ -286,6 +366,10 @@ class _ToolCtx:
     @property
     def col(self) -> Any:
         return mw.col
+
+    @property
+    def deferral(self) -> Any:
+        return state.deferral
 
     @property
     def stats(self) -> dict[str, Any] | None:
@@ -1424,6 +1508,11 @@ def _open_session_browser() -> None:
 
 
 def _teardown() -> None:
+    if state.deferral is not None:
+        from aqt.reviewer import Reviewer
+
+        state.deferral.uninstall(Reviewer)
+        state.deferral.clear_session()
     if state.approvals is not None:
         state.approvals.deny_all()
     if state.controller is not None:

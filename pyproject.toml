@@ -38,6 +38,7 @@ include = [
     "context.py",
     "approvals.py",
     "search_terms.py",
+    "deferral.py",
     "doctor.py",
     "keys.py",
     "transcripts.py",

@@ -6,6 +6,14 @@
   rail and returns focus to the reviewer/deck browser. Otherwise focuses the chat.
 - `new_chat_shortcut` (default `Ctrl+Shift+J`): starts a fresh chat with fresh
   context; focus stays in the message box.
+- `defer_shortcut` (default `Ctrl+Shift+D`): while reviewing, push the card on
+  screen to later in this session — "not this one right now". It is NOT a bury:
+  the card keeps its due date, interval and queue, so it stays due today and a
+  device without this add-on is unaffected. Also on the Tools menu and the
+  reviewer's right-click menu, and available to the assistant as `defer_card`.
+  "Bring back a deferred card" (Tools) makes one the NEXT card. The deferral
+  itself is stored on the card and syncs; the "show it next" part is
+  session-only and is forgotten when Anki closes.
 - `dock_width` (default `420`): expanded dock width in pixels. The width you drag
   the dock to is remembered automatically when the profile closes.
 - `dock_collapsed` (default `true`): whether the dock is collapsed to its slim

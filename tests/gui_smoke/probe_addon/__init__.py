@@ -1190,14 +1190,22 @@ def _run_checks() -> dict[str, Any]:
 
     def _shortcuts_registered() -> None:
         keys = _shortcut_keys()
-        for expected in (state.config["toggle_shortcut"], state.config["new_chat_shortcut"]):
+        expected_chords = (
+            state.config["toggle_shortcut"],
+            state.config["new_chat_shortcut"],
+            state.config.get("defer_shortcut", addon.DEFER_SHORTCUT),  # task #32
+        )
+        for expected in expected_chords:
             normalized = QKeySequence(expected).toString(
                 QKeySequence.SequenceFormat.PortableText
             )
             if normalized not in keys:
                 raise AssertionError(f"shortcut {expected!r} not registered (found {keys})")
-        if len(state.shortcuts) != 2:
-            raise AssertionError(f"expected 2 tracked shortcuts, got {len(state.shortcuts)}")
+        if len(state.shortcuts) != len(expected_chords):
+            raise AssertionError(
+                f"expected {len(expected_chords)} tracked shortcuts, "
+                f"got {len(state.shortcuts)}"
+            )
 
     check("shortcuts registered", _shortcuts_registered)
 
@@ -3135,6 +3143,74 @@ def _run_checks() -> dict[str, Any]:
 
     check("Cmd+Enter accepts and Escape is caught before Anki sees it",
           _keyboard_review_works)
+
+    def _deferring_changes_the_order_not_the_card() -> dict[str, Any]:
+        """Defer/recall through the REAL reviewer (task #32).
+
+        The whole design rests on one claim: reordering what
+        Reviewer._get_next_v3_card is handed changes which card is shown and
+        NOTHING else. So this drives the real reviewer and checks both sides -
+        the order moved, and the card's scheduling did not.
+        """
+        if state.deferral is None:
+            raise AssertionError("the deferral manager was not installed")
+        deck_id = mw.col.decks.id("Zzq Defer")
+        for i in range(5):
+            note = mw.col.new_note(mw.col.models.by_name("Basic"))
+            note["Front"], note["Back"] = f"Zzq defer {i}", str(i)
+            mw.col.add_note(note, deck_id)
+        mw.col.decks.select(deck_id)
+        mw.moveToState("review")
+        QTest.qWait(500)
+        if mw.state != "review" or mw.reviewer.card is None:
+            raise AssertionError("could not start a review")
+
+        first = int(mw.reviewer.card.id)
+        before = mw.col.get_card(first)
+        snapshot = (before.queue, before.due, before.type, before.ivl)
+
+        # Defer the card on screen, exactly as the shortcut does.
+        addon.defer_current_card()
+        QTest.qWait(400)
+        second = int(mw.reviewer.card.id) if mw.reviewer.card else 0
+        if second == first:
+            raise AssertionError("the deferred card is still on screen")
+
+        after = mw.col.get_card(first)
+        if (after.queue, after.due, after.type, after.ivl) != snapshot:
+            raise AssertionError(
+                f"deferring changed the card's scheduling: {snapshot} -> "
+                f"{(after.queue, after.due, after.type, after.ivl)}"
+            )
+        if after.queue < 0:
+            raise AssertionError("the card was buried/suspended, not deferred")
+
+        # It must not come back on its own while still deferred...
+        served: list[int] = []
+        for _ in range(3):
+            mw.reviewer.nextCard()
+            QTest.qWait(250)
+            if mw.reviewer.card:
+                served.append(int(mw.reviewer.card.id))
+        if first in served:
+            raise AssertionError(f"a deferred card was served anyway: {served}")
+
+        # ...and asking for it back makes it the NEXT card.
+        state.deferral.show_next(first)
+        mw.reviewer.nextCard()
+        QTest.qWait(400)
+        recalled = int(mw.reviewer.card.id) if mw.reviewer.card else 0
+        if recalled != first:
+            raise AssertionError(f"recall did not put it next: got {recalled}, want {first}")
+        return {
+            "deferred": first,
+            "servedWhileDeferred": served,
+            "recalledNext": recalled == first,
+            "schedulingUnchanged": True,
+        }
+
+    check("deferring reorders the reviewer without touching the card",
+          _deferring_changes_the_order_not_the_card)
 
     def _hover_geometry_stable() -> dict[str, Any]:
         """Hovering a header button must change ONLY its background - never
