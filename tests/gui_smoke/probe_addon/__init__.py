@@ -2890,6 +2890,114 @@ def _run_checks() -> dict[str, Any]:
     check("vim mode reaches the proposal field editors",
           _vim_reaches_the_field_editor)
 
+    def _post_resolution_controls_actually_work() -> dict[str, Any]:
+        """The four controls that were only PRESENCE-checked (#18 follow-up).
+
+        Re-apply, Put back for review, Undo all, and Browse were wired and
+        rendered but never clicked in a test, so nothing proved the round trip
+        reached Python and changed the collection. Presence is not behaviour -
+        the revert override rendered fine while being unreachable.
+        """
+        out: dict[str, Any] = {}
+
+        def _click(selector: str, what: str) -> None:
+            _wait_until(
+                lambda: _eval_js(
+                    dock.web, f"document.querySelectorAll('{selector}').length;",
+                    DOM_TIMEOUT_MS, what,
+                ) > 0,
+                DOM_TIMEOUT_MS, what,
+            )
+            _eval_js(
+                dock.web,
+                f"(function(){{ document.querySelector('{selector}').click(); return true; }})();",
+                DOM_TIMEOUT_MS, f"click {what}",
+            )
+
+        deck_id = mw.col.decks.id("Zzq Post Resolution")
+
+        # 1. Re-apply, after an undo, must put the change BACK.
+        note = mw.col.new_note(mw.col.models.by_name("Basic"))
+        note["Front"], note["Back"] = "Zzq readd probe", "before"
+        mw.col.add_note(note, deck_id)
+        pid = state.proposals.submit_edit(
+            {"note_id": note.id, "field_changes": {"Back": "after"},
+             "rationale": "readd probe"}
+        )["proposal_id"]
+        state.proposals.accept({"id": pid})
+        sel = '[data-proposal-id="%s"] ' % pid
+        _click(sel + "[data-testid=proposal-revert]", "Undo")
+        _wait_until(lambda: mw.col.get_note(note.id)["Back"] == "before",
+                    DOM_TIMEOUT_MS, "the undo to land")
+        _click(sel + "[data-testid=proposal-readd]", "Re-apply")
+        _wait_until(lambda: mw.col.get_note(note.id)["Back"] == "after",
+                    DOM_TIMEOUT_MS, "Re-apply to restore the change")
+        out["readd"] = mw.col.get_note(note.id)["Back"]
+
+        # 2. Put back for review returns a REJECTED proposal to pending.
+        note2 = mw.col.new_note(mw.col.models.by_name("Basic"))
+        note2["Front"], note2["Back"] = "Zzq restore probe", "unchanged"
+        mw.col.add_note(note2, deck_id)
+        pid2 = state.proposals.submit_edit(
+            {"note_id": note2.id, "field_changes": {"Back": "proposed"},
+             "rationale": "restore probe"}
+        )["proposal_id"]
+        state.proposals.reject({"id": pid2})
+        sel2 = '[data-proposal-id="%s"] ' % pid2
+        _click(sel2 + "[data-testid=proposal-restore]", "Put back for review")
+        _wait_until(
+            lambda: state.proposals._proposals[pid2].status == "pending",
+            DOM_TIMEOUT_MS, "the proposal to return to pending",
+        )
+        out["restore"] = state.proposals._proposals[pid2].status
+        # ...and it is actionable again, not just relabelled.
+        out["restore_actionable"] = _eval_js(
+            dock.web,
+            "document.querySelectorAll('%s[data-testid=proposal-approve],"
+            "%s[data-testid=proposal-reject]').length;" % (sel2, sel2),
+            DOM_TIMEOUT_MS, "restored actions",
+        )
+        if not out["restore_actionable"]:
+            raise AssertionError("restored proposal has no review controls")
+
+        # 3. Browse opens Anki's Browser scoped to this session.
+        before_browsers = len([w for w in mw.app.topLevelWidgets()
+                               if w.__class__.__name__ == "Browser"])
+        _click("[data-testid=ledger-browse]", "Browse")
+        QTest.qWait(600)
+        browsers = [w for w in mw.app.topLevelWidgets()
+                    if w.__class__.__name__ == "Browser"]
+        if len(browsers) <= before_browsers:
+            raise AssertionError("Browse opened no Browser window")
+        out["browse_search"] = str(getattr(browsers[-1].form.searchEdit.lineEdit(),
+                                           "text", lambda: "")())
+        browsers[-1].close()
+        QTest.qWait(300)
+
+        # 4. Undo all reverts every remaining applied change in the session.
+        note3 = mw.col.new_note(mw.col.models.by_name("Basic"))
+        note3["Front"], note3["Back"] = "Zzq undo-all probe", "original"
+        mw.col.add_note(note3, deck_id)
+        pid3 = state.proposals.submit_edit(
+            {"note_id": note3.id, "field_changes": {"Back": "changed"},
+             "rationale": "undo-all probe"}
+        )["proposal_id"]
+        state.proposals.accept({"id": pid3})
+        _wait_until(lambda: mw.col.get_note(note3.id)["Back"] == "changed",
+                    DOM_TIMEOUT_MS, "the change to apply")
+        _click("[data-testid=ledger-undo]", "Undo all")
+        _click("[data-testid=ledger-undo-confirm]", "confirm Undo all")
+        _wait_until(lambda: mw.col.get_note(note3.id)["Back"] == "original",
+                    DOM_TIMEOUT_MS, "Undo all to revert the session")
+        out["undo_all"] = mw.col.get_note(note3.id)["Back"]
+        # The earlier re-applied edit is part of the session too.
+        if mw.col.get_note(note.id)["Back"] != "before":
+            raise AssertionError("Undo all skipped an earlier applied change")
+        return out
+
+    check("Re-apply / Put back / Undo all / Browse all reach the collection",
+          _post_resolution_controls_actually_work)
+
     def _hover_geometry_stable() -> dict[str, Any]:
         """Hovering a header button must change ONLY its background - never
         padding, font, size, or radius. A geometry change on hover shrinks the

@@ -547,7 +547,7 @@ function LegacyProposalCard({ data, store }: ProposalCardProps) {
       {!pending ? <ProposalActions data={data} store={store} /> : null}
 
       {pending ? (
-        <div className="cwyc-proposal-actions">
+        <div className="cwyc-proposal-actions" data-proposal-id={data.id}>
           {/* No fields = nothing this button could open (a tag-only edit). */}
           {editableFields && fields.length > 0 ? (
             <button
