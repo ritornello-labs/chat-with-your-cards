@@ -3233,7 +3233,7 @@ def _run_checks() -> dict[str, Any]:
             raise AssertionError("deck vanished from the due tree")
 
         card_id = int(mw.col.decks.card_count([deck_id], include_subdecks=False) and
-                      list(mw.col.find_cards(f'deck:"Zzq Counts"'))[0])
+                      list(mw.col.find_cards('deck:"Zzq Counts"'))[0])
         before = counts()
         state.deferral.defer(card_id)
         after = counts()
@@ -3249,6 +3249,73 @@ def _run_checks() -> dict[str, Any]:
 
     check("a deferred card stays due and counted (it is not a bury)",
           _defer_leaves_the_card_due_and_counted)
+
+    def _defer_on_send_and_undo_from_the_dock() -> dict[str, Any]:
+        """The composer-side flow (user, 2026-07-28): with defer-on-send ON,
+        sending a question sets the on-screen card aside so other cards can be
+        reviewed while the agent thinks - and the Undo chip brings it straight
+        back. Driven through the REAL send path and the REAL chip."""
+        addon._set_setting({"key": "defer_on_send", "value": True})
+        try:
+            deck_id = mw.col.decks.id("Zzq OnSend")
+            for i in range(4):
+                note = mw.col.new_note(mw.col.models.by_name("Basic"))
+                note["Front"], note["Back"] = f"Zzq onsend {i}", str(i)
+                mw.col.add_note(note, deck_id)
+            mw.col.decks.select(deck_id)
+            mw.moveToState("review")
+            QTest.qWait(500)
+            asked_about = int(mw.reviewer.card.id)
+
+            # The Set aside chip is visible (review_state reached the dock) and
+            # shows it is in auto mode.
+            _wait_until(
+                lambda: _eval_js(
+                    dock.web,
+                    "((document.querySelector('[data-testid=defer-chip]')||{})"
+                    ".textContent||'');",
+                    DOM_TIMEOUT_MS, "defer chip",
+                ).startswith("Set aside"),
+                DOM_TIMEOUT_MS, "the Set aside chip to appear",
+            )
+
+            _send_message(dock.web, "what is this card about? (defer probe)")
+            _wait_until(
+                lambda: mw.reviewer.card is not None
+                and int(mw.reviewer.card.id) != asked_about,
+                DOM_TIMEOUT_MS, "the send to defer the on-screen card",
+            )
+            if not state.deferral.is_deferred(mw.col.get_card(asked_about)):
+                raise AssertionError("send did not mark the card deferred")
+
+            # The Undo chip appeared; click it IN THE DOM.
+            _wait_until(
+                lambda: _eval_js(
+                    dock.web,
+                    "document.querySelectorAll('[data-testid=deferred-undo-button]').length;",
+                    DOM_TIMEOUT_MS, "undo chip",
+                ) > 0,
+                DOM_TIMEOUT_MS, "the Undo chip",
+            )
+            _eval_js(
+                dock.web,
+                "(function(){ document.querySelector("
+                "'[data-testid=deferred-undo-button]').click(); return true; })();",
+                DOM_TIMEOUT_MS, "click Undo",
+            )
+            _wait_until(
+                lambda: mw.reviewer.card is not None
+                and int(mw.reviewer.card.id) == asked_about,
+                DOM_TIMEOUT_MS, "Undo to put the card back on screen",
+            )
+            if state.deferral.is_deferred(mw.col.get_card(asked_about)):
+                raise AssertionError("undo left the card marked deferred")
+            return {"asked_about": asked_about, "back_on_screen": True}
+        finally:
+            addon._set_setting({"key": "defer_on_send", "value": False})
+
+    check("defer-on-send sets the card aside and the Undo chip restores it",
+          _defer_on_send_and_undo_from_the_dock)
 
     def _hover_geometry_stable() -> dict[str, Any]:
         """Hovering a header button must change ONLY its background - never

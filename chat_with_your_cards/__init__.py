@@ -23,6 +23,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "toggle_shortcut": "Ctrl+J",
     "new_chat_shortcut": "Ctrl+Shift+J",
     "defer_shortcut": "Ctrl+Shift+D",
+    # Reviewing affordances (task #32 follow-up): the composer's "Set aside"
+    # button, and deferring the on-screen card automatically on every send.
+    "defer_button": True,
+    "defer_on_send": False,
     "dock_width": 420,
     # The dock is always visible; collapsed means the slim rail. Both persist
     # across sessions (saved at teardown alongside dock_width).
@@ -183,9 +187,15 @@ def defer_current_card() -> str:
     card = getattr(mw.reviewer, "card", None)
     if mw.state != "review" or card is None:
         return "No card is being reviewed."
-    state.deferral.defer(int(card.id))
+    card_id = int(card.id)
+    state.deferral.defer(card_id)
     # Move on immediately - the point is to get it off the screen.
     mw.reviewer.nextCard()
+    # The undo chip in the dock hangs off this event ("this card was just
+    # deferred - click to undo"). Pushed, not recorded: it is transient
+    # chrome, not conversation.
+    if state.dock is not None:
+        state.dock.bridge.push({"type": "card_deferred", "card_id": card_id})
     return "Card deferred - it comes back later in this session."
 
 
@@ -209,6 +219,40 @@ def _bind_defer_shortcut() -> None:
     shortcut = QShortcut(QKeySequence(chord), mw)
     shortcut.activated.connect(lambda: tooltip(defer_current_card()))
     state.shortcuts.append(shortcut)
+
+
+def _tooltip_result(text: str) -> None:
+    from aqt.utils import tooltip
+
+    tooltip(text)
+
+
+def undo_defer(card_id: int) -> str:
+    """The undo chip: unmark the card and put it straight back on screen.
+
+    nextCard() is safe on the displaced card - it was never answered, so it
+    stays due and simply comes round again after the recalled one."""
+    if state.deferral is None or mw.col is None:
+        return "Deferring is unavailable."
+    state.deferral.show_next(int(card_id))
+    if mw.state == "review":
+        mw.reviewer.nextCard()
+    return "It's back."
+
+
+def _push_review_state() -> None:
+    """Tell the dock whether a review card is on screen, so the composer's
+    "Set aside" button only shows when there is something to set aside."""
+    if state.dock is None:
+        return
+    card = getattr(mw.reviewer, "card", None) if mw.state == "review" else None
+    state.dock.bridge.push(
+        {
+            "type": "review_state",
+            "reviewing": card is not None,
+            "card_id": int(card.id) if card is not None else None,
+        }
+    )
 
 
 def _install_defer_entry_points(config: dict[str, Any]) -> None:
@@ -366,6 +410,7 @@ def _setup() -> None:
     def _chip(*_args: Any) -> None:
         if state.controller is not None:
             state.controller.push_context_chip()
+        _push_review_state()
 
     gui_hooks.reviewer_did_show_question.append(_chip)
     gui_hooks.state_did_change.append(_chip)
@@ -559,7 +604,26 @@ def _wire_bridge() -> None:
     controller = state.controller
 
     bridge.on("ready", lambda _msg: _mark_web_ready())
-    bridge.on("send", lambda msg: controller.send_user_message(str(msg.get("text", ""))))
+    def _on_send(msg: dict[str, Any]) -> None:
+        # "Always defer": sending a question about the card is the moment the
+        # card stops being reviewable, so get it off the screen while the
+        # agent thinks (user, 2026-07-28). Deferred BEFORE the send so the
+        # next card is up as the reply streams.
+        if (
+            bool(state.config.get("defer_on_send", False))
+            and state.deferral is not None
+            and mw.state == "review"
+            and getattr(mw.reviewer, "card", None) is not None
+        ):
+            defer_current_card()
+        controller.send_user_message(str(msg.get("text", "")))
+
+    bridge.on("send", _on_send)
+    bridge.on("defer_current", lambda _msg: _tooltip_result(defer_current_card()))
+    bridge.on(
+        "undo_defer",
+        lambda msg: _tooltip_result(undo_defer(int(msg.get("card_id", 0)))),
+    )
     bridge.on("cancel", lambda _msg: controller.cancel())
     bridge.on("new_chat", lambda _msg: new_chat())
     bridge.on("toggle_focus", lambda _msg: toggle_chat_focus())
@@ -731,6 +795,9 @@ def _push_settings() -> None:
             "theme": _norm_theme(state.config.get("theme")),
             "mcp_inherit_user": bool(state.config.get("mcp_inherit_user", False)),
             "widget_rendering": bool(state.config.get("widget_rendering", False)),
+            "defer_shortcut": str(state.config.get("defer_shortcut", DEFER_SHORTCUT)),
+            "defer_button": bool(state.config.get("defer_button", True)),
+            "defer_on_send": bool(state.config.get("defer_on_send", False)),
         }
     )
 
@@ -755,6 +822,25 @@ def _set_setting(msg: dict[str, Any]) -> None:
         state.config["widget_rendering"] = bool(value)
     elif key == "theme":
         state.config["theme"] = _norm_theme(value)
+    elif key == "defer_button":
+        state.config["defer_button"] = bool(value)
+    elif key == "defer_on_send":
+        state.config["defer_on_send"] = bool(value)
+    elif key == "defer_shortcut":
+        from aqt.qt import QKeySequence
+
+        chord = str(value).strip()
+        # An unparseable chord must not eat the binding: reject it and keep
+        # the old one, telling the panel via the re-pushed snapshot.
+        if not chord or QKeySequence(chord).isEmpty():
+            _push_settings()
+            return
+        state.config["defer_shortcut"] = chord
+        from . import shortcuts as shortcuts_mod
+
+        shortcuts_mod.register_shortcuts(state)
+        if state.deferral is not None:
+            _bind_defer_shortcut()
     elif key == "dock_side":
         side = "left" if value == "left" else "right"
         state.config["dock_side"] = side

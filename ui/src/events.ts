@@ -169,6 +169,21 @@ export interface LedgerEvent {
   entries: LedgerEntryPayload[];
 }
 
+/** Whether a review card is on screen (pushed on reviewer/state changes), so
+ *  the composer's "Set aside" button only shows when it can do something. */
+export interface ReviewStateEvent {
+  type: "review_state";
+  reviewing: boolean;
+  card_id: number | null;
+}
+
+/** A card was just deferred (shortcut, menu, send-with-defer-on, or the
+ *  agent); drives the transient "Undo" chip by the composer. */
+export interface CardDeferredEvent {
+  type: "card_deferred";
+  card_id: number;
+}
+
 export interface GradingCardSummary {
   card_id: number;
   note_id: number;
@@ -259,6 +274,10 @@ export interface SettingsEvent {
   theme?: string;
   /** Whether the agent inherits the user's own Claude Code MCP servers. */
   mcp_inherit_user?: boolean;
+  /** Reviewing affordances (task #32): chord, button visibility, auto-defer. */
+  defer_shortcut?: string;
+  defer_button?: boolean;
+  defer_on_send?: boolean;
   /** Whether sandboxed inline widgets (render_widget) may render. */
   widget_rendering?: boolean;
 }
@@ -375,6 +394,8 @@ export type KnownChatEvent =
   | ProposalResolvedEvent
   | ProposalErrorEvent
   | PreviewUpdateEvent
+  | ReviewStateEvent
+  | CardDeferredEvent
   | LedgerEvent
   | GradingEvent
   | UsageEvent

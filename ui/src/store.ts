@@ -317,6 +317,9 @@ export interface SettingsState {
   readonly theme: ThemeName;
   readonly mcpInheritUser: boolean;
   readonly widgetRendering: boolean;
+  readonly deferShortcut: string;
+  readonly deferButton: boolean;
+  readonly deferOnSend: boolean;
 }
 
 /**
@@ -346,6 +349,11 @@ export interface UiState {
   /** Which pending proposal the keyboard acts on. A shortcut that accepts a
    *  card must be visibly aimed at one, or Cmd+Enter is a blind write. */
   readonly activeProposalId: string | null;
+  /** Whether a review card is on screen (drives the "Set aside" button). */
+  readonly reviewing: boolean;
+  /** The just-deferred card behind the transient Undo chip; seq forces the
+   *  chip (and its auto-hide timer) to restart on every defer. */
+  readonly deferred: { cardId: number; seq: number } | null;
 }
 
 export const PERMISSION_MODES: readonly { id: string; label: string; hint: string }[] = [
@@ -371,6 +379,8 @@ const DEFAULT_UI_STATE: UiState = {
   settings: null,
   setup: null,
   activeProposalId: null,
+  reviewing: false,
+  deferred: null,
 };
 
 export interface ChatState {
@@ -575,6 +585,23 @@ export class ChatStore {
           : part
       ),
     }));
+    this.emit();
+  }
+
+  /** The composer's "Set aside" button: defer the card on screen (#32). */
+  deferCurrentCard(): void {
+    postCommand({ type: "defer_current" });
+  }
+
+  /** The transient Undo chip: unmark and put the card straight back. */
+  undoDefer(cardId: number): void {
+    postCommand({ type: "undo_defer", card_id: cardId });
+    this.dismissDeferredNotice();
+  }
+
+  dismissDeferredNotice(): void {
+    if (this.ui.deferred === null) return;
+    this.ui = { ...this.ui, deferred: null };
     this.emit();
   }
 
@@ -796,6 +823,25 @@ export class ChatStore {
       case "preview_update":
         this.updateProposalPreview(event as { id?: string; previews?: unknown });
         break;
+      case "review_state": {
+        const review = event as { reviewing?: boolean };
+        if (this.ui.reviewing !== !!review.reviewing) {
+          this.ui = { ...this.ui, reviewing: !!review.reviewing };
+          this.emit();
+        }
+        break;
+      }
+      case "card_deferred": {
+        const deferred = event as { card_id?: number };
+        if (deferred.card_id) {
+          this.ui = {
+            ...this.ui,
+            deferred: { cardId: Number(deferred.card_id), seq: (this.ui.deferred?.seq ?? 0) + 1 },
+          };
+          this.emit();
+        }
+        break;
+      }
       case "grading":
         this.upsertGrading((event as GradingEvent).grading);
         break;
@@ -948,6 +994,9 @@ export class ChatStore {
           theme?: string;
           mcp_inherit_user?: boolean;
           widget_rendering?: boolean;
+          defer_shortcut?: string;
+          defer_button?: boolean;
+          defer_on_send?: boolean;
         };
         const rawMappings = Array.isArray(s.vim_mappings) ? s.vim_mappings : [];
         const vimMappings = rawMappings.filter(
@@ -967,6 +1016,9 @@ export class ChatStore {
             theme,
             mcpInheritUser: Boolean(s.mcp_inherit_user),
             widgetRendering: Boolean(s.widget_rendering),
+            deferShortcut: String(s.defer_shortcut ?? ""),
+            deferButton: s.defer_button !== false,
+            deferOnSend: Boolean(s.defer_on_send),
           },
         };
         applyThemeClass(theme);

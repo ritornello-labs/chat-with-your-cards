@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useChatState } from "../ChatRuntimeProvider";
 import { THEME_NAMES, type ChatStore, type DoctorRow, type ThemeName } from "../store";
 
@@ -46,6 +46,36 @@ function Toggle(props: { label: string; checked: boolean; testid: string; onChan
         onChange={(e) => props.onChange(e.target.checked)}
       />
     </label>
+  );
+}
+
+function ShortcutInput(props: {
+  value: string;
+  testid: string;
+  onCommit: (chord: string) => void;
+}) {
+  const [draft, setDraft] = useState(props.value);
+  // Re-seed when Python re-pushes the snapshot - including the case where it
+  // REJECTED an unparseable chord and pushed the old one back.
+  useEffect(() => setDraft(props.value), [props.value]);
+  const commit = () => {
+    if (draft.trim() && draft !== props.value) props.onCommit(draft.trim());
+    else setDraft(props.value);
+  };
+  return (
+    <input
+      type="text"
+      className="cwyc-setting-input"
+      data-testid={props.testid}
+      value={draft}
+      size={10}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") commit();
+        else if (e.key === "Escape") setDraft(props.value);
+      }}
+    />
   );
 }
 
@@ -146,6 +176,32 @@ export function SettingsPanel({ store }: { store: ChatStore }) {
             Lets the agent draw charts and small interactive views in the chat. They run
             in a strict sandbox: no internet, no access to your collection or this app.
           </div>
+          <div className="cwyc-panel-title cwyc-panel-title-gap">Reviewing</div>
+          <Toggle
+            label="Show the Set aside button"
+            testid="setting-defer-button"
+            checked={settings.deferButton}
+            onChange={(v) => store.setSetting("defer_button", v)}
+          />
+          <Toggle
+            label="Set the card aside when I send"
+            testid="setting-defer-on-send"
+            checked={settings.deferOnSend}
+            onChange={(v) => store.setSetting("defer_on_send", v)}
+          />
+          <div className="cwyc-setting-row">
+            <span className="cwyc-setting-label">Set-aside shortcut</span>
+            <ShortcutInput
+              value={settings.deferShortcut}
+              testid="setting-defer-shortcut"
+              onCommit={(chord) => store.setSetting("defer_shortcut", chord)}
+            />
+          </div>
+          <div className="cwyc-setting-footnote">
+            Setting a card aside is not a bury: it stays due today and only moves
+            later in this session&rsquo;s order. An Undo chip appears whenever a
+            card is set aside.
+          </div>
           <div className="cwyc-panel-title cwyc-panel-title-gap">MCP tools (advanced)</div>
           <Toggle
             label="Use my Claude Code MCP servers"
@@ -181,6 +237,10 @@ export function SettingsPanel({ store }: { store: ChatStore }) {
           <div className="cwyc-setting-row">
             <span className="cwyc-setting-label">New chat</span>
             <span className="cwyc-setting-kbd">{settings.newChatShortcut}</span>
+          </div>
+          <div className="cwyc-setting-row">
+            <span className="cwyc-setting-label">Set card aside</span>
+            <span className="cwyc-setting-kbd">{settings.deferShortcut}</span>
           </div>
         </>
       )}

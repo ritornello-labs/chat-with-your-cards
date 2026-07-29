@@ -60,6 +60,12 @@ function chopWords(text: string, rand: () => number): string[] {
 }
 
 const devProposals = new Map<string, ProposalPayload>();
+let devReviewCard = 424242;
+// The dev preview always "has a review card on screen" so the Set aside chip
+// and the undo flow are reachable by hand.
+window.setTimeout(() => {
+  window.chatUI?.dispatch({ type: "review_state", reviewing: true, card_id: devReviewCard });
+}, 400);
 const devGradings = new Map<string, GradingPayload>();
 
 function compile(steps: readonly Step[]): Array<[number, ChatEvent]> {
@@ -1118,6 +1124,20 @@ export function installDevReplayer(): void {
       }
       // proposals.py's supersede(): a pending proposal set aside because the
       // user asked for a different one.
+      // task #32: the dev harness plays the reviewer. A fake card is "on
+      // screen" from load (review_state below); defer_current serves the next
+      // fake card and raises the undo chip, exactly like Python.
+      case "defer_current": {
+        window.chatUI?.dispatch({ type: "card_deferred", card_id: devReviewCard });
+        devReviewCard += 1;
+        window.chatUI?.dispatch({ type: "review_state", reviewing: true, card_id: devReviewCard });
+        break;
+      }
+      case "undo_defer": {
+        devReviewCard = Number(msg.card_id) || devReviewCard;
+        window.chatUI?.dispatch({ type: "review_state", reviewing: true, card_id: devReviewCard });
+        break;
+      }
       case "proposal_supersede": {
         const current = devProposals.get(String(msg.id));
         if (!current || current.status !== "pending") break;

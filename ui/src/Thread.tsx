@@ -13,6 +13,7 @@ import { ModeChip, ModelPicker, PinsButton, ToolsChip } from "./components/Compo
 import { VimComposer } from "./components/VimComposer";
 import { LedgerStrip } from "./components/LedgerStrip";
 import { Announcer } from "./components/Announcer";
+import { DeferredUndoChip, SetAsideChip } from "./components/DeferControls";
 import { WidgetCard, WidgetOfferChip } from "./components/WidgetCard";
 import { SetupCard } from "./components/SetupCard";
 import { ToolApprovalChip } from "./components/ToolApprovalChip";
@@ -131,6 +132,7 @@ function Composer({ store }: { store: ChatStore }) {
       {/* What this chat changed, and the way back. Above the composer because
           it is about the session, not any one message (task #18). */}
       <LedgerStrip store={store} />
+      <DeferredUndoChip store={store} />
       {ui.settings?.vimMode ? (
         <VimComposer store={store} />
       ) : (
@@ -149,6 +151,7 @@ function Composer({ store }: { store: ChatStore }) {
             than being wedged among the mode chips. */}
         <div className="cwyc-composer-context">
           <PinsButton store={store} />
+          <SetAsideChip store={store} />
         </div>
         <div className="cwyc-composer-left">
           <ModeChip store={store} />

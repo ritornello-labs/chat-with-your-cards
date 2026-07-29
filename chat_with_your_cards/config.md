@@ -9,11 +9,22 @@
 - `defer_shortcut` (default `Ctrl+Shift+D`): while reviewing, push the card on
   screen to later in this session — "not this one right now". It is NOT a bury:
   the card keeps its due date, interval and queue, so it stays due today and a
-  device without this add-on is unaffected. Also on the Tools menu and the
-  reviewer's right-click menu, and available to the assistant as `defer_card`.
-  "Bring back a deferred card" (Tools) makes one the NEXT card. The deferral
-  itself is stored on the card and syncs; the "show it next" part is
-  session-only and is forgotten when Anki closes.
+  device without this add-on is unaffected. Also on the Tools menu, the
+  reviewer's right-click menu, the dock's "Set aside" button, and available to
+  the assistant as `defer_card`. "Bring back a deferred card" (Tools) makes one
+  the NEXT card. The deferral itself is stored on the card and syncs; the
+  "show it next" part is session-only and is forgotten when Anki closes.
+  Editable in the dock's Settings panel (gear) too.
+- `defer_button` (default `true`): show the "Set aside" button by the composer
+  while a review card is on screen. Whenever a card is set aside — by the
+  button, the chord, the menu, the assistant, or defer-on-send — a transient
+  "Card set aside — Undo" chip appears; Undo unmarks it and puts it straight
+  back on screen.
+- `defer_on_send` (default `false`): set the on-screen card aside automatically
+  every time you send a message, so you can keep reviewing other cards while
+  the assistant thinks about the one you asked about. The "Set aside" button
+  then reads "Set aside · auto" as the mode indicator. Both toggles and the
+  shortcut live in the Settings panel under "Reviewing".
 - `dock_width` (default `420`): expanded dock width in pixels. The width you drag
   the dock to is remembered automatically when the profile closes.
 - `dock_collapsed` (default `true`): whether the dock is collapsed to its slim
