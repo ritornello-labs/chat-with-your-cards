@@ -380,9 +380,14 @@ given late is consumed by the agent's next attempt.
 - ~~The **`open` flag is ignored**~~ — **fixed 2026-07-27 (#19)**: a change
   set still collecting edits says "Collecting edits… N note(s) so far" and
   offers no actions, on both card variants.
-- ⚠ **Accessibility**: the transcript lost its `aria-live="polite"`, and the
-  vendored assistant-ui primitives supply none, so streamed replies are not
-  announced.
+- ~~⚠ **Accessibility**: the transcript lost its `aria-live="polite"`~~ —
+  **fixed 2026-07-27 (#22)**, but NOT by restoring the attribute. A reply
+  streams token by token, so a live region over the transcript re-announces
+  the growing text on every delta. `Announcer.tsx` is a visually hidden
+  `role="status"` region fed by settled state (turn started / reply finished
+  with anything now awaiting a decision / failed / stopped); the viewport is
+  `role="log"` with an explicit `aria-live="off"` so the role does not smuggle
+  the per-token announcements back in.
 - ⚠ **Escape returns focus to the reviewer only in vim mode.** The old handler
   was deliberately *capture-phase* to beat AnkiWebView's own bubble-phase
   Escape → `pycmd("close")`; preserve that detail in any fix.

@@ -12,6 +12,7 @@ import { TextPart } from "./components/TextPart";
 import { ModeChip, ModelPicker, PinsButton, ToolsChip } from "./components/ComposerControls";
 import { VimComposer } from "./components/VimComposer";
 import { LedgerStrip } from "./components/LedgerStrip";
+import { Announcer } from "./components/Announcer";
 import { WidgetCard, WidgetOfferChip } from "./components/WidgetCard";
 import { SetupCard } from "./components/SetupCard";
 import { ToolApprovalChip } from "./components/ToolApprovalChip";
@@ -219,7 +220,19 @@ export function Thread({ store }: { store: ChatStore }) {
   const { ui } = useChatState(store);
   return (
     <ThreadPrimitive.Root className="cwyc-thread">
-      <ThreadPrimitive.Viewport className="cwyc-viewport">
+      {/* Announcements come from here, NOT from a live region over the
+          transcript: a reply streams token by token, and a live transcript
+          re-announces the growing text on every delta (task #22). */}
+      <Announcer store={store} />
+      <ThreadPrimitive.Viewport
+        className="cwyc-viewport"
+        // `log` is the right role for a transcript and helps screen-reader
+        // navigation, but it implies aria-live="polite" - hence the explicit
+        // off, so the role does not smuggle the streaming spam back in.
+        role="log"
+        aria-live="off"
+        aria-label="Conversation"
+      >
         <ThreadPrimitive.Empty>
           {ui.setup ? (
             <SetupCard platform={ui.setup.platform} store={store} />

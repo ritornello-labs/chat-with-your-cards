@@ -2998,6 +2998,82 @@ def _run_checks() -> dict[str, Any]:
     check("Re-apply / Put back / Undo all / Browse all reach the collection",
           _post_resolution_controls_actually_work)
 
+    def _replies_are_announced_once() -> dict[str, Any]:
+        """A streamed reply must reach a screen reader - exactly once.
+
+        The migration dropped the transcript's aria-live and the vendored
+        primitives supply none, so a reply arrived in silence (task #22).
+        Putting aria-live back on the transcript is the WRONG fix: the text
+        streams token by token, so a live region over it re-announces the
+        growing reply on every delta. Announcements therefore come from a
+        dedicated region fed by settled state, and this check pins both halves
+        - the transcript must not be live, and the region must be.
+        """
+        shape = _eval_js(
+            dock.web,
+            "(function(){"
+            "  var a = document.querySelector('[data-testid=announcer]');"
+            "  var v = document.querySelector('.cwyc-viewport');"
+            "  if (!a || !v) return {found: false};"
+            "  var cs = getComputedStyle(a);"
+            "  return {found: true, role: a.getAttribute('role'),"
+            "    live: a.getAttribute('aria-live'),"
+            "    hidden: cs.position === 'absolute' && cs.clipPath !== 'none',"
+            "    viewportRole: v.getAttribute('role'),"
+            "    viewportLive: v.getAttribute('aria-live'),"
+            "    viewportLabel: v.getAttribute('aria-label')};"
+            "})();",
+            DOM_TIMEOUT_MS, "announcer shape",
+        )
+        if not shape.get("found"):
+            raise AssertionError("no announcer region in the dock")
+        if shape["role"] != "status" or shape["live"] != "polite":
+            raise AssertionError(f"announcer is not a polite status region: {shape}")
+        if not shape["hidden"]:
+            raise AssertionError(f"announcer is not visually hidden: {shape}")
+        if shape["viewportLive"] != "off":
+            raise AssertionError(
+                f"the transcript is a live region again - every streamed token "
+                f"would be announced: {shape}"
+            )
+
+        # Count how many times the region actually changes across ONE reply.
+        _eval_js(
+            dock.web,
+            "(function(){"
+            "  window.__said = [];"
+            "  var n = document.querySelector('[data-testid=announcer]');"
+            "  new MutationObserver(function(){"
+            "    var t = n.textContent.trim();"
+            "    if (t && window.__said[window.__said.length-1] !== t) window.__said.push(t);"
+            "  }).observe(n, {childList: true, subtree: true, characterData: true});"
+            "  return true; })();",
+            DOM_TIMEOUT_MS, "watch the announcer",
+        )
+        _send_message(dock.web, "announce probe")
+        _wait_until(
+            lambda: _eval_js(
+                dock.web, "(window.__said || []).length;", DOM_TIMEOUT_MS, "said count"
+            ) >= 2,
+            STREAM_TIMEOUT_MS, "a start and a finish announcement",
+        )
+        QTest.qWait(500)
+        said = _eval_js(
+            dock.web, "window.__said || [];", DOM_TIMEOUT_MS, "announcements"
+        )
+        # One "Working…", one settled reply. Per-token announcements would put
+        # this in the dozens - that is the regression being guarded.
+        if len(said) > 3:
+            raise AssertionError(f"the reply was announced {len(said)} times: {said}")
+        if said[0] != "Working…":
+            raise AssertionError(f"the turn start was not announced: {said}")
+        if len(said[-1]) < 10:
+            raise AssertionError(f"the reply itself was not announced: {said}")
+        return {"announcements": said[:2], "count": len(said), "shape": shape}
+
+    check("a streamed reply is announced once, not per token",
+          _replies_are_announced_once)
+
     def _hover_geometry_stable() -> dict[str, Any]:
         """Hovering a header button must change ONLY its background - never
         padding, font, size, or radius. A geometry change on hover shrinks the
