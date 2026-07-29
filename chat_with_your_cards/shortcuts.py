@@ -56,6 +56,18 @@ def new_chat(state: AddonState) -> None:
 
 
 def register_shortcuts(state: AddonState) -> None:
+    """(Re)bind the chords. Safe to call again after a config edit: the old
+    QShortcuts are disposed first, so editing a chord takes effect without an
+    Anki restart - which is what config.md has always claimed, and what did
+    not actually happen (found 2026-07-27: nothing re-registered these)."""
+    for existing in state.shortcuts:
+        try:
+            existing.setEnabled(False)
+            existing.setParent(None)
+        except Exception:
+            pass
+    state.shortcuts = []
+
     toggle = QShortcut(QKeySequence(state.config["toggle_shortcut"]), mw)
     toggle.activated.connect(lambda: toggle_chat_focus(state))
 

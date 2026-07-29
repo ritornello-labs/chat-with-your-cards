@@ -3212,6 +3212,44 @@ def _run_checks() -> dict[str, Any]:
     check("deferring reorders the reviewer without touching the card",
           _deferring_changes_the_order_not_the_card)
 
+    def _defer_leaves_the_card_due_and_counted() -> dict[str, Any]:
+        """Deferring must NOT act like a bury.
+
+        A bury pulls the card out of today's counts; the user's whole point is
+        that it stays due today (user, 2026-07-27: "the card should remain
+        due, in green"). So this compares the deck's own due tree either side
+        of a defer.
+        """
+        deck_id = mw.col.decks.id("Zzq Counts")
+        for i in range(3):
+            note = mw.col.new_note(mw.col.models.by_name("Basic"))
+            note["Front"], note["Back"] = f"Zzq counted {i}", str(i)
+            mw.col.add_note(note, deck_id)
+
+        def counts() -> tuple[int, int, int]:
+            for node in mw.col.sched.deck_due_tree().children:
+                if node.deck_id == deck_id:
+                    return (node.new_count, node.learn_count, node.review_count)
+            raise AssertionError("deck vanished from the due tree")
+
+        card_id = int(mw.col.decks.card_count([deck_id], include_subdecks=False) and
+                      list(mw.col.find_cards(f'deck:"Zzq Counts"'))[0])
+        before = counts()
+        state.deferral.defer(card_id)
+        after = counts()
+        card = mw.col.get_card(card_id)
+        if before != after:
+            raise AssertionError(f"deferring changed the due counts {before} -> {after}")
+        if card.queue < 0:
+            raise AssertionError(f"card was hidden from the queue (queue={card.queue})")
+        if card_id not in set(mw.col.find_cards("is:due")) | set(mw.col.find_cards("is:new")):
+            raise AssertionError("card no longer counts as due/new")
+        state.deferral.undefer(card_id)
+        return {"counts_before": list(before), "counts_after": list(after), "queue": card.queue}
+
+    check("a deferred card stays due and counted (it is not a bury)",
+          _defer_leaves_the_card_due_and_counted)
+
     def _hover_geometry_stable() -> dict[str, Any]:
         """Hovering a header button must change ONLY its background - never
         padding, font, size, or radius. A geometry change on hover shrinks the

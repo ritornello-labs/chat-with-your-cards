@@ -200,21 +200,30 @@ def bring_back_deferred() -> str:
     return "It will be the next card."
 
 
+def _bind_defer_shortcut() -> None:
+    """Bound alongside the other chords so a config edit rebinds all three."""
+    from aqt.qt import QKeySequence, QShortcut
+    from aqt.utils import tooltip
+
+    chord = str(state.config.get("defer_shortcut", DEFER_SHORTCUT))
+    shortcut = QShortcut(QKeySequence(chord), mw)
+    shortcut.activated.connect(lambda: tooltip(defer_current_card()))
+    state.shortcuts.append(shortcut)
+
+
 def _install_defer_entry_points(config: dict[str, Any]) -> None:
     """A chord, a Tools entry, and a right-click item on the card itself -
     the last one is where a reviewer actually looks for a per-card action."""
     from aqt import gui_hooks
-    from aqt.qt import QAction, QKeySequence, QShortcut
+    from aqt.qt import QAction, QKeySequence
     from aqt.utils import tooltip
 
     def run(action: Any) -> None:
         tooltip(action())
 
-    chord = str(config.get("defer_shortcut", DEFER_SHORTCUT))
-    shortcut = QShortcut(QKeySequence(chord), mw)
-    shortcut.activated.connect(lambda: run(defer_current_card))
-    state.shortcuts.append(shortcut)
+    _bind_defer_shortcut()
 
+    chord = str(config.get("defer_shortcut", DEFER_SHORTCUT))
     defer_action = QAction(
         f"Defer this card\t{QKeySequence(chord).toString(QKeySequence.SequenceFormat.NativeText)}",
         mw,
@@ -780,6 +789,13 @@ def _on_config_updated(*_args: Any) -> None:
     # this dict at init; rebinding would leave them reading a stale config.
     state.config.clear()
     state.config.update(merged)
+    # Chords are rebound here, not just read: config.md promises they apply
+    # live, and until now nothing re-registered them.
+    from . import shortcuts as shortcuts_mod
+
+    shortcuts_mod.register_shortcuts(state)
+    if state.deferral is not None:
+        _bind_defer_shortcut()
     desired_side = "left" if merged.get("dock_side") == "left" else "right"
     if state.dock.side != desired_side:
         from .dock import move_dock
