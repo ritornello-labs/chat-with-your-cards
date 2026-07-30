@@ -588,10 +588,12 @@ def build_registry() -> ToolRegistry:
         ),
         ToolSpec(
             "defer_card",
-            "Push a card to later in the CURRENT review session - the user's "
-            "'not this one right now'. It is NOT a bury: the card keeps its "
-            "due date, interval and queue, and simply stops being served for "
-            "a while. The marker expires at the day rollover on its own.",
+            "Set a card aside for later - the user's 'not this one right "
+            "now'. Scheduling (due date, interval, ease, history) is "
+            "untouched, and the change is one native undo away; while set "
+            "aside the card is out of today's queue (a tracked bury) and it "
+            "returns by itself at the next day rollover, or sooner via "
+            "undefer_card.",
             {
                 "type": "object",
                 "properties": {

@@ -1,8 +1,10 @@
-"""Deferring a card to later in the session (task #32).
+"""Setting a card aside (task #32, redesigned 2026-07-29).
 
-The point of the design is what it does NOT do: no bury, no reschedule, no
-scheduling field touched. The persisted half is a marker that expires by
-meaning; the "show it next" half is session-only, as the user asked.
+The invariant that forced the redesign: the backend only answers its own
+queue top ("not at top of queue" on anything else), so a card can only be
+served later by genuinely LEAVING the queue - marker + bury, one undo entry.
+The recall pin floats a card to the true top by transiently parking whatever
+sits ahead of it, released on the next fetch.
 """
 
 from __future__ import annotations
@@ -15,7 +17,11 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from chat_with_your_cards.deferral import MARKER_KEY, DeferralManager  # noqa: E402
+from chat_with_your_cards.deferral import (  # noqa: E402
+    MARKER_KEY,
+    PARK_KEY,
+    DeferralManager,
+)
 
 
 class FakeCard:
@@ -25,123 +31,171 @@ class FakeCard:
         self.queue = 2
         self.due = 5
         self.type = 2
+        self.ivl = 12
+
+
+class FakeSched:
+    def __init__(self, col: "FakeCol") -> None:
+        self.col = col
+        self.today = 7
+        self.buried: list[list[int]] = []
+        self.unburied: list[list[int]] = []
+
+    def bury_cards(self, ids, manual=True):
+        self.buried.append([int(i) for i in ids])
+        for i in ids:
+            self.col.cards[int(i)].queue = -3
+
+    def unbury_cards(self, ids):
+        self.unburied.append([int(i) for i in ids])
+        for i in ids:
+            if int(i) in self.col.cards:
+                self.col.cards[int(i)].queue = 2
+
+    def get_queued_cards(self, fetch_limit=1):
+        entries = [
+            SimpleNamespace(card=SimpleNamespace(id=c.id))
+            for c in self.col.cards.values()
+            if c.queue >= 0
+        ][:fetch_limit]
+        return SimpleNamespace(cards=entries)
 
 
 class FakeCol:
-    def __init__(self, today: int = 7) -> None:
-        self.cards = {1: FakeCard(1), 2: FakeCard(2), 3: FakeCard(3)}
-        self.sched = SimpleNamespace(today=today)
-        self.updated: list[int] = []
+    def __init__(self) -> None:
+        self.cards = {i: FakeCard(i) for i in (1, 2, 3, 4)}
+        self.sched = FakeSched(self)
+        self.undo_entries: list[str] = []
+        self.merges = 0
 
     def get_card(self, card_id: int) -> FakeCard:
         return self.cards[int(card_id)]
 
     def update_card(self, card: FakeCard) -> None:
-        self.updated.append(int(card.id))
+        pass
 
-    def find_cards(self, _query: str) -> list[int]:
-        return list(self.cards)
+    def add_custom_undo_entry(self, name: str) -> int:
+        self.undo_entries.append(name)
+        return len(self.undo_entries)
+
+    def merge_undo_entries(self, target: int) -> None:
+        self.merges += 1
+
+    def find_cards(self, query: str) -> list[int]:
+        # Emulate prop:cdn:<key>=<day> against the fakes' custom_data.
+        if "prop:cdn:" not in query:
+            return []
+        key, _, day = query.split("prop:cdn:")[1].partition("=")
+        out = []
+        for card in self.cards.values():
+            try:
+                data = json.loads(card.custom_data or "{}")
+            except ValueError:
+                continue
+            if str(data.get(key)) == day:
+                out.append(card.id)
+        return out
 
 
-def entry(card_id: int) -> SimpleNamespace:
-    return SimpleNamespace(card=SimpleNamespace(id=card_id))
-
-
-class MarkerTests(unittest.TestCase):
+class DeferTests(unittest.TestCase):
     def setUp(self) -> None:
         self.col = FakeCol()
         self.manager = DeferralManager(lambda: self.col)
 
-    def test_defer_marks_without_touching_scheduling(self) -> None:
-        before = vars(self.col.cards[1]).copy()
+    def test_defer_marks_and_buries_as_one_undo_entry(self) -> None:
+        """One named entry, so Anki's own Cmd+Z reverts marker AND bury at
+        once (the user's requested undo path)."""
         self.manager.defer(1)
         card = self.col.cards[1]
-        self.assertEqual({MARKER_KEY: 7}, json.loads(card.custom_data))
-        # The whole point: Bury/reschedule change these; this must not.
-        for field in ("queue", "due", "type"):
-            self.assertEqual(before[field], getattr(card, field))
+        self.assertEqual(7, json.loads(card.custom_data)[MARKER_KEY])
+        self.assertEqual(-3, card.queue)
+        self.assertEqual(["Set Card Aside"], self.col.undo_entries)
+        self.assertGreaterEqual(self.col.merges, 2)
 
-    def test_marker_is_only_valid_on_the_day_it_was_made(self) -> None:
-        """It expires by MEANING, so there is no cleanup pass to forget."""
+    def test_defer_touches_no_scheduling_field(self) -> None:
+        before = (self.col.cards[1].due, self.col.cards[1].type, self.col.cards[1].ivl)
+        self.manager.defer(1)
+        after = (self.col.cards[1].due, self.col.cards[1].type, self.col.cards[1].ivl)
+        self.assertEqual(before, after)
+
+    def test_marker_expires_by_meaning(self) -> None:
         self.manager.defer(1)
         self.assertTrue(self.manager.is_deferred(self.col.cards[1]))
         self.col.sched.today = 8
         self.assertFalse(self.manager.is_deferred(self.col.cards[1]))
 
-    def test_defer_preserves_other_custom_data(self) -> None:
-        """FSRS keeps its memory state here; clobbering it would be a real bug."""
+    def test_defer_preserves_fsrs_custom_data(self) -> None:
         self.col.cards[1].custom_data = json.dumps({"s": 1.5, "d": 4.2})
         self.manager.defer(1)
         data = json.loads(self.col.cards[1].custom_data)
         self.assertEqual(1.5, data["s"])
         self.assertIn(MARKER_KEY, data)
 
-    def test_undefer_leaves_other_custom_data_behind(self) -> None:
-        self.col.cards[1].custom_data = json.dumps({"s": 1.5})
+    def test_undefer_unburies_and_unmarks(self) -> None:
         self.manager.defer(1)
         self.manager.undefer(1)
-        self.assertEqual({"s": 1.5}, json.loads(self.col.cards[1].custom_data))
+        self.assertEqual(2, self.col.cards[1].queue)
+        self.assertNotIn(MARKER_KEY, self.col.cards[1].custom_data)
 
-    def test_undefer_on_an_untouched_card_writes_nothing(self) -> None:
-        self.manager.undefer(2)
-        self.assertEqual([], self.col.updated)
-
-    def test_unparseable_custom_data_is_not_fatal(self) -> None:
-        self.col.cards[1].custom_data = "not json"
-        self.assertFalse(self.manager.is_deferred(self.col.cards[1]))
-        self.manager.defer(1)
-        self.assertTrue(self.manager.is_deferred(self.col.cards[1]))
+    def test_deferred_ids_come_from_the_synced_marker(self) -> None:
+        self.manager.defer(2)
+        self.assertEqual([2], self.manager.deferred_card_ids())
 
 
-class OrderingTests(unittest.TestCase):
+class RecallPinTests(unittest.TestCase):
     def setUp(self) -> None:
         self.col = FakeCol()
         self.manager = DeferralManager(lambda: self.col)
-        self.entries = [entry(1), entry(2), entry(3)]
 
-    def deferred(self, ids: set[int]):
-        return lambda e: int(e.card.id) in ids
-
-    def test_nothing_deferred_keeps_ankis_own_order(self) -> None:
-        index = self.manager.choose(self.entries, self.deferred(set()))
-        self.assertEqual(0, index)
-
-    def test_the_first_undeferred_card_wins(self) -> None:
-        index = self.manager.choose(self.entries, self.deferred({1, 2}))
-        self.assertEqual(3, self.entries[index].card.id)
-
-    def test_deferred_top_card_is_skipped(self) -> None:
-        index = self.manager.choose(self.entries, self.deferred({1}))
-        self.assertEqual(2, self.entries[index].card.id)
-
-    def test_a_pinned_card_beats_everything(self) -> None:
+    def test_pin_parks_the_cards_ahead_and_only_those(self) -> None:
+        """Floating card 3 must park 1 and 2 (they become buried, marked) and
+        leave 4 alone - the stock fetch then serves 3 as the TRUE top, which
+        is what keeps answering it valid."""
         self.manager.show_next(3)
-        index = self.manager.choose(self.entries, self.deferred(set()))
-        self.assertEqual(3, self.entries[index].card.id)
+        self.manager._before_fetch()
+        self.assertEqual(-3, self.col.cards[1].queue)
+        self.assertEqual(-3, self.col.cards[2].queue)
+        self.assertEqual(2, self.col.cards[3].queue)
+        self.assertEqual(2, self.col.cards[4].queue)
+        self.assertIn(PARK_KEY, self.col.cards[1].custom_data)
+        self.assertIsNone(self.manager.pinned)  # spent
 
-    def test_show_next_clears_the_marker(self) -> None:
-        """Otherwise the card comes back and is skipped the instant it lands."""
-        self.manager.defer(3)
+    def test_next_fetch_releases_the_parked_cards(self) -> None:
         self.manager.show_next(3)
-        self.assertFalse(self.manager.is_deferred(self.col.cards[3]))
+        self.manager._before_fetch()
+        self.manager._before_fetch()  # the fetch AFTER the pinned card
+        self.assertEqual(2, self.col.cards[1].queue)
+        self.assertEqual(2, self.col.cards[2].queue)
+        self.assertNotIn(PARK_KEY, self.col.cards[1].custom_data)
 
-    def test_all_deferred_shows_one_anyway(self) -> None:
-        """The fetch window is a horizon, not infinity. Showing a deferred card
-        beats blanking the reviewer or looping."""
-        index = self.manager.choose(self.entries, self.deferred({1, 2, 3}))
-        self.assertEqual(0, index)
+    def test_crash_healing_releases_marker_only_parks(self) -> None:
+        """A park that survived a crash has the marker but no session memory;
+        the sweep must still release it."""
+        self.manager._mark(self.col, 2, PARK_KEY)
+        self.col.cards[2].queue = -3
+        self.manager._before_fetch()
+        self.assertEqual(2, self.col.cards[2].queue)
+        self.assertNotIn(PARK_KEY, self.col.cards[2].custom_data)
 
-    def test_deferring_the_pinned_card_drops_the_pin(self) -> None:
-        self.manager.show_next(2)
-        self.manager.defer(2)
+    def test_pin_to_an_unreachable_card_is_dropped(self) -> None:
+        self.col.cards[3].queue = -1  # suspended meanwhile
+        self.manager.show_next(3)
+        self.col.cards[3].queue = -1  # undefer's unbury un-buried it; re-hide
+        self.manager._before_fetch()
         self.assertIsNone(self.manager.pinned)
+        self.assertEqual([], self.manager._parked)
 
-    def test_the_pin_is_session_only(self) -> None:
-        """The user asked for exactly this: 'not now' persists, 'show it next'
-        does not."""
-        self.manager.show_next(2)
+    def test_pin_already_on_top_parks_nothing(self) -> None:
+        self.manager.show_next(1)
+        self.manager._before_fetch()
+        self.assertEqual([], self.manager._parked)
+        self.assertEqual(2, self.col.cards[2].queue)
+
+    def test_clear_session_releases_parks(self) -> None:
+        self.manager.show_next(3)
+        self.manager._before_fetch()
         self.manager.clear_session()
-        self.assertIsNone(self.manager.pinned)
+        self.assertEqual(2, self.col.cards[1].queue)
 
 
 if __name__ == "__main__":

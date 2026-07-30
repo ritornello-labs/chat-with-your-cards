@@ -3144,111 +3144,80 @@ def _run_checks() -> dict[str, Any]:
     check("Cmd+Enter accepts and Escape is caught before Anki sees it",
           _keyboard_review_works)
 
-    def _deferring_changes_the_order_not_the_card() -> dict[str, Any]:
-        """Defer/recall through the REAL reviewer (task #32).
+    def _defer_answer_recall_answer() -> dict[str, Any]:
+        """The dogfood failure of 2026-07-29, end to end.
 
-        The whole design rests on one claim: reordering what
-        Reviewer._get_next_v3_card is handed changes which card is shown and
-        NOTHING else. So this drives the real reviewer and checks both sides -
-        the order moved, and the card's scheduling did not.
+        The first defer design reordered only the DISPLAYED queue; the backend
+        answers nothing but its own top ("not at top of queue"), so the card
+        shown after a defer could never be answered and the reviewer wedged.
+        This drives the redesigned flow through the real reviewer and ANSWERS
+        at every step - the half the old checks never did.
         """
-        if state.deferral is None:
-            raise AssertionError("the deferral manager was not installed")
-        deck_id = mw.col.decks.id("Zzq Defer")
+        deck_id = mw.col.decks.id("Zzq Defer2")
         for i in range(5):
             note = mw.col.new_note(mw.col.models.by_name("Basic"))
-            note["Front"], note["Back"] = f"Zzq defer {i}", str(i)
+            note["Front"], note["Back"] = f"Zzq defer2 {i}", str(i)
             mw.col.add_note(note, deck_id)
         mw.col.decks.select(deck_id)
         mw.moveToState("review")
         QTest.qWait(500)
-        if mw.state != "review" or mw.reviewer.card is None:
-            raise AssertionError("could not start a review")
-
         first = int(mw.reviewer.card.id)
         before = mw.col.get_card(first)
-        snapshot = (before.queue, before.due, before.type, before.ivl)
+        sched_before = (before.due, before.type, before.ivl)
 
-        # Defer the card on screen, exactly as the shortcut does.
         addon.defer_current_card()
         QTest.qWait(400)
-        second = int(mw.reviewer.card.id) if mw.reviewer.card else 0
+        second = int(mw.reviewer.card.id)
         if second == first:
-            raise AssertionError("the deferred card is still on screen")
-
-        after = mw.col.get_card(first)
-        if (after.queue, after.due, after.type, after.ivl) != snapshot:
+            raise AssertionError("the set-aside card is still on screen")
+        aside = mw.col.get_card(first)
+        if aside.queue != -3:
+            raise AssertionError(f"expected a tracked bury, queue={aside.queue}")
+        if (aside.due, aside.type, aside.ivl) != sched_before:
+            raise AssertionError("set-aside touched scheduling fields")
+        if not state.deferral.is_deferred(aside):
+            raise AssertionError("marker missing")
+        # Cmd+Z contract: the whole set-aside is ONE named undo step.
+        if mw.col.undo_status().undo != "Set Card Aside":
             raise AssertionError(
-                f"deferring changed the card's scheduling: {snapshot} -> "
-                f"{(after.queue, after.due, after.type, after.ivl)}"
+                f"undo entry is {mw.col.undo_status().undo!r}, not 'Set Card Aside'"
             )
-        if after.queue < 0:
-            raise AssertionError("the card was buried/suspended, not deferred")
 
-        # It must not come back on its own while still deferred...
-        served: list[int] = []
-        for _ in range(3):
-            mw.reviewer.nextCard()
-            QTest.qWait(250)
-            if mw.reviewer.card:
-                served.append(int(mw.reviewer.card.id))
-        if first in served:
-            raise AssertionError(f"a deferred card was served anyway: {served}")
-
-        # ...and asking for it back makes it the NEXT card.
-        state.deferral.show_next(first)
-        mw.reviewer.nextCard()
+        # THE regression: answering the card now on screen must succeed.
+        # (_answerCard no-ops while the QUESTION is up; flip first.)
+        mw.reviewer._showAnswer()
+        QTest.qWait(150)
+        mw.reviewer._answerCard(3)
         QTest.qWait(400)
-        recalled = int(mw.reviewer.card.id) if mw.reviewer.card else 0
-        if recalled != first:
-            raise AssertionError(f"recall did not put it next: got {recalled}, want {first}")
+        third = int(mw.reviewer.card.id)
+        if third in (first, second):
+            raise AssertionError("answer after defer did not advance")
+
+        # Recall: the pin must make it the TRUE top, and answering it must work.
+        addon.undo_defer(first)
+        QTest.qWait(400)
+        if int(mw.reviewer.card.id) != first:
+            raise AssertionError(f"recall did not serve the card: {mw.reviewer.card.id}")
+        mw.reviewer._showAnswer()
+        QTest.qWait(150)
+        mw.reviewer._answerCard(3)
+        QTest.qWait(400)
+        # The parked cards must be back in the pool on the following fetch.
+        parked_still_buried = [
+            int(cid)
+            for cid in mw.col.find_cards("is:buried")
+            if state.deferral._marked_today(mw.col.get_card(cid), "cwycPrk")
+        ]
+        if parked_still_buried:
+            raise AssertionError(f"parked cards not released: {parked_still_buried}")
         return {
-            "deferred": first,
-            "servedWhileDeferred": served,
-            "recalledNext": recalled == first,
-            "schedulingUnchanged": True,
+            "answered_after_defer": third,
+            "recalled_and_answered": first,
+            "scheduling_untouched": True,
         }
 
-    check("deferring reorders the reviewer without touching the card",
-          _deferring_changes_the_order_not_the_card)
-
-    def _defer_leaves_the_card_due_and_counted() -> dict[str, Any]:
-        """Deferring must NOT act like a bury.
-
-        A bury pulls the card out of today's counts; the user's whole point is
-        that it stays due today (user, 2026-07-27: "the card should remain
-        due, in green"). So this compares the deck's own due tree either side
-        of a defer.
-        """
-        deck_id = mw.col.decks.id("Zzq Counts")
-        for i in range(3):
-            note = mw.col.new_note(mw.col.models.by_name("Basic"))
-            note["Front"], note["Back"] = f"Zzq counted {i}", str(i)
-            mw.col.add_note(note, deck_id)
-
-        def counts() -> tuple[int, int, int]:
-            for node in mw.col.sched.deck_due_tree().children:
-                if node.deck_id == deck_id:
-                    return (node.new_count, node.learn_count, node.review_count)
-            raise AssertionError("deck vanished from the due tree")
-
-        card_id = int(mw.col.decks.card_count([deck_id], include_subdecks=False) and
-                      list(mw.col.find_cards('deck:"Zzq Counts"'))[0])
-        before = counts()
-        state.deferral.defer(card_id)
-        after = counts()
-        card = mw.col.get_card(card_id)
-        if before != after:
-            raise AssertionError(f"deferring changed the due counts {before} -> {after}")
-        if card.queue < 0:
-            raise AssertionError(f"card was hidden from the queue (queue={card.queue})")
-        if card_id not in set(mw.col.find_cards("is:due")) | set(mw.col.find_cards("is:new")):
-            raise AssertionError("card no longer counts as due/new")
-        state.deferral.undefer(card_id)
-        return {"counts_before": list(before), "counts_after": list(after), "queue": card.queue}
-
-    check("a deferred card stays due and counted (it is not a bury)",
-          _defer_leaves_the_card_due_and_counted)
+    check("set aside, answer, recall, answer - the full loop works",
+          _defer_answer_recall_answer)
 
     def _defer_on_send_and_undo_from_the_dock() -> dict[str, Any]:
         """The composer-side flow (user, 2026-07-28): with defer-on-send ON,

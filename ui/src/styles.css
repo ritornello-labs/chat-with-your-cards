@@ -628,7 +628,12 @@ body {
   outline-offset: 2px;
 }
 
-.cwyc-composer-input:focus-visible {
+.cwyc-composer-input:focus-visible,
+.cwyc-vim-editor :focus-visible,
+.cwyc-vim-field :focus-visible {
+  /* These editors' FRAMES carry the focus ring via :focus-within; the inner
+     content element must not add a second rectangle inside it (user,
+     2026-07-29: doubled focus box on the vim composer). */
   outline: none;
 }
 

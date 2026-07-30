@@ -6,15 +6,17 @@
   rail and returns focus to the reviewer/deck browser. Otherwise focuses the chat.
 - `new_chat_shortcut` (default `Ctrl+Shift+J`): starts a fresh chat with fresh
   context; focus stays in the message box.
-- `defer_shortcut` (default `Ctrl+Shift+D`): while reviewing, push the card on
-  screen to later in this session — "not this one right now". It is NOT a bury:
-  the card keeps its due date, interval and queue, so it stays due today and a
-  device without this add-on is unaffected. Also on the Tools menu, the
-  reviewer's right-click menu, the dock's "Set aside" button, and available to
-  the assistant as `defer_card`. "Bring back a deferred card" (Tools) makes one
-  the NEXT card. The deferral itself is stored on the card and syncs; the
-  "show it next" part is session-only and is forgotten when Anki closes.
-  Editable in the dock's Settings panel (gear) too.
+- `defer_shortcut` (default `Ctrl+Shift+D`): while reviewing, set the card on
+  screen aside — "not this one right now". Scheduling (due date, interval,
+  ease, history) is untouched, and Anki's own Undo (Cmd+Z) reverts it in one
+  step. While set aside the card is out of today's queue — it is a tracked
+  bury, because Anki's scheduler only ever serves and accepts answers for the
+  top of its own queue, so a card can only be served later by genuinely
+  leaving it. It returns by itself at the next day rollover even if this
+  add-on never runs again, or sooner via "Bring back". The set-aside state
+  syncs (the card is aside on your phone too). Also on the Tools menu, the
+  reviewer's right-click menu, the dock's "Set aside" button, and available
+  to the assistant as `defer_card`. Editable in the Settings panel (gear).
 - `defer_button` (default `true`): show the "Set aside" button by the composer
   while a review card is on screen. Whenever a card is set aside — by the
   button, the chord, the menu, the assistant, or defer-on-send — a transient

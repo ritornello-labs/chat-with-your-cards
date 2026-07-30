@@ -198,9 +198,9 @@ export function SettingsPanel({ store }: { store: ChatStore }) {
             />
           </div>
           <div className="cwyc-setting-footnote">
-            Setting a card aside is not a bury: it stays due today and only moves
-            later in this session&rsquo;s order. An Undo chip appears whenever a
-            card is set aside.
+            A set-aside card leaves today&rsquo;s queue and comes back on its own
+            tomorrow — or sooner via Undo (the chip, or Anki&rsquo;s own Cmd+Z).
+            Its scheduling is untouched.
           </div>
           <div className="cwyc-panel-title cwyc-panel-title-gap">MCP tools (advanced)</div>
           <Toggle
