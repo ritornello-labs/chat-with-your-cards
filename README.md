@@ -5,6 +5,9 @@ of your collection available as context.
 
 ![Chat With Your Cards running in a disposable Anki profile](docs/images/chat-with-your-cards.png)
 
+[Animated tour](https://ritornello.dev/media/ankiweb/2026-07-30/chat-with-your-cards/preview.gif)
+· [MP4 video](https://ritornello.dev/media/ankiweb/2026-07-30/chat-with-your-cards/demo.mp4)
+
 Chat With Your Cards is built for questions that arise while studying: explain
 this card, find related material, inspect the surrounding topic, or propose a
 better note without leaving the reviewer. The agent can search the collection,
