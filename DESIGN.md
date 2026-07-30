@@ -1031,3 +1031,45 @@ trusted is exactly what the sandbox prevents; recurring shapes get promoted
 by the developer into typed product features instead), and a saved-widget
 catalog (premature optimization, decided 2026-07-16 — the agent just
 regenerates; custom_instructions can carry per-user standing requests).
+
+## 19. Setting a card aside: deferral + the set-aside tray (2026-07-29/30)
+
+**The invariant that shaped everything:** Anki's backend answers only its own
+queue top (`InvalidInput "not at top of queue"`), and the scheduler service
+has no skip/pop/reorder API. A display-only reorder is therefore unshippable
+(dogfooded: the swapped-in card could be viewed but never answered, and the
+reviewer wedged). Every community solution converges on the same mechanism —
+so does ours: **defer = a synced `custom_data` day-marker (`cwycDfr`, expires
+by meaning at rollover) + a manual bury, wrapped in ONE named undo entry**
+("Set Card Aside", so native Cmd+Z reverts marker and bury together).
+Scheduling fields are untouched; the card returns by itself at the next day
+rollover on every device (the marker and bury state sync). Recall pins the
+card by transiently parking (`cwycPrk`) whatever sits ahead of it so the
+stock fetch serves it as the genuine backend top; parks release on the next
+fetch and crash-heal via the same-day marker sweep. Honest cost, stated in
+all user-facing copy: while set aside, the card IS out of today's counts.
+
+Rejected alternatives (2026-07-30 review): answering non-top cards by
+reimplementing the FSRS answer path (fragile, breaks undo/sync); `set_due_date`
+re-sorting (no-op for same-day cards, order randomized); cosmetic count
+patches (phones show the truth). Tiered native handling (reposition for new
+cards, intraday due-bump for learning cards) noted as a possible refinement;
+the user chose bury-only for now. The true fix is an upstream rslib defer op.
+
+**The set-aside tray (task #33):** the set-aside cards are a first-class
+primitive, not invisible state. A tray icon with a live count badge in the
+dock header (shown only while non-empty; the transient "Card set aside —
+Undo" chip's label also opens it) flips the dock from the chat thread to a
+full-pane list: each card is a chip with deck (leaf-first) + clamped front
+text, expandable in place to a front/back text preview, with an always-visible
+per-card "Review next" (unbury + pin, the Undo chip's verb) and a header
+"Bring all back" (plain unbury — "all of them next" is not a thing). Chip
+content is stripped text with `[image]`/`[audio]` markers (deferral.py's
+`card_summary`), never a template render — the dock webview must not run
+arbitrary note-type CSS/JS. Python pushes `deferred_list` on ready, on
+request, and after every deferral mutation; `review_state` carries a cached
+cheap count for the badge so no collection-wide `prop:cdn:` search runs per
+question shown. Escape steps out of the tray before it means anything else;
+outside an active review, tray actions `mw.reset()` so stale due counts
+redraw. Newest-set-aside lists first (session order; synced-in unknowns
+last).

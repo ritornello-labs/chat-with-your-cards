@@ -393,18 +393,22 @@ def find_related(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
 
 
 def defer_card(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    """Push a card to later in this review session, without burying it."""
+    """Set a card aside for the rest of today (a tracked manual bury)."""
     manager = getattr(ctx, "deferral", None)
     if manager is None:
         raise ValueError("deferring is unavailable in this session")
     card_id = int(args["card_id"])
     ctx.col.get_card(card_id)  # existence check with a clean error
     manager.defer(card_id)
+    notify = getattr(ctx, "deferral_changed", None)
+    if notify is not None:
+        notify(card_id)
     return {
         "card_id": card_id,
         "deferred": True,
-        "note": "The card keeps its due date and scheduling; it is only moved "
-        "later in this session's order, and the marker expires today.",
+        "note": "Set aside as a tracked manual bury: scheduling untouched, "
+        "out of today's counts until brought back (undefer_card, the user's "
+        "set-aside tray, or automatically at the next day rollover).",
     }
 
 
@@ -418,6 +422,9 @@ def undefer_card(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
         manager.show_next(card_id)
     else:
         manager.undefer(card_id)
+    notify = getattr(ctx, "deferral_changed", None)
+    if notify is not None:
+        notify()
     return {"card_id": card_id, "deferred": False}
 
 

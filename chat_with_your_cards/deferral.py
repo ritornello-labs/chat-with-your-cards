@@ -33,7 +33,9 @@ aqt-free except install(); every failure path falls through to stock Anki.
 
 from __future__ import annotations
 
+import html as html_lib
 import json
+import re
 from typing import Any, Callable
 
 # custom_data keys are capped at 8 bytes by the backend.
@@ -53,6 +55,10 @@ class DeferralManager:
         # fetch. Session memory only - the PARK_KEY marker is the durable
         # record that heals a crash.
         self._parked: list[int] = []
+        # Defer order, oldest -> newest. Session memory: cards set aside on
+        # another device (or before a restart) have no known order and list
+        # after the ones we saw happen.
+        self._order: list[int] = []
         self._original: Callable[[Any], None] | None = None
 
     # ---- marker helpers ----
@@ -92,6 +98,8 @@ class DeferralManager:
         col.merge_undo_entries(target)
         col.sched.bury_cards([int(card_id)], manual=True)
         col.merge_undo_entries(target)
+        self._order = [c for c in self._order if c != int(card_id)]
+        self._order.append(int(card_id))
         if self._pinned == int(card_id):
             self._pinned = None
 
@@ -113,9 +121,11 @@ class DeferralManager:
         return self._marked_today(card, MARKER_KEY)
 
     def deferred_card_ids(self) -> list[int]:
+        """Today's set-aside cards, newest-set-aside FIRST. Cards whose defer
+        we never saw (synced in, or from before a restart) list last."""
         col = self._get_col()
         try:
-            return [
+            found = [
                 int(cid)
                 for cid in col.find_cards(
                     f"prop:cdn:{MARKER_KEY}={col.sched.today}"
@@ -123,6 +133,10 @@ class DeferralManager:
             ]
         except Exception:
             return []
+        rank = {cid: i for i, cid in enumerate(self._order)}
+        # Known cards: newest (highest rank) first, key -i <= 0. Unknown
+        # cards: key 1, i.e. after every known one, stable by id.
+        return sorted(found, key=lambda c: (-rank.get(c, -1) if c in rank else 1, c))
 
     @property
     def pinned(self) -> int | None:
@@ -209,6 +223,72 @@ class DeferralManager:
         col.sched.bury_cards(ahead, manual=True)
         col.merge_undo_entries(target)
         self._parked = ahead
+
+
+# ---- card summaries for the set-aside tray (task #33) ----
+#
+# The tray shows each set-aside card as TEXT (deck + stripped front/back), not
+# a full template render: the dock webview cannot be trusted to run arbitrary
+# note-type CSS/JS, and a snippet is what a "which card was that?" glance
+# needs. Media collapses to explicit markers instead of vanishing silently.
+
+_RE_STYLE = re.compile(r"<(style|script)\b.*?</\1\s*>", re.I | re.S)
+_RE_AV = re.compile(r"\[anki:play:[^\]]*\]|\[sound:[^\]]*\]")
+_RE_IMG = re.compile(r"<img\b[^>]*>", re.I)
+_RE_BREAK = re.compile(r"<(?:br|/div|/p|/li|/tr|/td|/th|/h[1-6])\b[^>]*>", re.I)
+_RE_TAG = re.compile(r"<[^>]+>")
+_RE_ANSWER_HR = re.compile(r"<hr[^>]*\bid\s*=\s*['\"]?answer['\"]?[^>]*>", re.I)
+
+SUMMARY_MAX_CHARS = 600
+
+
+def render_text(html: str) -> str:
+    """Rendered card HTML -> readable plain text with media markers."""
+    text = _RE_STYLE.sub(" ", html or "")
+    text = _RE_AV.sub(" [audio] ", text)
+    text = _RE_IMG.sub(" [image] ", text)
+    text = _RE_BREAK.sub("\n", text)
+    # Inline tags strip to NOTHING (like Anki's own strip_html) - a space
+    # here would split "<b>map</b>:" into "map :". Word-joining across block
+    # boundaries is prevented by the break pass above, not by this one.
+    text = _RE_TAG.sub("", text)
+    text = html_lib.unescape(text)
+    lines = [re.sub(r"[ \t\xa0]+", " ", line).strip() for line in text.split("\n")]
+    text = "\n".join(line for line in lines if line)
+    if len(text) > SUMMARY_MAX_CHARS:
+        text = text[: SUMMARY_MAX_CHARS - 1].rstrip() + "…"
+    return text
+
+
+def card_summary(col: Any, card_id: int) -> dict[str, Any]:
+    """{card_id, deck, front, back} for one card, template-render based with
+    a raw-fields fallback so a broken template still yields a usable chip."""
+    card = col.get_card(int(card_id))
+    try:
+        deck = str(col.decks.name(card.odid or card.did))
+    except Exception:
+        deck = ""
+    try:
+        question = card.question()
+        answer = card.answer()
+        # The rendered answer usually repeats the question above <hr id=answer>;
+        # the tray labels the sides itself, so keep only what follows it.
+        back = _RE_ANSWER_HR.split(answer)[-1]
+        front_text = render_text(question)
+        back_text = render_text(back)
+    except Exception:
+        try:
+            values = list(card.note().values())
+        except Exception:
+            values = []
+        front_text = render_text(values[0] if values else "")
+        back_text = render_text(values[1] if len(values) > 1 else "")
+    return {
+        "card_id": int(card.id),
+        "deck": deck,
+        "front": front_text,
+        "back": back_text,
+    }
 
 
 def _load(card: Any) -> dict[str, Any]:

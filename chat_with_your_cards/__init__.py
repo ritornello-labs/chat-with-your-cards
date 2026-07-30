@@ -125,6 +125,12 @@ class AddonState:
     last_checkpoint: Any = None
     shortcuts: list[Any] = field(default_factory=list)
     web_ready: bool = False
+    # Cached count of today's set-aside cards for the tray badge. None = must
+    # recount (session start, or a state change that may follow a sync /
+    # rollover); mutations refresh it via _push_deferred_list. The cache
+    # exists so _push_review_state (fired on EVERY question shown) does not
+    # run a collection-wide prop:cdn search per card.
+    set_aside_count: Optional[int] = None
     config: dict[str, Any] = field(default_factory=dict)
     # Record-and-push into the chat transcript + webview (set in _setup). Tools
     # use it via _ToolCtx.push_ui to surface UI (e.g. show_image's inline image).
@@ -191,11 +197,7 @@ def defer_current_card() -> str:
     state.deferral.defer(card_id)
     # Move on immediately - the point is to get it off the screen.
     mw.reviewer.nextCard()
-    # The undo chip in the dock hangs off this event ("this card was just
-    # deferred - click to undo"). Pushed, not recorded: it is transient
-    # chrome, not conversation.
-    if state.dock is not None:
-        state.dock.bridge.push({"type": "card_deferred", "card_id": card_id})
+    _notify_deferred(card_id)
     return "Card deferred - it comes back later in this session."
 
 
@@ -206,8 +208,34 @@ def bring_back_deferred() -> str:
     ids = state.deferral.deferred_card_ids()
     if not ids:
         return "No deferred cards."
-    state.deferral.show_next(ids[-1])
+    # deferred_card_ids() lists newest-set-aside first (task #33).
+    state.deferral.show_next(ids[0])
+    _notify_deferred()
     return "It will be the next card."
+
+
+def unbury_all_deferred() -> str:
+    """The tray's "Bring all back": every set-aside card returns to the queue
+    in its natural order (no pin - "all of them next" is not a thing)."""
+    if state.deferral is None or mw.col is None:
+        return "Deferring is unavailable."
+    ids = state.deferral.deferred_card_ids()
+    if not ids:
+        return "No cards are set aside."
+    for cid in ids:
+        state.deferral.undefer(cid)
+    _refresh_after_unbury()
+    _notify_deferred()
+    return "Card brought back." if len(ids) == 1 else f"{len(ids)} cards brought back."
+
+
+def _refresh_after_unbury() -> None:
+    """Mid-card, the next fetch picks unburied cards up by itself; anywhere
+    else (deck list, overview - including the state after finishing a deck)
+    the due counts on screen are now stale, so redraw."""
+    if mw.state == "review" and getattr(mw.reviewer, "card", None) is not None:
+        return
+    mw.reset()
 
 
 def _bind_defer_shortcut() -> None:
@@ -237,22 +265,68 @@ def undo_defer(card_id: int) -> str:
     state.deferral.show_next(int(card_id))
     if mw.state == "review":
         mw.reviewer.nextCard()
+    else:
+        # From the tray outside an active review: the card is unburied and
+        # pinned for when review resumes; redraw the stale due counts now.
+        mw.reset()
+    _notify_deferred()
     return "It's back."
 
 
 def _push_review_state() -> None:
     """Tell the dock whether a review card is on screen, so the composer's
-    "Set aside" button only shows when there is something to set aside."""
+    "Set aside" button only shows when there is something to set aside.
+    Carries the set-aside count for the tray badge (cached - see AddonState)."""
     if state.dock is None:
         return
     card = getattr(mw.reviewer, "card", None) if mw.state == "review" else None
+    count = state.set_aside_count
+    if count is None and state.deferral is not None and mw.col is not None:
+        count = len(state.deferral.deferred_card_ids())
+        state.set_aside_count = count
     state.dock.bridge.push(
         {
             "type": "review_state",
             "reviewing": card is not None,
             "card_id": int(card.id) if card is not None else None,
+            "set_aside_count": int(count or 0),
         }
     )
+
+
+def _deferred_entries() -> list[dict[str, Any]]:
+    """Card summaries for the set-aside tray, newest-set-aside first. A card
+    that fails to summarize entirely is skipped rather than sinking the list."""
+    from .deferral import card_summary
+
+    if state.deferral is None or mw.col is None:
+        return []
+    entries: list[dict[str, Any]] = []
+    for cid in state.deferral.deferred_card_ids():
+        try:
+            entries.append(card_summary(mw.col, cid))
+        except Exception:
+            continue
+    return entries
+
+
+def _push_deferred_list() -> None:
+    if state.dock is None:
+        return
+    entries = _deferred_entries()
+    state.set_aside_count = len(entries)
+    state.dock.bridge.push({"type": "deferred_list", "entries": entries})
+
+
+def _notify_deferred(card_id: int | None = None) -> None:
+    """UI freshness after any deferral mutation: the transient undo chip
+    (when a card was just set aside) plus the tray list and badge count."""
+    if state.dock is None:
+        return
+    if card_id is not None:
+        # Pushed, not recorded: transient chrome, not conversation.
+        state.dock.bridge.push({"type": "card_deferred", "card_id": int(card_id)})
+    _push_deferred_list()
 
 
 def _install_defer_entry_points(config: dict[str, Any]) -> None:
@@ -412,8 +486,15 @@ def _setup() -> None:
             state.controller.push_context_chip()
         _push_review_state()
 
+    def _state_chip(*_args: Any) -> None:
+        # A screen change can follow a sync or day rollover, either of which
+        # moves cards in or out of the set-aside state behind our back - so
+        # the badge count must be recounted, not trusted (task #33).
+        state.set_aside_count = None
+        _chip()
+
     gui_hooks.reviewer_did_show_question.append(_chip)
-    gui_hooks.state_did_change.append(_chip)
+    gui_hooks.state_did_change.append(_state_chip)
 
 
 class _ToolCtx:
@@ -424,6 +505,13 @@ class _ToolCtx:
     @property
     def deferral(self) -> Any:
         return state.deferral
+
+    @property
+    def deferral_changed(self) -> Any:
+        """Tools report deferral mutations here so the dock's undo chip and
+        set-aside tray stay fresh (task #33). Optional by design - tools
+        getattr it, so tests with bare contexts still run."""
+        return _notify_deferred
 
     @property
     def stats(self) -> dict[str, Any] | None:
@@ -624,6 +712,10 @@ def _wire_bridge() -> None:
         "undo_defer",
         lambda msg: _tooltip_result(undo_defer(int(msg.get("card_id", 0)))),
     )
+    # The set-aside tray (task #33): full list on demand, bring-all-back.
+    # Per-card bring-back reuses undo_defer above.
+    bridge.on("get_deferred", lambda _msg: _push_deferred_list())
+    bridge.on("unbury_all_deferred", lambda _msg: _tooltip_result(unbury_all_deferred()))
     bridge.on("cancel", lambda _msg: controller.cancel())
     bridge.on("new_chat", lambda _msg: new_chat())
     bridge.on("toggle_focus", lambda _msg: toggle_chat_focus())
@@ -709,6 +801,11 @@ def _mark_web_ready() -> None:
         state.dock.push_state(animating=False)
     _push_settings()
     _push_collection_meta()
+    _push_review_state()
+    # Seed the tray so its badge and list are right from the first paint,
+    # even for cards set aside earlier today before a restart, or on another
+    # device (the marker syncs; it expires at the day rollover).
+    _push_deferred_list()
     _scan_learning()
     # Optionally reopen the last chat where the user left off (default off:
     # a fresh chat each launch). Runs after the initial UI state is pushed.

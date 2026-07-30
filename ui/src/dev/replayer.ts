@@ -61,10 +61,53 @@ function chopWords(text: string, rand: () => number): string[] {
 
 const devProposals = new Map<string, ProposalPayload>();
 let devReviewCard = 424242;
+
+// The set-aside tray (task #33): a persistent dev list, pre-seeded with the
+// shapes that broke pickers before (deep deck paths, long fronts, media
+// markers), so the tray is visually testable the moment the page loads.
+interface DevAsideEntry {
+  card_id: number;
+  deck: string;
+  front: string;
+  back: string;
+}
+const devAside: DevAsideEntry[] = [
+  {
+    card_id: 424001,
+    deck: "Geography::World::Regions::South America::Brazil::GeoTrainer",
+    front: "Locate on the blank map:\nRio Grande do Norte",
+    back: "[image]\nNortheastern tip of Brazil — capital Natal.",
+  },
+  {
+    card_id: 424002,
+    deck: "Math::Analysis",
+    front:
+      "Why does the order of quantifiers matter in the epsilon-delta definition of a limit, and what would swapping them assert instead?",
+    back: "Delta may depend on epsilon. Swapped, one delta would have to work for every epsilon — forcing f to be locally constant.",
+  },
+  {
+    card_id: 424003,
+    deck: "Chinese::Hanzi",
+    front: "[audio] 学习",
+    back: "xuéxí — to study, to learn",
+  },
+];
+function pushDeferredList(): void {
+  window.chatUI?.dispatch({ type: "deferred_list", entries: [...devAside] });
+}
+function pushReviewState(): void {
+  window.chatUI?.dispatch({
+    type: "review_state",
+    reviewing: true,
+    card_id: devReviewCard,
+    set_aside_count: devAside.length,
+  });
+}
 // The dev preview always "has a review card on screen" so the Set aside chip
 // and the undo flow are reachable by hand.
 window.setTimeout(() => {
-  window.chatUI?.dispatch({ type: "review_state", reviewing: true, card_id: devReviewCard });
+  pushReviewState();
+  pushDeferredList();
 }, 400);
 const devGradings = new Map<string, GradingPayload>();
 
@@ -1128,16 +1171,37 @@ export function installDevReplayer(): void {
       // screen" from load (review_state below); defer_current serves the next
       // fake card and raises the undo chip, exactly like Python.
       case "defer_current": {
+        // Mirror Python's _notify_deferred: the undo chip AND the tray list.
+        devAside.unshift({
+          card_id: devReviewCard,
+          deck: "Math::Analysis",
+          front: `Deferred from the dev reviewer (card ${devReviewCard}).`,
+          back: "It would come back later in this session.",
+        });
         window.chatUI?.dispatch({ type: "card_deferred", card_id: devReviewCard });
         devReviewCard += 1;
-        window.chatUI?.dispatch({ type: "review_state", reviewing: true, card_id: devReviewCard });
+        pushReviewState();
+        pushDeferredList();
         break;
       }
       case "undo_defer": {
-        devReviewCard = Number(msg.card_id) || devReviewCard;
-        window.chatUI?.dispatch({ type: "review_state", reviewing: true, card_id: devReviewCard });
+        const backId = Number(msg.card_id) || devReviewCard;
+        const at = devAside.findIndex((e) => e.card_id === backId);
+        if (at >= 0) devAside.splice(at, 1);
+        devReviewCard = backId;
+        pushReviewState();
+        pushDeferredList();
         break;
       }
+      case "get_deferred":
+        pushDeferredList();
+        break;
+      case "unbury_all_deferred":
+        devAside.length = 0;
+        window.chatUI?.dispatch({ type: "notice", text: "All set-aside cards brought back." });
+        pushReviewState();
+        pushDeferredList();
+        break;
       case "proposal_supersede": {
         const current = devProposals.get(String(msg.id));
         if (!current || current.status !== "pending") break;

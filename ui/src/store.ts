@@ -56,6 +56,7 @@ import type {
   ProposalResolvedEvent,
   GradingEvent,
   GradingPayload,
+  SetAsideEntryPayload,
   ToolCallFinishedEvent,
   ToolCallStartedEvent,
   UsageEvent,
@@ -334,6 +335,14 @@ export interface SetupState {
   readonly platform: string; // "darwin" | "linux" | "windows"
 }
 
+/** One set-aside card as the tray renders it (events.ts SetAsideEntryPayload). */
+export interface SetAsideEntry {
+  readonly cardId: number;
+  readonly deck: string;
+  readonly front: string;
+  readonly back: string;
+}
+
 export interface UiState {
   readonly agent: AgentState;
   readonly openTarget: "terminal" | "desktop";
@@ -354,6 +363,14 @@ export interface UiState {
   /** The just-deferred card behind the transient Undo chip; seq forces the
    *  chip (and its auto-hide timer) to restart on every defer. */
   readonly deferred: { cardId: number; seq: number } | null;
+  /** Which full-pane view the dock shows (task #33): the chat thread, or the
+   *  set-aside tray. Chrome state - survives reset() like the rest of ui.*. */
+  readonly pane: "chat" | "aside";
+  /** Today's set-aside cards, newest first (deferred_list pushes). */
+  readonly setAside: readonly SetAsideEntry[];
+  /** Badge count. Usually setAside.length, but review_state can update it
+   *  alone (cheap count without re-rendering every card summary). */
+  readonly setAsideCount: number;
 }
 
 export const PERMISSION_MODES: readonly { id: string; label: string; hint: string }[] = [
@@ -381,6 +398,9 @@ const DEFAULT_UI_STATE: UiState = {
   activeProposalId: null,
   reviewing: false,
   deferred: null,
+  pane: "chat",
+  setAside: [],
+  setAsideCount: 0,
 };
 
 export interface ChatState {
@@ -605,6 +625,41 @@ export class ChatStore {
     this.emit();
   }
 
+  // ---- the set-aside tray (task #33) ----
+
+  /** Flip the dock to the tray and ask Python for the fresh list (the badge
+   *  count may be ahead of the entries we hold). */
+  openSetAside(): void {
+    if (this.ui.pane !== "aside") {
+      this.ui = { ...this.ui, pane: "aside" };
+      this.emit();
+    }
+    postCommand({ type: "get_deferred" });
+  }
+
+  closeSetAside(): void {
+    if (this.ui.pane === "aside") {
+      this.ui = { ...this.ui, pane: "chat" };
+      this.emit();
+    }
+  }
+
+  toggleSetAside(): void {
+    if (this.ui.pane === "aside") this.closeSetAside();
+    else this.openSetAside();
+  }
+
+  /** Tray per-card action: unbury AND pin as the next card (same verb as the
+   *  transient Undo chip - "I want to review this one now"). */
+  bringBackCard(cardId: number): void {
+    postCommand({ type: "undo_defer", card_id: cardId });
+  }
+
+  /** Tray bulk action: everything returns to the queue, no pin. */
+  bringAllBack(): void {
+    postCommand({ type: "unbury_all_deferred" });
+  }
+
   /** Aim the keyboard at a specific pending proposal (task #21). */
   setActiveProposal(id: string | null): void {
     if (this.ui.activeProposalId === id) return;
@@ -824,11 +879,30 @@ export class ChatStore {
         this.updateProposalPreview(event as { id?: string; previews?: unknown });
         break;
       case "review_state": {
-        const review = event as { reviewing?: boolean };
-        if (this.ui.reviewing !== !!review.reviewing) {
-          this.ui = { ...this.ui, reviewing: !!review.reviewing };
+        const review = event as { reviewing?: boolean; set_aside_count?: number };
+        const count =
+          typeof review.set_aside_count === "number" && review.set_aside_count >= 0
+            ? review.set_aside_count
+            : this.ui.setAsideCount;
+        if (this.ui.reviewing !== !!review.reviewing || this.ui.setAsideCount !== count) {
+          this.ui = { ...this.ui, reviewing: !!review.reviewing, setAsideCount: count };
           this.emit();
         }
+        break;
+      }
+      case "deferred_list": {
+        const raw = (event as { entries?: unknown[] }).entries;
+        const entries: SetAsideEntry[] = (Array.isArray(raw) ? raw : []).map((item) => {
+          const e = item as Partial<SetAsideEntryPayload>;
+          return {
+            cardId: Number(e.card_id ?? 0),
+            deck: String(e.deck ?? ""),
+            front: String(e.front ?? ""),
+            back: String(e.back ?? ""),
+          };
+        });
+        this.ui = { ...this.ui, setAside: entries, setAsideCount: entries.length };
+        this.emit();
         break;
       }
       case "card_deferred": {

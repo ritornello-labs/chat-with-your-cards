@@ -3286,6 +3286,140 @@ def _run_checks() -> dict[str, Any]:
     check("defer-on-send sets the card aside and the Undo chip restores it",
           _defer_on_send_and_undo_from_the_dock)
 
+    def _set_aside_tray_end_to_end() -> dict[str, Any]:
+        """The set-aside tray (task #33), through the REAL DOM: defer two
+        cards, open the tray from the header badge, verify newest-first chips
+        with real deck + front text, expand a preview, bring one back next
+        from its chip, bring the rest back in bulk, and land back in chat."""
+        deck_id = mw.col.decks.id("Zzq Tray")
+        for i in range(4):
+            note = mw.col.new_note(mw.col.models.by_name("Basic"))
+            note["Front"], note["Back"] = f"Zzq tray {i}", f"tray back {i}"
+            mw.col.add_note(note, deck_id)
+        mw.col.decks.select(deck_id)
+        mw.moveToState("review")
+        QTest.qWait(500)
+        first = int(mw.reviewer.card.id)
+        addon.defer_current_card()
+        QTest.qWait(300)
+        second = int(mw.reviewer.card.id)
+        addon.defer_current_card()
+        QTest.qWait(300)
+
+        # The header tray button shows the live badge count.
+        _wait_until(
+            lambda: _eval_js(
+                dock.web,
+                "((document.querySelector('[data-testid=tray-badge]')||{})"
+                ".textContent||'');",
+                DOM_TIMEOUT_MS, "tray badge",
+            ) == "2",
+            DOM_TIMEOUT_MS, "the tray badge to read 2",
+        )
+        _eval_js(
+            dock.web,
+            "(function(){ document.querySelector("
+            "'[data-testid=tray-button]').click(); return true; })();",
+            DOM_TIMEOUT_MS, "open the tray",
+        )
+        _wait_until(
+            lambda: _eval_js(
+                dock.web,
+                "document.querySelectorAll('[data-testid=aside-pane] .cwyc-aside-card').length;",
+                DOM_TIMEOUT_MS, "tray chips",
+            ) == 2,
+            DOM_TIMEOUT_MS, "the tray to list both cards",
+        )
+        # Newest-set-aside first, with the real deck and front text.
+        top_chip = _eval_js(
+            dock.web,
+            "((document.querySelector('.cwyc-aside-card')||{}).textContent||'');",
+            DOM_TIMEOUT_MS, "top chip text",
+        )
+        if "Zzq Tray" not in top_chip:
+            raise AssertionError(f"deck name missing from the chip: {top_chip!r}")
+        second_front = mw.col.get_card(second).note()["Front"]
+        if second_front not in top_chip:
+            raise AssertionError(
+                f"newest-first violated: top chip {top_chip!r} lacks {second_front!r}"
+            )
+        # Expand the preview: the BACK text becomes visible.
+        _eval_js(
+            dock.web,
+            f"(function(){{ document.querySelector("
+            f"'[data-testid=aside-card-{second}]').click(); return true; }})();",
+            DOM_TIMEOUT_MS, "expand the chip",
+        )
+        _wait_until(
+            lambda: "tray back" in _eval_js(
+                dock.web,
+                "(Array.from(document.querySelectorAll('.cwyc-aside-text'))"
+                ".map(function(n){return n.textContent;}).join('|'));",
+                DOM_TIMEOUT_MS, "expanded preview",
+            ),
+            DOM_TIMEOUT_MS, "the expanded preview to show the back",
+        )
+        # Per-chip "Review next": the recalled card must land on screen.
+        _eval_js(
+            dock.web,
+            f"(function(){{ document.querySelector("
+            f"'[data-testid=aside-next-{second}]').click(); return true; }})();",
+            DOM_TIMEOUT_MS, "review next",
+        )
+        _wait_until(
+            lambda: mw.reviewer.card is not None
+            and int(mw.reviewer.card.id) == second,
+            DOM_TIMEOUT_MS, "the recalled card to be served",
+        )
+        _wait_until(
+            lambda: _eval_js(
+                dock.web,
+                "document.querySelectorAll('[data-testid=aside-pane] .cwyc-aside-card').length;",
+                DOM_TIMEOUT_MS, "tray chips after recall",
+            ) == 1,
+            DOM_TIMEOUT_MS, "the tray to drop to one card",
+        )
+        # Bring all back: nothing stays set aside, the empty state shows.
+        _eval_js(
+            dock.web,
+            "(function(){ document.querySelector("
+            "'[data-testid=aside-bring-all]').click(); return true; })();",
+            DOM_TIMEOUT_MS, "bring all back",
+        )
+        _wait_until(
+            lambda: not state.deferral.deferred_card_ids(),
+            DOM_TIMEOUT_MS, "every card to return to the queue",
+        )
+        _wait_until(
+            lambda: _eval_js(
+                dock.web,
+                "document.querySelectorAll('[data-testid=aside-empty]').length;",
+                DOM_TIMEOUT_MS, "empty state",
+            ) == 1,
+            DOM_TIMEOUT_MS, "the tray's empty state",
+        )
+        if mw.col.get_card(first).queue == -3:
+            raise AssertionError("bring-all left the first card buried")
+        # The back button lands in the chat view again.
+        _eval_js(
+            dock.web,
+            "(function(){ document.querySelector("
+            "'[data-testid=aside-back]').click(); return true; })();",
+            DOM_TIMEOUT_MS, "back to chat",
+        )
+        _wait_until(
+            lambda: _eval_js(
+                dock.web,
+                "document.querySelectorAll('[data-testid=aside-pane]').length;",
+                DOM_TIMEOUT_MS, "pane gone",
+            ) == 0,
+            DOM_TIMEOUT_MS, "the chat view to return",
+        )
+        return {"deferred": [first, second], "tray_verified": True}
+
+    check("the set-aside tray lists, previews, recalls and restores",
+          _set_aside_tray_end_to_end)
+
     def _hover_geometry_stable() -> dict[str, Any]:
         """Hovering a header button must change ONLY its background - never
         padding, font, size, or radius. A geometry change on hover shrinks the

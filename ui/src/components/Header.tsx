@@ -149,6 +149,42 @@ export function Header({ store }: { store: ChatStore }) {
           />
         </svg>
       </HeaderButton>
+      {/* The set-aside tray (task #33). Present only while it has contents
+          (or is open): an empty tray is not worth a permanent button, and
+          the transient "Card set aside" chip introduces it at the moment it
+          first becomes non-empty. */}
+      {ui.setAsideCount > 0 || ui.pane === "aside" ? (
+        <button
+          type="button"
+          className={"cwyc-hbtn cwyc-hbtn-tray" + (ui.pane === "aside" ? " cwyc-hbtn-active" : "")}
+          title={
+            ui.pane === "aside"
+              ? "Back to the chat"
+              : `Cards set aside today (${ui.setAsideCount})`
+          }
+          aria-label={`Set-aside tray, ${ui.setAsideCount} card${ui.setAsideCount === 1 ? "" : "s"}`}
+          aria-pressed={ui.pane === "aside"}
+          data-testid="tray-button"
+          onClick={() => store.toggleSetAside()}
+        >
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+            {/* an inbox tray: where the set-aside cards wait */}
+            <path
+              d="M2 9.5V12a1.5 1.5 0 0 0 1.5 1.5h9A1.5 1.5 0 0 0 14 12V9.5M2 9.5h3.2l1 1.6h3.6l1-1.6H14M2 9.5l1.6-5A1.5 1.5 0 0 1 5 3.5h6a1.5 1.5 0 0 1 1.4 1l1.6 5"
+              stroke="currentColor"
+              strokeWidth="1.3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              fill="none"
+            />
+          </svg>
+          {ui.setAsideCount > 0 ? (
+            <span className="cwyc-hbtn-badge" data-testid="tray-badge">
+              {ui.setAsideCount > 9 ? "9+" : ui.setAsideCount}
+            </span>
+          ) : null}
+        </button>
+      ) : null}
 
       <div className="cwyc-header-spacer" />
 

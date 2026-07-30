@@ -20,7 +20,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from chat_with_your_cards.deferral import (  # noqa: E402
     MARKER_KEY,
     PARK_KEY,
+    SUMMARY_MAX_CHARS,
     DeferralManager,
+    card_summary,
+    render_text,
 )
 
 
@@ -141,6 +144,21 @@ class DeferTests(unittest.TestCase):
         self.manager.defer(2)
         self.assertEqual([2], self.manager.deferred_card_ids())
 
+    def test_deferred_ids_list_newest_first(self) -> None:
+        """The tray shows the most recently set-aside card on top, and
+        bring_back_deferred takes ids[0] as "newest" - same contract."""
+        self.manager.defer(2)
+        self.manager.defer(4)
+        self.manager.defer(1)
+        self.assertEqual([1, 4, 2], self.manager.deferred_card_ids())
+
+    def test_unknown_order_cards_list_after_known_ones(self) -> None:
+        """A card whose defer this session never saw (synced in, or from
+        before a restart) still lists - after the ones we ordered."""
+        self.manager.defer(3)
+        self.manager._mark(self.col, 1, MARKER_KEY)  # marker, no session order
+        self.assertEqual([3, 1], self.manager.deferred_card_ids())
+
 
 class RecallPinTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -196,6 +214,73 @@ class RecallPinTests(unittest.TestCase):
         self.manager._before_fetch()
         self.manager.clear_session()
         self.assertEqual(2, self.col.cards[1].queue)
+
+
+class RenderableCard(FakeCard):
+    """A fake with just enough surface for card_summary (task #33)."""
+
+    def __init__(self, card_id: int, question: str, answer: str, did: int = 7) -> None:
+        super().__init__(card_id)
+        self.did = did
+        self.odid = 0
+        self._q = question
+        self._a = answer
+
+    def question(self) -> str:
+        return self._q
+
+    def answer(self) -> str:
+        return self._a
+
+
+class SummaryTests(unittest.TestCase):
+    """render_text / card_summary: what the set-aside tray shows (task #33)."""
+
+    def test_render_text_strips_markup_and_marks_media(self) -> None:
+        html = (
+            "<style>.card{color:red}</style>"
+            '<div>Locate on the <b>blank map</b>:</div>'
+            '<img src="br.png"> [sound:xuexi.mp3] [anki:play:q:0]'
+            "&nbsp;Rio&nbsp;Grande"
+        )
+        text = render_text(html)
+        self.assertNotIn("<", text)
+        self.assertNotIn("color:red", text)
+        self.assertIn("Locate on the blank map:", text)
+        self.assertIn("[image]", text)
+        self.assertIn("[audio]", text)
+        self.assertIn("Rio Grande", text)
+
+    def test_render_text_caps_length(self) -> None:
+        text = render_text("word " * 500)
+        self.assertLessEqual(len(text), SUMMARY_MAX_CHARS)
+        self.assertTrue(text.endswith("…"))
+
+    def test_card_summary_splits_the_answer_at_the_hr(self) -> None:
+        col = FakeCol()
+        col.decks = SimpleNamespace(name=lambda did: "Math::Analysis")
+        card = RenderableCard(
+            9,
+            "Define the limit of f at a.",
+            "Define the limit of f at a.<hr id=answer>For every epsilon...",
+        )
+        col.cards[9] = card
+        summary = card_summary(col, 9)
+        self.assertEqual("Math::Analysis", summary["deck"])
+        self.assertEqual("Define the limit of f at a.", summary["front"])
+        self.assertEqual("For every epsilon...", summary["back"])
+        self.assertNotIn("Define the limit", summary["back"])
+
+    def test_card_summary_survives_a_broken_template(self) -> None:
+        col = FakeCol()
+        col.decks = SimpleNamespace(name=lambda did: "Deck")
+        card = RenderableCard(9, "", "")
+        card.question = lambda: (_ for _ in ()).throw(RuntimeError("boom"))  # type: ignore[method-assign]
+        card.note = lambda: SimpleNamespace(values=lambda: ["Raw front", "Raw back"])  # type: ignore[attr-defined]
+        col.cards[9] = card
+        summary = card_summary(col, 9)
+        self.assertEqual("Raw front", summary["front"])
+        self.assertEqual("Raw back", summary["back"])
 
 
 if __name__ == "__main__":

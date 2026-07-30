@@ -73,7 +73,20 @@ export function DeferredUndoChip({ store }: { store: ChatStore }) {
   if (!deferred) return null;
   return (
     <div className="cwyc-deferred-undo" data-testid="deferred-undo" role="status">
-      <span className="cwyc-deferred-undo-text">Card set aside</span>
+      {/* The label doubles as the door to the tray (task #33): the moment a
+          card was just set aside is exactly when "where did it go?" arises. */}
+      <button
+        type="button"
+        className="cwyc-deferred-undo-text"
+        data-testid="deferred-undo-view"
+        title="See every card set aside today"
+        onClick={() => {
+          store.openSetAside();
+          store.dismissDeferredNotice();
+        }}
+      >
+        Card set aside
+      </button>
       <button
         type="button"
         className="cwyc-chip"

@@ -4,6 +4,7 @@ import { Thread } from "./Thread";
 import { useKeyboardReview } from "./hooks/useKeyboardReview";
 import { Header } from "./components/Header";
 import { Rail } from "./components/Rail";
+import { SetAsidePane } from "./components/SetAsidePane";
 import { UsageFooter } from "./components/UsageFooter";
 import type { ChatStore } from "./store";
 
@@ -79,7 +80,9 @@ function Shell({ store }: { store: ChatStore }) {
     >
       <div className="cwyc-full" style={pinWidth !== undefined ? { width: pinWidth } : undefined}>
         <Header store={store} />
-        <Thread store={store} />
+        {/* The set-aside tray (task #33) replaces the thread, not the shell:
+            header, notices and footer stay put so it reads as a view flip. */}
+        {ui.pane === "aside" ? <SetAsidePane store={store} /> : <Thread store={store} />}
         <NoticeStrip store={store} />
         <Footer store={store} />
       </div>

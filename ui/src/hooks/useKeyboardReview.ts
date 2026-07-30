@@ -59,6 +59,12 @@ export function useKeyboardReview(store: ChatStore): void {
         if (inVimEditor(event.target) || popoverOpen()) return;
         event.preventDefault();
         event.stopPropagation(); // beat AnkiWebView's bubble-phase pycmd("close")
+        // The set-aside tray is a view the user stepped INTO; Escape steps
+        // back out before it means anything to the wider dock (task #33).
+        if (store.getSnapshot().ui.pane === "aside") {
+          store.closeSetAside();
+          return;
+        }
         if (store.getSnapshot().isRunning) store.cancel();
         else postCommand({ type: "focus_reviewer" });
         return;

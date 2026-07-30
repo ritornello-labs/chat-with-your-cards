@@ -175,6 +175,8 @@ export interface ReviewStateEvent {
   type: "review_state";
   reviewing: boolean;
   card_id: number | null;
+  /** Today's set-aside card count, for the tray badge (task #33). */
+  set_aside_count?: number;
 }
 
 /** A card was just deferred (shortcut, menu, send-with-defer-on, or the
@@ -182,6 +184,23 @@ export interface ReviewStateEvent {
 export interface CardDeferredEvent {
   type: "card_deferred";
   card_id: number;
+}
+
+/** One set-aside card as the tray shows it (__init__.py's _deferred_entries
+ *  via deferral.py's card_summary): stripped text, media as [image]/[audio]
+ *  markers, newest-set-aside first. */
+export interface SetAsideEntryPayload {
+  card_id: number;
+  deck: string;
+  front: string;
+  back: string;
+}
+
+/** The full set-aside list (task #33): pushed on ready, on get_deferred, and
+ *  after every deferral mutation, so the tray and its badge never go stale. */
+export interface DeferredListEvent {
+  type: "deferred_list";
+  entries: SetAsideEntryPayload[];
 }
 
 export interface GradingCardSummary {
@@ -396,6 +415,7 @@ export type KnownChatEvent =
   | PreviewUpdateEvent
   | ReviewStateEvent
   | CardDeferredEvent
+  | DeferredListEvent
   | LedgerEvent
   | GradingEvent
   | UsageEvent

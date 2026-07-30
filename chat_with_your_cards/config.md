@@ -21,7 +21,11 @@
   while a review card is on screen. Whenever a card is set aside — by the
   button, the chord, the menu, the assistant, or defer-on-send — a transient
   "Card set aside — Undo" chip appears; Undo unmarks it and puts it straight
-  back on screen.
+  back on screen. Every card set aside today is listed in the **set-aside
+  tray**: a tray icon with a count badge appears in the dock's header (also
+  reachable from the chip's "Card set aside" label), showing each card with
+  its deck and front text, expandable to a front/back preview, with per-card
+  "Review next" and a "Bring all back" button.
 - `defer_on_send` (default `false`): set the on-screen card aside automatically
   every time you send a message, so you can keep reviewing other cards while
   the assistant thinks about the one you asked about. The "Set aside" button
