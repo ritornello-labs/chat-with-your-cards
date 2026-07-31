@@ -108,9 +108,100 @@ function useSmartPanel(open: boolean) {
   };
 }
 
+/** Per-operation-class behavior for the "What happens in this mode?"
+ *  disclosure (#26). PRESENTATION of verified behavior only - the carve-outs
+ *  are hardcoded in proposals.py/grading.py; this table just stops them
+ *  being invisible. Keep in sync with _finish_submission (bulk & deck ops
+ *  auto-apply under trusted), the auto-accept creations+grading cap,
+ *  delete_notes (trusted_only, always confirmed) and submit_skill_update
+ *  (always confirmed). */
+const OPERATION_MATRIX: readonly { name: string; by: Record<string, string> }[] = [
+  {
+    name: "Reads",
+    by: {
+      "ask-each-read": "Each needs your OK",
+      "read-only": "Free",
+      default: "Free",
+      "auto-accept": "Free",
+      "trusted-writes": "Free",
+    },
+  },
+  {
+    name: "New notes",
+    by: {
+      "ask-each-read": "Review card",
+      "read-only": "Not offered",
+      default: "Review card",
+      "auto-accept": "Instant, capped per chat",
+      "trusted-writes": "Instant, session budget",
+    },
+  },
+  {
+    name: "Note edits & bulk sweeps",
+    by: {
+      "ask-each-read": "Review card",
+      "read-only": "Not offered",
+      default: "Review card",
+      "auto-accept": "Review card",
+      "trusted-writes": "Instant, session budget",
+    },
+  },
+  {
+    name: "Cards, tags & scheduling",
+    by: {
+      "ask-each-read": "Review card",
+      "read-only": "Not offered",
+      default: "Review card",
+      "auto-accept": "Review card",
+      "trusted-writes": "Instant, session budget",
+    },
+  },
+  {
+    name: "Decks & structure",
+    by: {
+      "ask-each-read": "Review card",
+      "read-only": "Not offered",
+      default: "Review card",
+      "auto-accept": "Review card",
+      "trusted-writes": "Instant, session budget",
+    },
+  },
+  {
+    name: "Grading (Again)",
+    by: {
+      "ask-each-read": "Confirmation chip",
+      "read-only": "Not offered",
+      default: "Confirmation chip",
+      "auto-accept": "Instant, same cap",
+      "trusted-writes": "Instant, session budget",
+    },
+  },
+  {
+    name: "Deleting notes",
+    by: {
+      "ask-each-read": "Not offered",
+      "read-only": "Not offered",
+      default: "Not offered",
+      "auto-accept": "Not offered",
+      "trusted-writes": "Always confirmed + backup",
+    },
+  },
+  {
+    name: "Skill updates",
+    by: {
+      "ask-each-read": "Review card",
+      "read-only": "Not offered",
+      default: "Review card",
+      "auto-accept": "Review card",
+      "trusted-writes": "Review card",
+    },
+  },
+];
+
 export function ModeChip({ store }: { store: ChatStore }) {
   const { ui } = useChatState(store);
   const [open, setOpen] = useState(false);
+  const [detail, setDetail] = useState(false);
   const ref = useDismiss(open, () => setOpen(false));
   const panel = useSmartPanel(open);
   const current = PERMISSION_MODES.find((m) => m.id === ui.agent.mode) ?? PERMISSION_MODES[2];
@@ -127,22 +218,58 @@ export function ModeChip({ store }: { store: ChatStore }) {
         {current.label}
       </button>
       {open ? (
-        <div className={panel.panelClass} style={panel.panelStyle} ref={panel.panelRef} role="menu">
+        <div
+          className={panel.panelClass + " cwyc-panel-mode"}
+          style={panel.panelStyle}
+          ref={panel.panelRef}
+          role="menu"
+        >
           <div className="cwyc-panel-title">Permission mode</div>
-          {PERMISSION_MODES.map((mode) => (
-            <button
-              key={mode.id}
-              type="button"
-              className={"cwyc-menu-item" + (mode.id === ui.agent.mode ? " cwyc-active" : "")}
-              onClick={() => {
-                store.setPermissionMode(mode.id);
-                setOpen(false);
-              }}
-            >
-              <span className="cwyc-menu-label">{mode.label}</span>
-              <span className="cwyc-menu-hint">{mode.hint}</span>
-            </button>
-          ))}
+          {/* One ladder, most restrictive at the top (#26). The rail marks
+              the ordering; the matrix below explains the hardcoded per-class
+              carve-outs that used to be invisible. */}
+          <div className="cwyc-mode-ladder">
+            {PERMISSION_MODES.map((mode) => (
+              <button
+                key={mode.id}
+                type="button"
+                className={"cwyc-menu-item" + (mode.id === ui.agent.mode ? " cwyc-active" : "")}
+                onClick={() => {
+                  store.setPermissionMode(mode.id);
+                  setOpen(false);
+                }}
+              >
+                <span className="cwyc-ladder-dot" aria-hidden="true" />
+                <span className="cwyc-menu-label">{mode.label}</span>
+                <span className="cwyc-menu-hint">{mode.hint}</span>
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="cwyc-mode-detail-toggle"
+            data-testid="mode-detail-toggle"
+            aria-expanded={detail}
+            onClick={() => setDetail((d) => !d)}
+          >
+            {detail ? "Hide details" : `What happens under ${current.label}?`}
+          </button>
+          {detail ? (
+            <div className="cwyc-mode-matrix" data-testid="mode-matrix">
+              {OPERATION_MATRIX.map((row) => (
+                <div className="cwyc-mode-matrix-row" key={row.name}>
+                  <span className="cwyc-mode-matrix-op">{row.name}</span>
+                  <span className="cwyc-mode-matrix-val">
+                    {row.by[current.id] ?? "Review card"}
+                  </span>
+                </div>
+              ))}
+              <div className="cwyc-mode-matrix-note">
+                Shell &amp; file access is a separate axis — the agent-tools
+                chip next to this one.
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

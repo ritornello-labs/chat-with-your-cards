@@ -1619,6 +1619,91 @@ body {
   position: relative;
 }
 
+/* Permission ladder + per-class matrix (#26). The rail marks the
+   restrictive -> permissive ordering; the matrix names the operation
+   classes whose carve-outs are hardcoded in Python. */
+.cwyc-panel-mode {
+  min-width: 300px;
+}
+
+.cwyc-mode-ladder {
+  position: relative;
+}
+
+.cwyc-mode-ladder::before {
+  content: "";
+  position: absolute;
+  left: 13px;
+  top: 12px;
+  bottom: 12px;
+  width: 2px;
+  background: var(--cwyc-border);
+  border-radius: 1px;
+}
+
+#cwyc-root .cwyc-mode-ladder .cwyc-menu-item {
+  position: relative;
+  padding-left: 26px;
+}
+
+.cwyc-ladder-dot {
+  position: absolute;
+  left: 9px;
+  top: 13px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--cwyc-border);
+  background: var(--cwyc-bg);
+}
+
+#cwyc-root .cwyc-mode-ladder .cwyc-active .cwyc-ladder-dot {
+  border-color: var(--cwyc-accent);
+  background: var(--cwyc-accent);
+}
+
+.cwyc-mode-detail-toggle {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px 10px;
+  border: none;
+  border-top: 1px solid var(--cwyc-border);
+  background: none;
+  color: var(--cwyc-accent);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cwyc-mode-matrix {
+  padding: 4px 10px 8px;
+  font-size: 12px;
+}
+
+.cwyc-mode-matrix-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 0;
+}
+
+.cwyc-mode-matrix-op {
+  color: var(--cwyc-text-dim);
+}
+
+.cwyc-mode-matrix-val {
+  text-align: right;
+}
+
+.cwyc-mode-matrix-note {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--cwyc-border);
+  color: var(--cwyc-text-dim);
+  font-size: 11px;
+}
+
 .cwyc-preview-expand {
   position: absolute;
   right: 8px;

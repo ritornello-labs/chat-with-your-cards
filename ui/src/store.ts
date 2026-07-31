@@ -373,12 +373,25 @@ export interface UiState {
   readonly setAsideCount: number;
 }
 
+/** The permission ladder, most restrictive first (#26). Hints describe
+ *  OPERATION CLASSES, not "cards"/"notes" everywhere - and they describe
+ *  verified behavior: under trusted, note writes, bulk sweeps AND deck &
+ *  structure ops all auto-apply within the shared session budget (deletes
+ *  and skill updates always need explicit confirmation, in every mode). */
 export const PERMISSION_MODES: readonly { id: string; label: string; hint: string }[] = [
   { id: "ask-each-read", label: "Ask each read", hint: "Every tool call needs your OK" },
-  { id: "read-only", label: "Read-only", hint: "No write tools offered at all" },
-  { id: "default", label: "Propose", hint: "Reads free; writes as review cards" },
-  { id: "auto-accept", label: "Auto-accept", hint: "New notes and grading apply instantly (capped)" },
-  { id: "trusted-writes", label: "Trusted writes", hint: "Writes apply under a session budget" },
+  { id: "read-only", label: "Read-only", hint: "Change tools not offered at all" },
+  { id: "default", label: "Propose", hint: "Reads free; changes as review cards" },
+  {
+    id: "auto-accept",
+    label: "Auto-accept",
+    hint: "New notes & grading apply instantly (capped per chat); other changes still get review",
+  },
+  {
+    id: "trusted-writes",
+    label: "Trusted writes",
+    hint: "Changes apply instantly under a session budget; deletes & skill updates still need you",
+  },
 ];
 
 const EMPTY_PINS: PinsState = { deck: "", note_type: "", tags: [], fields: {} };
