@@ -58,6 +58,18 @@ MAX_TAGS_PER_OP = 10
 # Scheduling writes (#6). Anki's set_due_date grammar: "n" days from today,
 # "n-m" a random day in that range, trailing "!" also sets the interval.
 SCHEDULING_OPS = {"set_due_date", "forget_cards", "reposition_new_cards"}
+
+# Per-deck study limits (#25). These live on the DECK object, not the options
+# preset, so set_deck_options structurally cannot reach them. Tool arg name ->
+# deck-dict key; the *_today values self-expire at the next day rollover
+# (stored as {"limit": n, "today": day}).
+DECK_LIMIT_KEYS = {
+    "new_limit_today": "newLimitToday",
+    "review_limit_today": "reviewLimitToday",
+    "new_limit": "newLimit",
+    "review_limit": "reviewLimit",
+}
+MAX_DECK_LIMIT = 100_000
 _DUE_DATE_RE = re.compile(r"^\d+(-\d+)?!?$")
 # Every field the three ops can touch, captured per card at apply time so
 # revert is an exact update_card restore - including the new->review
@@ -1638,6 +1650,109 @@ class ProposalManager:
             warnings=warnings,
         )
 
+    @staticmethod
+    def _limit_display(raw: Any, today: int) -> str:
+        """Human text for a deck-limit value: today-only dicts show expiry."""
+        if raw is None:
+            return "(none)"
+        if isinstance(raw, dict):
+            limit = raw.get("limit")
+            return (
+                f"{limit} (today)"
+                if int(raw.get("today", -1)) == today
+                else f"{limit} (expired)"
+            )
+        return str(raw)
+
+    def submit_set_deck_limits(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Per-deck limits (#25): today-only overrides + permanent caps.
+
+        The one Study Triage action worth having ("Set Today's New Cards to
+        0") plus Custom Study's increase-limits. Today-only values expire at
+        the next rollover, so risk is low; -1 clears an override.
+        """
+        col = self._col()
+        deck_name = str(args.get("deck", "")).strip()
+        did, deck = self._deck_by_name(col, deck_name)
+        if deck.get("dyn"):
+            raise ProposalError("filtered decks have no per-deck limits")
+        changes: dict[str, int] = {}
+        for limit_field in DECK_LIMIT_KEYS:
+            if limit_field not in args or args[limit_field] is None:
+                continue
+            value = int(args[limit_field])
+            if value < -1 or value > MAX_DECK_LIMIT:
+                raise ProposalError(
+                    f"{limit_field} must be 0-{MAX_DECK_LIMIT}, or -1 to clear "
+                    f"the override; got {value}"
+                )
+            changes[limit_field] = value
+        if not changes:
+            raise ProposalError(
+                "nothing to change - pass at least one of "
+                + ", ".join(DECK_LIMIT_KEYS)
+            )
+        include_subdecks = bool(args.get("include_subdecks", False))
+        names = [deck_name]
+        skipped_filtered = 0
+        if include_subdecks:
+            for name in self._deck_names(col):
+                if not name.startswith(deck_name + "::"):
+                    continue
+                _did, child = self._deck_by_name(col, name)
+                if child.get("dyn"):
+                    skipped_filtered += 1
+                    continue
+                names.append(name)
+        today = int(col.sched.today)
+        samples: list[str] = []
+        for name in names[: MAX_SAMPLES + 1]:
+            _d, target = self._deck_by_name(col, name)
+            for limit_field, value in changes.items():
+                old = self._limit_display(target.get(DECK_LIMIT_KEYS[limit_field]), today)
+                new = "(none)" if value == -1 else str(value)
+                if limit_field.endswith("_today") and value != -1:
+                    new += " (today only)"
+                samples.append(f'"{name}" {limit_field}: {old} → {new}')
+        if len(names) > MAX_SAMPLES + 1:
+            samples.append(f"… and {len(names) - MAX_SAMPLES - 1} more deck(s)")
+        warnings: list[str] = []
+        if any(f.endswith("_today") for f in changes):
+            warnings.append(
+                "today-only limits expire on their own at the next day rollover"
+            )
+        children_exist = any(
+            n.startswith(deck_name + "::") for n in self._deck_names(col)
+        )
+        if children_exist and not include_subdecks:
+            raising = any(
+                not f.endswith("_today") or v > 0 for f, v in changes.items()
+            )
+            note = (
+                "v3 scheduler: a parent deck's limit caps its whole subtree, "
+                "so 0 here silences the subdecks too"
+            )
+            if raising:
+                note += (
+                    "; RAISING limits may still be capped by each subdeck's "
+                    "own limit (include_subdecks raises those as well)"
+                )
+            warnings.append(note)
+        if skipped_filtered:
+            warnings.append(
+                f"{skipped_filtered} filtered subdeck(s) have no limits and "
+                "were skipped"
+            )
+        return self._deck_op_proposal(
+            op="set_deck_limits",
+            op_args={"decks": names, "changes": changes},
+            deck=deck_name,
+            rationale=str(args.get("rationale", "")),
+            samples=samples,
+            count=len(names) * len(changes),
+            warnings=warnings,
+        )
+
     def submit_create_filtered_deck(self, args: dict[str, Any]) -> dict[str, Any]:
         col = self._col()
         name = str(args.get("name", "")).strip()
@@ -2780,6 +2895,40 @@ class ProposalManager:
                         },
                     )
                 )
+            elif proposal.op == "set_deck_limits":
+                today = int(col.sched.today)
+                limit_priors: dict[str, dict[str, Any]] = {}
+                for name in a["decks"]:
+                    try:
+                        _did, deck = self._deck_by_name(col, name)
+                    except ProposalError:
+                        continue  # deck renamed/removed since submit
+                    if deck.get("dyn"):
+                        continue
+                    prior: dict[str, Any] = {}
+                    for field, value in a["changes"].items():
+                        key = DECK_LIMIT_KEYS[field]
+                        prior[field] = deck.get(key)
+                        if int(value) == -1:
+                            deck[key] = None
+                        elif field.endswith("_today"):
+                            deck[key] = {"limit": int(value), "today": today}
+                        else:
+                            deck[key] = int(value)
+                    col.decks.save(deck)
+                    limit_priors[name] = prior
+                if not limit_priors:
+                    raise ProposalError("none of those decks exist anymore")
+                self._ledger.append(
+                    LedgerEntry(
+                        id=proposal.id,
+                        kind="deck_op",
+                        note_id=0,
+                        label=f'deck limits for "{a["decks"][0]}"'
+                        + (f" +{len(limit_priors) - 1} subdecks" if len(limit_priors) > 1 else ""),
+                        data={"op": "set_deck_limits", "priors": limit_priors},
+                    )
+                )
             elif proposal.op == "create_filtered_deck":
                 name = a["name"]
                 if self._find_deck_id(col, name) is not None:
@@ -3637,6 +3786,15 @@ class ProposalManager:
                     node, leaf = self._resolve_option(conf, path)
                     node[leaf] = prior
                 col.decks.update_config(conf)
+            elif op == "set_deck_limits":
+                for name, prior in entry.data["priors"].items():
+                    try:
+                        _did, deck = self._deck_by_name(col, name)
+                    except ProposalError:
+                        continue  # deck gone; nothing to restore
+                    for field, raw in prior.items():
+                        deck[DECK_LIMIT_KEYS[field]] = raw
+                    col.decks.save(deck)
             elif op == "create_filtered_deck":
                 # Removing a filtered deck returns its cards to their home
                 # decks with scheduling intact - the safe inverse of create.

@@ -40,6 +40,25 @@ def get_deck_info(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
         "card_count": len(list(col.find_cards(f'deck:"{escaped}"'))),
         "subdecks": [n for n in all_names if n.startswith(name + "::")],
     }
+    if not deck.get("dyn"):
+        # Per-deck limits (#25) live on the deck, not the preset; today-only
+        # entries carry the day they apply to and expire at rollover.
+        today = int(col.sched.today)
+
+        def limit_value(raw: Any) -> Any:
+            if isinstance(raw, dict):
+                active = int(raw.get("today", -1)) == today
+                return {"limit": raw.get("limit"), "active_today": active}
+            return raw
+
+        info["deck_limits"] = {
+            "new_limit": deck.get("newLimit"),
+            "review_limit": deck.get("reviewLimit"),
+            "new_limit_today": limit_value(deck.get("newLimitToday")),
+            "review_limit_today": limit_value(deck.get("reviewLimitToday")),
+            "note": "per-deck overrides (set_deck_limits); null = preset "
+            "value applies",
+        }
     if info["filtered"]:
         info["terms"] = [
             {"search": t[0], "limit": t[1], "order": t[2]}
@@ -63,6 +82,10 @@ def get_deck_info(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
             "e.g. 'new.perDay' or 'rev.perDay'",
         }
     return info
+
+
+def set_deck_limits(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    return ctx.proposals.submit_set_deck_limits(args)
 
 
 def create_deck(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
@@ -184,6 +207,53 @@ def register_deck_tools(registry: ToolRegistry) -> None:
                 "required": ["deck", "options"],
             },
             set_deck_options,
+            writes=True,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            "set_deck_limits",
+            "Per-DECK study limits, separate from the options preset: "
+            "today-only overrides that expire at the next day rollover, and "
+            "permanent per-deck caps. THE tool for 'no new cards just for "
+            "today' (new_limit_today=0) and 'let me do 60 extra reviews "
+            "today' (review_limit_today above the preset). -1 clears an "
+            "override. v3 note: a parent's limit caps its whole subtree, so "
+            "zeroing the parent alone silences it; RAISING limits may need "
+            "include_subdecks since each child's own limit still applies. "
+            "Revertible.",
+            {
+                "type": "object",
+                "properties": {
+                    "deck": {"type": "string", "description": "Full deck path"},
+                    "new_limit_today": {
+                        "type": "integer",
+                        "minimum": -1,
+                        "description": "Today's new-card cap; 0 = no new "
+                        "cards today; -1 clears",
+                    },
+                    "review_limit_today": {
+                        "type": "integer",
+                        "minimum": -1,
+                        "description": "Today's review cap; -1 clears",
+                    },
+                    "new_limit": {
+                        "type": "integer",
+                        "minimum": -1,
+                        "description": "Permanent per-deck new cap "
+                        "(overrides the preset); -1 clears",
+                    },
+                    "review_limit": {
+                        "type": "integer",
+                        "minimum": -1,
+                        "description": "Permanent per-deck review cap; -1 clears",
+                    },
+                    "include_subdecks": {"type": "boolean", "default": False},
+                    "rationale": {"type": "string"},
+                },
+                "required": ["deck"],
+            },
+            set_deck_limits,
             writes=True,
         )
     )

@@ -1833,6 +1833,85 @@ class CardStateTests(unittest.TestCase):
         self.assertIn("clear the flag on 3 card(s)", manager._ledger[-1].label)
 
 
+class DeckLimitsTests(unittest.TestCase):
+    """Per-deck limits (#25): today-only overrides + permanent caps, on the
+    DECK object (not the preset), with -1 clearing and subtree cascade."""
+
+    def _setup(self):
+        manager, col, pushed = make_manager()
+        col.decks._add("Focus")
+        col.decks._add("Focus::Child")
+        col.decks._add("Focus::Cram", dyn=True)
+        return manager, col, pushed
+
+    def test_validation(self) -> None:
+        manager, col, pushed = self._setup()
+        with self.assertRaisesRegex(ProposalError, "nothing to change"):
+            manager.submit_set_deck_limits({"deck": "Focus"})
+        with self.assertRaisesRegex(ProposalError, "-1 to clear"):
+            manager.submit_set_deck_limits({"deck": "Focus", "new_limit_today": -2})
+        with self.assertRaisesRegex(ProposalError, "filtered decks"):
+            manager.submit_set_deck_limits(
+                {"deck": "Focus::Cram", "new_limit_today": 0}
+            )
+
+    def test_today_zero_apply_and_revert(self) -> None:
+        manager, col, pushed = self._setup()
+        result = manager.submit_set_deck_limits(
+            {"deck": "Focus", "new_limit_today": 0}
+        )
+        proposal = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertTrue(any("expire on their own" in w for w in proposal["warnings"]))
+        self.assertTrue(
+            any("caps its whole subtree" in w for w in proposal["warnings"])
+        )
+        manager.accept({"id": result["proposal_id"]})
+        deck = col.decks.get(col.decks.id_for_name("Focus"))
+        self.assertEqual({"limit": 0, "today": 0}, deck["newLimitToday"])
+        manager.revert({"id": result["proposal_id"]})
+        deck = col.decks.get(col.decks.id_for_name("Focus"))
+        self.assertIsNone(deck.get("newLimitToday"))
+
+    def test_subdecks_cascade_skips_filtered(self) -> None:
+        manager, col, pushed = self._setup()
+        result = manager.submit_set_deck_limits(
+            {
+                "deck": "Focus",
+                "review_limit_today": 60,
+                "include_subdecks": True,
+            }
+        )
+        proposal = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertTrue(any("filtered subdeck" in w for w in proposal["warnings"]))
+        self.assertEqual(2, proposal["count"])  # Focus + Child, one field each
+        manager.accept({"id": result["proposal_id"]})
+        for name in ("Focus", "Focus::Child"):
+            deck = col.decks.get(col.decks.id_for_name(name))
+            self.assertEqual({"limit": 60, "today": 0}, deck["reviewLimitToday"])
+        cram = col.decks.get(col.decks.id_for_name("Focus::Cram"))
+        self.assertIsNone(cram.get("reviewLimitToday"))
+        manager.revert({"id": result["proposal_id"]})
+        for name in ("Focus", "Focus::Child"):
+            deck = col.decks.get(col.decks.id_for_name(name))
+            self.assertIsNone(deck.get("reviewLimitToday"))
+
+    def test_permanent_limit_and_clear(self) -> None:
+        manager, col, pushed = self._setup()
+        first = manager.submit_set_deck_limits({"deck": "Focus", "review_limit": 200})
+        manager.accept({"id": first["proposal_id"]})
+        deck = col.decks.get(col.decks.id_for_name("Focus"))
+        self.assertEqual(200, deck["reviewLimit"])
+        cleared = manager.submit_set_deck_limits({"deck": "Focus", "review_limit": -1})
+        proposal = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertIn("200 → (none)", proposal["samples"][0]["text"])
+        manager.accept({"id": cleared["proposal_id"]})
+        deck = col.decks.get(col.decks.id_for_name("Focus"))
+        self.assertIsNone(deck.get("reviewLimit"))
+        manager.revert({"id": cleared["proposal_id"]})
+        deck = col.decks.get(col.decks.id_for_name("Focus"))
+        self.assertEqual(200, deck["reviewLimit"])
+
+
 class SchedulingTests(unittest.TestCase):
     """Set Due Date / Forget / Reposition (#6): loud before/after samples,
     full-field prior capture, exact update_card restore on revert."""

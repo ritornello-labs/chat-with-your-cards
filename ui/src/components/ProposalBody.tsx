@@ -23,6 +23,7 @@ const OP_LABELS: Record<string, string> = {
   create_deck: "Create deck",
   rename_deck: "Rename deck",
   set_deck_options: "Deck options",
+  set_deck_limits: "Deck limits",
   create_filtered_deck: "Create filtered deck",
   update_filtered_deck: "Rebuild filtered deck",
   filtered_deck_action: "Filtered deck",
@@ -54,6 +55,7 @@ const COUNT_NOUNS: Record<string, [string, string]> = {
   set_due_date: ["card", "cards"],
   forget_cards: ["card", "cards"],
   reposition_new_cards: ["card", "cards"],
+  set_deck_limits: ["change", "changes"],
   find_replace: ["note", "notes"],
   rename_tag: ["note", "notes"],
   // skill_update counts the OBSERVED EDITS behind the suggestion, not notes.

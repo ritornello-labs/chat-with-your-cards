@@ -402,6 +402,51 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
 
     check("scheduling set-due/forget/reposition apply+revert (real v3)", _scheduling_flow)
 
+    def _deck_limits_flow() -> dict[str, Any]:
+        """Per-deck limits (#25) on the real deck objects: a today-zero new
+        limit lands as {limit, today}, cascade covers the child, revert
+        clears, and get_deck_info reads the values back."""
+        col = mw.col
+        col.decks.id("ProbeLimits::Child")  # creates parent + child
+        result = proposals.submit_set_deck_limits(
+            {
+                "deck": "ProbeLimits",
+                "new_limit_today": 0,
+                "review_limit": 321,
+                "include_subdecks": True,
+            }
+        )
+        proposals.accept({"id": result["proposal_id"]})
+        today = int(col.sched.today)
+        for name in ("ProbeLimits", "ProbeLimits::Child"):
+            deck = col.decks.get(col.decks.id_for_name(name))
+            if deck.get("newLimitToday") != {"limit": 0, "today": today}:
+                raise AssertionError(
+                    f"today limit wrong on {name}: {deck.get('newLimitToday')}"
+                )
+            if deck.get("reviewLimit") != 321:
+                raise AssertionError(f"review limit wrong on {name}")
+
+        addon = importlib.import_module(ADDON_PACKAGE)
+        from chat_with_your_cards.tools import build_registry
+
+        info = build_registry().call(
+            addon._ToolCtx(), "get_deck_info", {"deck": "ProbeLimits"}
+        )
+        limits = info.get("deck_limits") or {}
+        if limits.get("review_limit") != 321:
+            raise AssertionError(f"get_deck_info missed the limits: {limits}")
+        if limits.get("new_limit_today") != {"limit": 0, "active_today": True}:
+            raise AssertionError(f"today limit not marked active: {limits}")
+
+        proposals.revert({"id": result["proposal_id"]})
+        deck = col.decks.get(col.decks.id_for_name("ProbeLimits"))
+        if deck.get("newLimitToday") is not None or deck.get("reviewLimit") is not None:
+            raise AssertionError("deck-limits revert did not clear the overrides")
+        return {"decks": 2}
+
+    check("per-deck limits set/read/revert (real deck objects)", _deck_limits_flow)
+
     def _change_set() -> dict[str, Any]:
         ids = [_new_note(f"cs {i}", back="orig") for i in range(3)]
         cs = proposals.open_change_set({"title": "probe sweep"})
