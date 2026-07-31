@@ -153,6 +153,41 @@ function previewSrcdoc(side: string, css: string | null | undefined): string {
  * reduced-motion guard). Edits default to the interesting side (After);
  * creations start front-up like a real card on the desk.
  */
+/** The flip preview plus the large-window launcher (#2): the in-card
+ *  preview is a small square, and complex cards need room. Desktop opens a
+ *  resizable QDialog rendering through the same ephemeral templates. */
+function PreviewZone({
+  previews,
+  onExpand,
+}: {
+  previews: PreviewsPayload;
+  onExpand: () => void;
+}) {
+  return (
+    <div className="cwyc-preview-zone">
+      <PreviewFlip previews={previews} />
+      <button
+        type="button"
+        className="cwyc-preview-expand"
+        data-testid="proposal-open-preview"
+        title="Open in a large resizable window"
+        aria-label="Open large preview window"
+        onClick={onExpand}
+      >
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path
+            d="M9.5 2.5h4v4M13.5 2.5 9 7M6.5 13.5h-4v-4M2.5 13.5 7 9"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
 function PreviewFlip({ previews }: { previews: PreviewsPayload }) {
   const faces = useMemo(() => {
     if (previews.before && previews.after) {
@@ -380,7 +415,16 @@ function SharedCreateProposalCard({ data, store }: ProposalCardProps) {
       className={"cwyc-interaction-card" + (isActive ? " cwyc-proposal-active" : "")}
       error={data.errorMessage}
       renderBlock={(block) => {
-        if (block.type === "card_preview" && previews) return <PreviewFlip previews={previews} />;
+        if (block.type === "card_preview" && previews) {
+          // This route has no field-draft state; {} makes Python fall back
+          // to the proposal's own values (#2).
+          return (
+            <PreviewZone
+              previews={previews}
+              onExpand={() => store.openPreviewWindow(data.id, {})}
+            />
+          );
+        }
         // The schema's key_value block is read-only by definition; swap in the
         // editable destination rather than pushing editability upstream into a
         // vocabulary that is shared with other hosts.
@@ -518,7 +562,12 @@ function LegacyProposalCard({ data, store }: ProposalCardProps) {
         </div>
       ))}
 
-      {previews ? <PreviewFlip previews={previews} /> : null}
+      {previews ? (
+        <PreviewZone
+          previews={previews}
+          onExpand={() => store.openPreviewWindow(data.id, values)}
+        />
+      ) : null}
 
       {!editableFields ? (
         <ProposalBody data={data} />

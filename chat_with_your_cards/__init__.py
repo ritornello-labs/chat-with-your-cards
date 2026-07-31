@@ -731,6 +731,21 @@ def _wire_bridge() -> None:
     bridge.on("proposal_readd", proposals.readd)
     bridge.on("proposal_restore", proposals.restore)
     bridge.on("proposal_preview", proposals.preview_request)
+
+    def _open_proposal_preview(msg: dict[str, Any]) -> None:
+        # The large preview window (#2): render through the same ephemeral
+        # path as the in-card preview, then hand off to the Qt dialog.
+        previews = proposals.render_for_window(
+            str(msg.get("id", "")), msg.get("fields") or None
+        )
+        if not previews:
+            _tooltip_result("Nothing to preview for this proposal")
+            return
+        from .preview_window import show_preview
+
+        show_preview("Proposal preview — Chat With Your Cards", previews)
+
+    bridge.on("proposal_preview_window", _open_proposal_preview)
     grading = state.grading
     assert grading is not None
     bridge.on("grading_accept", grading.accept)

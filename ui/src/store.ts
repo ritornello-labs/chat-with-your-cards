@@ -556,6 +556,12 @@ export class ChatStore {
     postCommand({ type: "proposal_preview", id, fields });
   }
 
+  /** Open the proposal in the large resizable preview window (#2). Carries
+   *  the current draft fields so the big window matches the in-card state. */
+  openPreviewWindow(id: string, fields: Record<string, string>): void {
+    postCommand({ type: "proposal_preview_window", id, fields });
+  }
+
   rejectProposal(id: string): void {
     postCommand({ type: "proposal_reject", id });
   }

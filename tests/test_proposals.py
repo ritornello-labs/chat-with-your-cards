@@ -75,6 +75,24 @@ class FakeNote:
     def cards(self) -> list[FakeCard]:
         return self._cards
 
+    def ephemeral_card(self, ord_: int = 0) -> Any:
+        # Minimal mirror of Note.ephemeral_card: renders {{Front}} / {{Back}}
+        # through the note's current values, so preview tests assert on real
+        # content instead of only "a push happened".
+        question = self._fields.get("Front", "")
+        answer = question + "<hr id=answer>" + self._fields.get("Back", "")
+
+        class _Output:
+            question_text = question
+            answer_text = answer
+
+        class _Card:
+            @staticmethod
+            def render_output() -> Any:
+                return _Output()
+
+        return _Card()
+
 
 class _NamedId:
     def __init__(self, name: str, id_: int = 0) -> None:

@@ -43,6 +43,7 @@ include = [
     "keys.py",
     "transcripts.py",
     "proposals.py",
+    "preview_window.py",
     "media_staging.py",
     "contract.py",
     "invariants.py",

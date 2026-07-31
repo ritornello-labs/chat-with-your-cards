@@ -3369,6 +3369,38 @@ class ProposalManager:
         if proposal.note_id is not None:
             self._after_write([proposal.note_id])
 
+    def render_for_window(
+        self, proposal_id: str, fields: dict[str, Any] | None = None
+    ) -> dict[str, Any] | None:
+        """Previews for the large preview window (#2, route B).
+
+        Same renderers as preview_request, but RETURNED instead of pushed:
+        the caller hands them to preview_window.show_preview on the main
+        thread. `fields` carries the card's in-progress draft so the big
+        window shows what the user is editing, not the stale submission;
+        without a draft it falls back to the proposal's own values.
+        """
+        proposal = self._proposals.get(str(proposal_id))
+        if proposal is None:
+            return None
+        edited = {str(k): str(v) for k, v in (fields or {}).items()}
+        try:
+            col = self._col()
+            if proposal.kind == "create":
+                model = col.models.by_name(proposal.note_type)
+                if model is None:
+                    return None
+                return self._render_create_fields(
+                    col, model, edited or dict(proposal.fields)
+                )
+            if proposal.kind == "edit":
+                return self._render_edit_live(
+                    col, proposal, edited or dict(proposal.fields)
+                )
+        except Exception:
+            return None
+        return None  # bulk/deck/skill kinds have no card to render
+
     def preview_request(self, msg: dict[str, Any]) -> None:
         """Re-render a proposal's card preview from the user's in-progress
         edits, so the live card reflects what they are typing."""

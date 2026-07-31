@@ -1613,6 +1613,41 @@ body {
   margin-left: 0.35em;
 }
 
+/* Large-preview launcher (#2): a quiet corner affordance over the flip
+   preview - visible on hover/focus, out of the way otherwise. */
+.cwyc-preview-zone {
+  position: relative;
+}
+
+.cwyc-preview-expand {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--cwyc-border);
+  border-radius: 7px;
+  background: var(--cwyc-bg);
+  color: var(--cwyc-text-dim);
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+
+.cwyc-preview-zone:hover .cwyc-preview-expand,
+.cwyc-preview-expand:focus-visible {
+  opacity: 1;
+}
+
+.cwyc-preview-expand:hover {
+  color: var(--cwyc-accent);
+}
+
 .cwyc-field-input {
   width: 100%;
   border: 1px solid var(--cwyc-border);

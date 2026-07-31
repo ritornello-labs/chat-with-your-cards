@@ -1241,6 +1241,14 @@ export function installDevReplayer(): void {
         });
         break;
       }
+      case "proposal_preview_window":
+        // Desktop Anki opens a resizable QDialog here (#2); the browser
+        // harness can only prove the command fired.
+        window.chatUI?.dispatch({
+          type: "notice",
+          text: "Desktop Anki opens the large preview window here.",
+        });
+        break;
       case "proposal_revise": {
         const current = devProposals.get(String(msg.id));
         if (!current) break;

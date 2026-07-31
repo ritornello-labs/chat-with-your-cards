@@ -447,6 +447,50 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
 
     check("per-deck limits set/read/revert (real deck objects)", _deck_limits_flow)
 
+    def _preview_window_flow() -> dict[str, Any]:
+        """#2's large preview against real Qt: render_for_window over a real
+        pending create proposal, the dialog opens with an AnkiWebView and
+        face buttons, and reopening replaces the singleton."""
+        from aqt.qt import QPushButton
+        from aqt.webview import AnkiWebView
+
+        from chat_with_your_cards import preview_window
+
+        result = proposals.submit_create(
+            {
+                "note_type": "Basic",
+                "deck": "ProbePreview",
+                "fields": {"Front": "big preview front", "Back": "big back"},
+                "tags": [],
+            }
+        )
+        previews = proposals.render_for_window(result["proposal_id"])
+        if not previews or not previews.get("after"):
+            raise AssertionError(f"render_for_window returned {previews}")
+        if "big preview front" not in str(previews["after"].get("question", "")):
+            raise AssertionError(f"rendered question missing the field: {previews}")
+        dialog = preview_window.show_preview("probe preview", previews)
+        if dialog is None:
+            raise AssertionError("show_preview returned no dialog")
+        QTest.qWait(300)
+        if dialog.findChild(AnkiWebView) is None:
+            raise AssertionError("preview dialog has no AnkiWebView")
+        labels = {b.text() for b in dialog.findChildren(QPushButton)}
+        if not {"Front", "Back", "Close"} <= labels:
+            raise AssertionError(f"face buttons missing: {labels}")
+        replacement = preview_window.show_preview("probe preview 2", previews)
+        QTest.qWait(150)
+        if replacement is dialog:
+            raise AssertionError("singleton did not open a fresh dialog")
+        replacement.close()
+        QTest.qWait(150)
+        if preview_window._open_dialog is not None:
+            raise AssertionError("closing did not clear the singleton")
+        proposals.reject({"id": result["proposal_id"]})
+        return {"buttons": sorted(labels)}
+
+    check("large preview window opens over a real proposal (#2)", _preview_window_flow)
+
     def _change_set() -> dict[str, Any]:
         ids = [_new_note(f"cs {i}", back="orig") for i in range(3)]
         cs = proposals.open_change_set({"title": "probe sweep"})
