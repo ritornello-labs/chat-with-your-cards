@@ -242,6 +242,12 @@ def build_system_prompt(
         "(compact deck/tag overview); deck_tree, tag_tree, "
         "collection_stats drill down."
     )
+    # One compact nudge: the 4000-char ceiling test leaves no room for a
+    # tour - the tool descriptions themselves carry the detail.
+    parts.append(
+        "\nDon't guess stats: get_study_stats, get_due_forecast, "
+        "get_card_history."
+    )
     # The user's own per-install instructions (config `custom_instructions`),
     # verbatim and clearly attributed so the agent treats them as operator
     # policy, not card content. Kept last so it reads as the final word. Length

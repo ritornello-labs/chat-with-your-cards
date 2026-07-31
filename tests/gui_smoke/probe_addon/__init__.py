@@ -1114,6 +1114,77 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
 
     check("reviewer refresh after edit (real review state)", _reviewer_refresh)
 
+    def _statistics_tools() -> dict[str, Any]:
+        """#5's read-only stats stack against the real backend. find_dupes
+        and media.check crash in the bare anki library (no i18n/hooks), so
+        only this probe can prove them; deck_due_tree and card_stats_data
+        are backend calls worth confirming on 25.09 too."""
+        addon = importlib.import_module(ADDON_PACKAGE)
+        from chat_with_your_cards.tools import build_registry
+
+        registry = build_registry()
+        ctx = addon._ToolCtx()
+        col = mw.col
+
+        stats = registry.call(ctx, "get_study_stats", {"days": 3650})
+        real_total = int(col.db.scalar("select count() from cards"))
+        if stats["card_states"]["total"] != real_total:
+            raise AssertionError(
+                f"card_states total {stats['card_states']['total']} != {real_total}"
+            )
+        # The grading flow above answered real cards, so reviews must show.
+        if stats["reviews"]["total"] <= 0:
+            raise AssertionError(f"no reviews visible in study stats: {stats['reviews']}")
+        if "total" not in stats["true_retention"]:
+            raise AssertionError(f"true_retention malformed: {stats['true_retention']}")
+
+        due = registry.call(ctx, "get_deck_due_counts", {"include_empty": True})
+        if not any(row["cards_in_deck"] > 0 for row in due["decks"]):
+            raise AssertionError(f"deck due counts saw no cards in {due['total_decks']} decks")
+
+        forecast = registry.call(ctx, "get_due_forecast", {"days": 5})
+        if len(forecast["daily"]) != 5:
+            raise AssertionError(f"forecast malformed: {forecast}")
+
+        graded_cid = int(col.db.scalar("select cid from revlog limit 1"))
+        history = registry.call(ctx, "get_card_history", {"card_id": graded_cid})
+        if history["revlog_total"] < 1:
+            raise AssertionError(f"card history empty for graded card: {history}")
+        if history["revlog"][0]["button"] not in ("again", "hard", "good", "easy"):
+            raise AssertionError(f"revlog button not decoded: {history['revlog'][0]}")
+
+        _new_note("dupe front stats", deck="ProbeStats", back="a")
+        _new_note("dupe front stats", deck="ProbeStats", back="b")
+        dupes = registry.call(
+            ctx, "find_duplicates", {"field": "Front", "search": 'deck:"ProbeStats"'}
+        )
+        pair = next((g for g in dupes["groups"] if g["note_count"] == 2), None)
+        if pair is None:
+            raise AssertionError(f"find_duplicates missed the seeded pair: {dupes}")
+
+        media_dir = Path(col.media.dir())
+        (media_dir / "zz-stats-orphan.png").write_bytes(_PNG_1PX)
+        _new_note(
+            "missing media probe",
+            deck="ProbeStats",
+            back='<img src="zz-stats-missing.png">',
+        )
+        media = registry.call(ctx, "check_media", {})
+        if "zz-stats-missing.png" not in media["missing"]:
+            raise AssertionError(f"check_media missed the missing ref: {media['missing'][:5]}")
+        if "zz-stats-orphan.png" not in media["unused"]:
+            raise AssertionError(f"check_media missed the orphan: {media['unused'][:5]}")
+
+        return {
+            "reviews": stats["reviews"]["total"],
+            "decks": due["total_decks"],
+            "history_entries": history["revlog_total"],
+            "dupe_groups": dupes["groups_total"],
+            "missing_media": media["missing_count"],
+        }
+
+    check("statistics tools against the real backend (#5)", _statistics_tools)
+
 
 def _note_exists(note_id: int) -> bool:
     assert mw is not None
