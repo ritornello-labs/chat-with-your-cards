@@ -3,7 +3,9 @@
 An AI chat dock inside Anki, with the card you are reviewing and the structure
 of your collection available as context.
 
-![Chat With Your Cards running in a disposable Anki profile](docs/images/chat-with-your-cards.png)
+[![Chat With Your Cards opening beside Anki](https://ritornello.dev/media/ankiweb/2026-07-31-v2/chat-with-your-cards/preview.gif)](https://ritornello.dev/media/ankiweb/2026-07-31-v2/chat-with-your-cards/demo.mp4)
+
+[Browse the development-preview gallery](https://ritornello.dev/#chat-with-your-cards).
 
 Chat With Your Cards is built for questions that arise while studying: explain
 this card, find related material, inspect the surrounding topic, or propose a
