@@ -80,9 +80,20 @@ function Shell({ store }: { store: ChatStore }) {
     >
       <div className="cwyc-full" style={pinWidth !== undefined ? { width: pinWidth } : undefined}>
         <Header store={store} />
-        {/* The set-aside tray (task #33) replaces the thread, not the shell:
-            header, notices and footer stay put so it reads as a view flip. */}
-        {ui.pane === "aside" ? <SetAsidePane store={store} /> : <Thread store={store} />}
+        {/* The set-aside tray (task #33) is an OVERLAY on the thread, never a
+            replacement: swapping components unmounted the whole assistant-ui
+            transcript, and remounting a real session (KaTeX, mermaid, proposal
+            previews, widget iframes) cost half a second of blocked main thread
+            per flip in a 12-message harness - seconds in real use (dogfood
+            2026-07-30, "the tray is super slow"). The thread stays mounted
+            and keeps its scroll; `inert` takes it out of focus order and the
+            accessibility tree while covered. */}
+        <div className="cwyc-main">
+          <div className="cwyc-thread-host" inert={ui.pane === "aside"}>
+            <Thread store={store} />
+          </div>
+          {ui.pane === "aside" ? <SetAsidePane store={store} /> : null}
+        </div>
         <NoticeStrip store={store} />
         <Footer store={store} />
       </div>

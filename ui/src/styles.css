@@ -3329,9 +3329,27 @@ body {
   pointer-events: none;
 }
 
-.cwyc-aside {
+/* The flex middle slot: the thread lives here permanently, and the tray
+   overlays it absolutely (never unmounting the transcript - see App.tsx). */
+.cwyc-main {
   flex: 1 1 auto;
   min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.cwyc-thread-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.cwyc-aside {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  background: var(--cwyc-bg);
   display: flex;
   flex-direction: column;
   padding: 10px 12px 8px;
