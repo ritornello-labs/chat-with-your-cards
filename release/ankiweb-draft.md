@@ -13,16 +13,6 @@ The dock stays inside Anki and supports ordinary chat, card explanations,
 collection tools, reversible proposals, and explicit approval for changes.
 Destructive operations use Anki-native undo and backup safeguards.
 
-![Real Chat With Your Cards proposal flow captured in Anki](https://ritornello.dev/media/ankiweb/2026-07-31/chat-with-your-cards/preview.gif)
-
-![Explaining a reviewer card](https://ritornello.dev/media/ankiweb/2026-07-31/chat-with-your-cards/gallery-01.png)
-
-![Reviewing a proposed collection change](https://ritornello.dev/media/ankiweb/2026-07-31/chat-with-your-cards/gallery-02.png)
-
-![The assistant rail beside a live review card](https://ritornello.dev/media/ankiweb/2026-07-31/chat-with-your-cards/gallery-03.png)
-
-[Watch the full Chat With Your Cards interaction (MP4)](https://ritornello.dev/media/ankiweb/2026-07-31/chat-with-your-cards/demo.mp4)
-
 GitHub: [https://github.com/ritornello-labs/chat-with-your-cards](https://github.com/ritornello-labs/chat-with-your-cards)
 
 This listing is prepared as a development preview. Do not submit it until the
