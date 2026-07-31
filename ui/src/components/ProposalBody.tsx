@@ -26,12 +26,22 @@ const OP_LABELS: Record<string, string> = {
   create_filtered_deck: "Create filtered deck",
   update_filtered_deck: "Rebuild filtered deck",
   filtered_deck_action: "Filtered deck",
+  suspend_cards: "Suspend cards",
+  unsuspend_cards: "Unsuspend cards",
+  bury_cards: "Bury cards",
+  unbury_cards: "Unbury cards",
+  set_card_flag: "Flag cards",
 };
 
 /** What `count` counts - "400 item(s)" says less than nothing. Keyed by op,
  *  then by kind for the proposals that carry no op. */
 const COUNT_NOUNS: Record<string, [string, string]> = {
   move_cards: ["card", "cards"],
+  suspend_cards: ["card", "cards"],
+  unsuspend_cards: ["card", "cards"],
+  bury_cards: ["card", "cards"],
+  unbury_cards: ["card", "cards"],
+  set_card_flag: ["card", "cards"],
   find_replace: ["note", "notes"],
   rename_tag: ["note", "notes"],
   // skill_update counts the OBSERVED EDITS behind the suggestion, not notes.

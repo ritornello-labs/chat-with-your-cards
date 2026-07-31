@@ -401,6 +401,36 @@ function bulkProposalScript(): Step[] {
   ];
 }
 
+/** card-state bulk op (#3): headline sample + card labels + honest warnings,
+ *  exactly the payload shape proposals.py's submit_card_state pushes. */
+function suspendProposalScript(): Step[] {
+  const id = nextProposalId("q");
+  return [
+    { kind: "text", text: "These leeches are eating your reviews - park them:\n\n" },
+    {
+      kind: "proposal",
+      proposal: baseProposal({
+        id,
+        kind: "bulk",
+        op: "suspend_cards",
+        op_args: { query: 'deck:"Math::Analysis" tag:leech' },
+        rationale: "These leeches have 8+ lapses each; suspending stops the churn while we rework them.",
+        count: 12,
+        samples: [
+          { text: "Suspend 12 card(s) matching 'deck:\"Math::Analysis\" tag:leech'" },
+          { text: "Cauchy sequence" },
+          { text: "Uniform continuity" },
+          { text: "Heine-Borel" },
+        ],
+        warnings: [
+          "2 of these card(s) are already suspended (no change)",
+          "1 card(s) sit in a filtered deck; this returns them to their home deck, and undo will not re-add them to the filtered deck",
+        ],
+      }),
+    },
+  ];
+}
+
 /** delete: the blast radius, by name. */
 function deleteProposalScript(): Step[] {
   const id = nextProposalId("d");
@@ -762,6 +792,7 @@ function selectScript(userText: string): Step[] {
   if (text.includes("grade") || text.includes("fail") || text.includes("again")) return gradingScript();
   if (text.includes("tag")) return tagEditProposalScript();
   if (text.includes("bulk") || text.includes("replace")) return bulkProposalScript();
+  if (text.includes("suspend") || text.includes("flag")) return suspendProposalScript();
   if (text.includes("delete")) return deleteProposalScript();
   if (text.includes("collect") || text.includes("change set")) return openChangeSetScript();
   if (text.includes("skill")) return skillProposalScript();

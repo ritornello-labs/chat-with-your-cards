@@ -28,6 +28,32 @@ DEFAULT_AUTO_ACCEPT_CAP = 20
 DEFAULT_WRITE_BUDGET = 200
 MAX_SAMPLES = 5
 
+# Card-state bulk ops (#3): op name -> proposal-card verb. Suspend/bury are
+# scheduler queue changes; flags are the cards' 3-bit user flag.
+CARD_STATE_OPS = {
+    "suspend_cards": "Suspend",
+    "unsuspend_cards": "Unsuspend",
+    "bury_cards": "Bury",
+    "unbury_cards": "Unbury",
+    "set_card_flag": "Flag",
+}
+FLAG_NAMES = {
+    0: "no flag",
+    1: "Red",
+    2: "Orange",
+    3: "Green",
+    4: "Blue",
+    5: "Pink",
+    6: "Turquoise",
+    7: "Purple",
+}
+# Explicit id lists ride in op_args, which ships verbatim to the UI payload -
+# a query is the right vehicle for anything bigger.
+MAX_EXPLICIT_CARD_IDS = 2000
+# Per-card inspection cap at submit (no-op / filtered-deck warnings). Purely
+# advisory: accept captures true prior state per card regardless of size.
+CARD_STATE_INSPECT_MAX = 500
+
 # New-skill proposals (workspace task #20): kebab-case only (the harness
 # discovers skills by directory name) and generous-but-bounded size caps -
 # large enough for a real workflow write-up, small enough that a runaway or
@@ -870,6 +896,140 @@ class ProposalManager:
             warnings=warnings,
         )
         return self._finish_submission(proposal, len(card_ids))
+
+    def submit_card_state(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Card-state ops (#3): suspend/unsuspend, bury/unbury, flags.
+
+        One shared submit path because the five ops have the same shape:
+        select cards (explicit ids OR a query - exactly one), freeze an
+        honest count, warn about no-ops and filtered-deck side effects,
+        and stash enough in op_args for accept to re-resolve.
+        """
+        col = self._col()
+        op = str(args.get("op", ""))
+        if op not in CARD_STATE_OPS:
+            raise ProposalError(f"unknown card-state op {op!r}")
+        flag: int | None = None
+        if op == "set_card_flag":
+            if "flag" not in args:
+                raise ProposalError(
+                    "set_card_flag needs flag 0-7 (0 clears; "
+                    + ", ".join(f"{n} {FLAG_NAMES[n]}" for n in range(1, 8))
+                    + ")"
+                )
+            flag = int(args["flag"])
+            if not 0 <= flag <= 7:
+                raise ProposalError(f"flag must be 0-7, got {flag}")
+        raw_ids = args.get("card_ids") or []
+        query = str(args.get("query") or "").strip()
+        if bool(raw_ids) == bool(query):
+            raise ProposalError(f"{op} needs exactly one of card_ids or query")
+        warnings: list[str] = []
+        if raw_ids:
+            ids = list(dict.fromkeys(int(c) for c in raw_ids))
+            if len(ids) > MAX_EXPLICIT_CARD_IDS:
+                raise ProposalError(
+                    f"{len(ids)} explicit card_ids is too many "
+                    f"(max {MAX_EXPLICIT_CARD_IDS}); pass a query instead"
+                )
+            live = []
+            missing = 0
+            for cid in ids:
+                try:
+                    col.get_card(cid)
+                except Exception:
+                    missing += 1
+                    continue
+                live.append(cid)
+            if not live:
+                raise ProposalError("none of those cards exist")
+            if missing:
+                warnings.append(f"{missing} card id(s) do not exist and were dropped")
+            scope_text = f"{len(live)} selected card(s)"
+        else:
+            try:
+                live = [int(c) for c in col.find_cards(query)]
+            except Exception as exc:
+                raise ProposalError(f"bad query {query!r}: {exc}") from None
+            if not live:
+                raise ProposalError(
+                    self._empty_query_error(col, query, f"no cards match {query!r}")
+                )
+            scope_text = f"{len(live)} card(s) matching {query!r}"
+        # Honest accounting, bounded: inspecting every card of a huge query
+        # would stall submit, and the warnings are advisory - accept captures
+        # true prior state per card regardless.
+        if len(live) <= CARD_STATE_INSPECT_MAX:
+            noop = 0
+            in_filtered = 0
+            for cid in live:
+                card = col.get_card(cid)
+                queue = int(card.queue)
+                if op == "suspend_cards" and queue == -1:
+                    noop += 1
+                elif op == "unsuspend_cards" and queue != -1:
+                    noop += 1
+                elif op == "bury_cards" and queue < 0:
+                    noop += 1
+                elif op == "unbury_cards" and queue not in (-2, -3):
+                    noop += 1
+                elif op == "set_card_flag" and (int(card.flags) & 0x7) == flag:
+                    noop += 1
+                in_filtered_deck = int(getattr(card, "odid", 0) or 0) != 0
+                if op in ("suspend_cards", "bury_cards") and in_filtered_deck:
+                    in_filtered += 1
+            if noop:
+                already = {
+                    "suspend_cards": "already suspended",
+                    "unsuspend_cards": "not suspended",
+                    "bury_cards": "already buried or suspended",
+                    "unbury_cards": "not buried",
+                    "set_card_flag": f"already flagged {FLAG_NAMES[flag or 0]}",
+                }[op]
+                warnings.append(f"{noop} of these card(s) are {already} (no change)")
+            if in_filtered:
+                warnings.append(
+                    f"{in_filtered} card(s) sit in a filtered deck; this returns "
+                    "them to their home deck, and undo will not re-add them to "
+                    "the filtered deck"
+                )
+        verb = CARD_STATE_OPS[op]
+        if op == "set_card_flag":
+            verb = (
+                f"Flag {FLAG_NAMES[flag or 0]}" if flag else "Clear the flag on"
+            )
+        samples = [{"text": f"{verb} {scope_text}"}]
+        for cid in live[:MAX_SAMPLES]:
+            try:
+                note = col.get_card(cid).note()
+                samples.append(
+                    {"text": _short_label(next(iter(dict(note.items()).values()), ""))}
+                )
+            except Exception:
+                continue
+        op_args: dict[str, Any] = (
+            {"card_ids": live} if raw_ids else {"query": query}
+        )
+        if flag is not None:
+            op_args["flag"] = flag
+        proposal = Proposal(
+            id=self._next_id(),
+            kind="bulk",
+            op=op,
+            op_args=op_args,
+            note_type="",
+            deck="",
+            tags=[],
+            fields={},
+            # No fallback rationale: samples[0] already carries "{verb} {scope}",
+            # and echoing it as the rationale rendered the same sentence twice
+            # on the card (seen in the dev preview).
+            rationale=str(args.get("rationale", "")),
+            count=len(live),
+            samples=samples,
+            warnings=warnings,
+        )
+        return self._finish_submission(proposal, len(live))
 
     def submit_delete_notes(self, args: dict[str, Any]) -> dict[str, Any]:
         col = self._col()
@@ -1923,7 +2083,83 @@ class ProposalManager:
                     "skipped: " + ", ".join(skipped[:3])
                 )
             return applied
+        if proposal.op in CARD_STATE_OPS:
+            return self._accept_card_state(proposal)
         raise ProposalError(f"unknown bulk op {proposal.op!r}")
+
+    def _accept_card_state(self, proposal: Proposal) -> list[int]:
+        """Apply a suspend/unsuspend/bury/unbury/flag proposal.
+
+        Prior state is captured per card AT APPLY TIME (queue for the queue
+        ops, the 3-bit flag for set_card_flag), because the collection may
+        have moved since submit; revert restores exactly what was recorded.
+        """
+        op = proposal.op
+        flag = proposal.op_args.get("flag")
+
+        def execute(col: Any, before: invariants.Snapshot) -> _WriteResult:
+            if "card_ids" in proposal.op_args:
+                candidates = [int(c) for c in proposal.op_args["card_ids"]]
+            else:
+                candidates = [int(c) for c in col.find_cards(proposal.op_args["query"])]
+            prior: dict[int, int] = {}
+            cards: list[int] = []
+            for cid in candidates:
+                try:
+                    card = col.get_card(cid)
+                except Exception:
+                    continue
+                if op == "set_card_flag":
+                    prior[cid] = int(getattr(card, "flags", 0)) & 0x7
+                else:
+                    prior[cid] = int(card.queue)
+                cards.append(cid)
+            if not cards:
+                raise ProposalError("none of those cards exist anymore")
+            if op == "suspend_cards":
+                col.sched.suspend_cards(cards)
+            elif op == "unsuspend_cards":
+                col.sched.unsuspend_cards(cards)
+            elif op == "bury_cards":
+                col.sched.bury_cards(cards, manual=True)
+            elif op == "unbury_cards":
+                col.sched.unbury_cards(cards)
+            else:
+                col.set_user_flag_for_cards(int(flag or 0), cards)
+            label = f"{CARD_STATE_OPS[op].lower()} {len(cards)} card(s)"
+            if op == "set_card_flag":
+                label = (
+                    f"flag {len(cards)} card(s) {FLAG_NAMES[int(flag or 0)]}"
+                    if flag
+                    else f"clear the flag on {len(cards)} card(s)"
+                )
+            self._ledger.append(
+                LedgerEntry(
+                    id=proposal.id,
+                    kind="bulk",
+                    note_id=0,
+                    label=label,
+                    data={"op": op, "prior": prior, "flag": flag},
+                )
+            )
+            note_ids = [int(col.get_card(cid).nid) for cid in cards[:50]]
+            return _WriteResult(
+                note_ids,
+                invariants.Expectation(),
+                invariants.Scope(
+                    card_ids=tuple(cards),
+                    # suspend/bury/unbury/flag all stamp the card rows only
+                    written_card_ids=tuple(cards),
+                ),
+            )
+
+        note_ids = self._apply_write(
+            execute=execute, backup_reason=f"bulk {proposal.op}"
+        )
+        proposal.status = ACCEPTED
+        if self._checkpoint_warning:
+            proposal.warnings.append(self._checkpoint_warning)
+        return note_ids
 
     @staticmethod
     def _kind_revertible(proposal: Proposal) -> bool:
@@ -2673,6 +2909,41 @@ class ProposalManager:
                 # One set_deck RPC per distinct prior home deck, not per card.
                 steps=len(by_deck),
             )
+        elif entry.kind == "bulk" and entry.data.get("op") in CARD_STATE_OPS:
+            op = entry.data["op"]
+            prior = {int(c): int(v) for c, v in entry.data.get("prior", {}).items()}
+            if op == "set_card_flag":
+                # Group by prior flag: one backend call per distinct value.
+                by_flag: dict[int, list[int]] = {}
+                for cid, old_flag in prior.items():
+                    by_flag.setdefault(old_flag, []).append(cid)
+
+                def mutate_flags() -> None:
+                    for old_flag, cids in by_flag.items():
+                        col.set_user_flag_for_cards(old_flag, cids)
+
+                self._revert_write(
+                    col,
+                    mutate_flags,
+                    invariants.Scope(card_ids=tuple(prior)),
+                    steps=len(by_flag),
+                )
+            else:
+                # Queue states drift on their own (bury expires at rollover,
+                # the user may have unsuspended in the Browser), so the revert
+                # reads each card's CURRENT queue and only issues the
+                # transitions still needed to reach the recorded prior state.
+                calls_box = {"n": 0}
+
+                def mutate_queues() -> None:
+                    calls_box["n"] = _restore_card_queues(col, prior)
+
+                self._revert_write(
+                    col,
+                    mutate_queues,
+                    invariants.Scope(card_ids=tuple(prior)),
+                    steps=lambda: calls_box["n"],
+                )
         elif entry.kind == "change_set":
             missing_box = {"n": 0}
 
@@ -3218,6 +3489,58 @@ def _coerce_field_map(value: Any, key: str) -> dict[str, str]:
             f"got {type(value).__name__}"
         )
     return {str(k): str(v) for k, v in value.items()}
+
+
+def _restore_card_queues(col: Any, prior: dict[int, int]) -> int:
+    """Return each card to its recorded queue state; returns backend calls made.
+
+    Compares against the CURRENT queue rather than assuming the post-apply
+    state still holds: manual buries expire at the day rollover and the user
+    can flip states in the Browser between apply and revert, and a blind
+    reverse-operation would then corrupt cards that no longer need it.
+    Order matters: leave the wrong hidden state first (unsuspend/unbury),
+    re-bury second, suspend last (suspend wins from any state).
+    """
+    unsuspend_ids: list[int] = []
+    unbury_ids: list[int] = []
+    bury_manual: list[int] = []
+    bury_sched: list[int] = []
+    suspend_ids: list[int] = []
+    for cid, want in prior.items():
+        try:
+            cur = int(col.get_card(cid).queue)
+        except Exception:
+            continue
+        if cur == want:
+            continue
+        if want == -1:
+            suspend_ids.append(cid)
+            continue
+        if cur == -1:
+            unsuspend_ids.append(cid)
+        elif cur in (-2, -3):
+            unbury_ids.append(cid)
+        if want == -3:
+            bury_manual.append(cid)
+        elif want == -2:
+            bury_sched.append(cid)
+    calls = 0
+    if unsuspend_ids:
+        col.sched.unsuspend_cards(unsuspend_ids)
+        calls += 1
+    if unbury_ids:
+        col.sched.unbury_cards(unbury_ids)
+        calls += 1
+    if bury_manual:
+        col.sched.bury_cards(bury_manual, manual=True)
+        calls += 1
+    if bury_sched:
+        col.sched.bury_cards(bury_sched, manual=False)
+        calls += 1
+    if suspend_ids:
+        col.sched.suspend_cards(suspend_ids)
+        calls += 1
+    return calls
 
 
 def _short_label(text: str, limit: int = 60) -> str:

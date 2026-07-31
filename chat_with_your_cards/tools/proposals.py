@@ -37,6 +37,35 @@ def delete_notes(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     return ctx.proposals.submit_delete_notes(args)
 
 
+def _card_state(op: str):
+    def call(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+        return ctx.proposals.submit_card_state({**args, "op": op})
+
+    return call
+
+
+# Shared schema for the card-state ops: exactly one of card_ids / query.
+def _card_state_schema(extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    properties: dict[str, Any] = {
+        "card_ids": {
+            "type": "array",
+            "items": {"type": "integer"},
+            "description": "Exact card ids (from find_cards). Use for a "
+            "hand-picked selection; use `query` for everything matching a "
+            "search. Exactly one of the two.",
+        },
+        "query": {
+            "type": "string",
+            "description": "Anki search selecting the cards, e.g. "
+            "'deck:\"X\" tag:leech'. Exactly one of card_ids / query.",
+        },
+        "rationale": {"type": "string"},
+    }
+    if extra:
+        properties.update(extra)
+    return {"type": "object", "properties": properties, "required": list(extra or [])}
+
+
 def open_change_set(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     return ctx.proposals.open_change_set(args)
 
@@ -244,6 +273,72 @@ def register_proposal_tools(registry: ToolRegistry) -> None:
             delete_notes,
             writes=True,
             trusted_only=True,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            "suspend_cards",
+            "Suspend cards: removed from study entirely until unsuspended, "
+            "scheduling frozen. One confirmation with the affected count; "
+            "revertible. Cards currently in a filtered deck return to their "
+            "home deck (warned on the proposal).",
+            _card_state_schema(),
+            _card_state("suspend_cards"),
+            writes=True,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            "unsuspend_cards",
+            "Unsuspend cards so they return to normal scheduling. One "
+            "confirmation; revertible.",
+            _card_state_schema(),
+            _card_state("unsuspend_cards"),
+            writes=True,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            "bury_cards",
+            "Bury cards until the next day rollover (Anki's manual bury). For "
+            "'not this one right now' on the card being reviewed, prefer "
+            "defer_card - it is tracked in the user's set-aside tray; this "
+            "tool is for bulk or off-queue burying. One confirmation; "
+            "revertible.",
+            _card_state_schema(),
+            _card_state("bury_cards"),
+            writes=True,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            "unbury_cards",
+            "Unbury cards so they come back into today's queue. One "
+            "confirmation; revertible.",
+            _card_state_schema(),
+            _card_state("unbury_cards"),
+            writes=True,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            "set_card_flag",
+            "Set or clear the colored flag on cards (visible in the Browser "
+            "and reviewer; searchable as flag:N). One confirmation; "
+            "revertible.",
+            _card_state_schema(
+                {
+                    "flag": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 7,
+                        "description": "0 clears; 1 Red, 2 Orange, 3 Green, "
+                        "4 Blue, 5 Pink, 6 Turquoise, 7 Purple",
+                    }
+                }
+            ),
+            _card_state("set_card_flag"),
+            writes=True,
         )
     )
     registry.register(

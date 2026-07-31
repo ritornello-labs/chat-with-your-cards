@@ -36,6 +36,9 @@ class FakeCard:
         self.usn = -1  # -1 == pending sync, the state every touched row must hold
         self.memory_state: Any = None  # FSRS stability/difficulty, wiped by set_deck
         self.data = ""  # legacy JSON blob (s/d) fallback for FSRS detection
+        self.type = 2  # review card unless a test says otherwise
+        self.queue = 2  # >=0 normal, -1 suspended, -2 sched-buried, -3 manual
+        self.flags = 0  # low 3 bits = user flag
 
 
 class FakeNote:
@@ -198,6 +201,46 @@ class FakeSched:
             if card.did == did and card.odid:
                 card.did = card.odid
                 card.odid = 0
+
+    # --- card-state ops (#3), mirroring Anki's semantics ---
+
+    def _send_home(self, card: FakeCard) -> None:
+        # Suspending or burying a card in a filtered deck returns it home.
+        if card.odid:
+            card.did = card.odid
+            card.odid = 0
+
+    def _requeue(self, card: FakeCard) -> None:
+        # Unsuspend/unbury recompute the queue from the card type.
+        card.queue = 0 if card.type == 0 else 2
+
+    def suspend_cards(self, ids: list[int]) -> None:
+        for cid in ids:
+            card = self._col._cards[cid]
+            self._send_home(card)
+            card.queue = -1
+            card.usn = -1
+
+    def unsuspend_cards(self, ids: list[int]) -> None:
+        for cid in ids:
+            card = self._col._cards[cid]
+            if card.queue == -1:
+                self._requeue(card)
+                card.usn = -1
+
+    def bury_cards(self, ids: list[int], manual: bool = True) -> None:
+        for cid in ids:
+            card = self._col._cards[cid]
+            self._send_home(card)
+            card.queue = -3 if manual else -2
+            card.usn = -1
+
+    def unbury_cards(self, ids: list[int]) -> None:
+        for cid in ids:
+            card = self._col._cards[cid]
+            if card.queue in (-2, -3):
+                self._requeue(card)
+                card.usn = -1
 
 
 class FakeTags:
@@ -381,6 +424,12 @@ class FakeCol:
 
     def get_card(self, card_id: int) -> FakeCard:
         return self._cards[card_id]
+
+    def set_user_flag_for_cards(self, flag: int, cids: list[int]) -> None:
+        for cid in cids:
+            card = self._cards[cid]
+            card.flags = (card.flags & ~0x7) | flag
+            card.usn = -1
 
     def set_deck(self, card_ids: list[int], deck_id: int) -> None:
         # Mirror Anki: set_deck into a filtered deck hard-errors
@@ -1436,6 +1485,149 @@ class BulkOpsTests(unittest.TestCase):
             manager.submit_move_cards(
                 {"query": 'deck:"Default"', "deck": "Cram"}
             )
+
+
+class CardStateTests(unittest.TestCase):
+    """Suspend/unsuspend, bury/unbury, flags (#3): submit validation, honest
+    warnings, prior-state capture at apply, and drift-aware queue revert."""
+
+    def _setup(self, **manager_kwargs):
+        manager, col, pushed = make_manager(**manager_kwargs)
+        note_ids = _seed_notes(manager, col, pushed)
+        card_ids = [col.get_note(nid)._cards[0].id for nid in note_ids]
+        return manager, col, pushed, card_ids
+
+    def test_submit_requires_exactly_one_selector(self) -> None:
+        manager, col, pushed, card_ids = self._setup()
+        with self.assertRaisesRegex(ProposalError, "exactly one"):
+            manager.submit_card_state({"op": "suspend_cards"})
+        with self.assertRaisesRegex(ProposalError, "exactly one"):
+            manager.submit_card_state(
+                {"op": "suspend_cards", "card_ids": card_ids, "query": 'deck:"Default"'}
+            )
+
+    def test_flag_validation(self) -> None:
+        manager, col, pushed, card_ids = self._setup()
+        with self.assertRaisesRegex(ProposalError, "flag 0-7"):
+            manager.submit_card_state({"op": "set_card_flag", "card_ids": card_ids})
+        with self.assertRaisesRegex(ProposalError, "0-7"):
+            manager.submit_card_state(
+                {"op": "set_card_flag", "card_ids": card_ids, "flag": 9}
+            )
+
+    def test_missing_ids_warned_all_missing_rejected(self) -> None:
+        manager, col, pushed, card_ids = self._setup()
+        result = manager.submit_card_state(
+            {"op": "suspend_cards", "card_ids": [card_ids[0], 999999]}
+        )
+        self.assertEqual(1, result["affected"])
+        proposal = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertTrue(any("do not exist" in w for w in proposal["warnings"]))
+        with self.assertRaisesRegex(ProposalError, "none of those cards exist"):
+            manager.submit_card_state({"op": "suspend_cards", "card_ids": [999999]})
+
+    def test_suspend_apply_and_revert_restores_prior_queues(self) -> None:
+        manager, col, pushed, card_ids = self._setup()
+        # One card is ALREADY suspended: apply is a no-op for it (warned), and
+        # revert must leave it suspended rather than blanket-unsuspending.
+        col.get_card(card_ids[0]).queue = -1
+        result = manager.submit_card_state(
+            {"op": "suspend_cards", "query": 'deck:"Default"'}
+        )
+        proposal = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertTrue(any("already suspended" in w for w in proposal["warnings"]))
+        manager.accept({"id": result["proposal_id"]})
+        self.assertTrue(all(col.get_card(c).queue == -1 for c in card_ids))
+        manager.revert({"id": result["proposal_id"]})
+        self.assertEqual(-1, col.get_card(card_ids[0]).queue)  # was suspended before
+        self.assertEqual(2, col.get_card(card_ids[1]).queue)
+        self.assertEqual(2, col.get_card(card_ids[2]).queue)
+
+    def test_bury_revert_survives_rollover_drift(self) -> None:
+        manager, col, pushed, card_ids = self._setup()
+        result = manager.submit_card_state(
+            {"op": "bury_cards", "card_ids": card_ids[:2]}
+        )
+        manager.accept({"id": result["proposal_id"]})
+        self.assertEqual(-3, col.get_card(card_ids[0]).queue)
+        self.assertEqual(-3, col.get_card(card_ids[1]).queue)
+        # Simulate the day rollover auto-unburying one card before the revert.
+        col.get_card(card_ids[0]).queue = 2
+        manager.revert({"id": result["proposal_id"]})
+        self.assertEqual(2, col.get_card(card_ids[0]).queue)  # already back: untouched
+        self.assertEqual(2, col.get_card(card_ids[1]).queue)
+
+    def test_suspend_returns_filtered_card_home_and_warns(self) -> None:
+        manager, col, pushed, card_ids = self._setup()
+        cram = col.decks.new_filtered("Cram")
+        card = col.get_card(card_ids[0])
+        card.odid = card.did
+        card.did = cram
+        result = manager.submit_card_state(
+            {"op": "suspend_cards", "card_ids": [card_ids[0]]}
+        )
+        proposal = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertTrue(any("filtered deck" in w for w in proposal["warnings"]))
+        manager.accept({"id": result["proposal_id"]})
+        self.assertEqual(-1, card.queue)
+        self.assertEqual(0, card.odid)  # home again, like real Anki
+
+    def test_unsuspend_revert_resuspends_only_previously_suspended(self) -> None:
+        manager, col, pushed, card_ids = self._setup()
+        col.get_card(card_ids[0]).queue = -1
+        col.get_card(card_ids[1]).queue = -1
+        result = manager.submit_card_state(
+            {"op": "unsuspend_cards", "query": 'deck:"Default"'}
+        )
+        manager.accept({"id": result["proposal_id"]})
+        self.assertTrue(all(col.get_card(c).queue == 2 for c in card_ids))
+        manager.revert({"id": result["proposal_id"]})
+        self.assertEqual(-1, col.get_card(card_ids[0]).queue)
+        self.assertEqual(-1, col.get_card(card_ids[1]).queue)
+        self.assertEqual(2, col.get_card(card_ids[2]).queue)  # was normal before
+
+    def test_flag_apply_and_revert_restores_distinct_priors(self) -> None:
+        manager, col, pushed, card_ids = self._setup()
+        col.get_card(card_ids[0]).flags = 2  # Orange before
+        result = manager.submit_card_state(
+            {"op": "set_card_flag", "card_ids": card_ids, "flag": 1}
+        )
+        manager.accept({"id": result["proposal_id"]})
+        self.assertTrue(all(col.get_card(c).flags & 0x7 == 1 for c in card_ids))
+        ledger = manager._ledger[-1]
+        self.assertIn("flag 3 card(s) Red", ledger.label)
+        manager.revert({"id": result["proposal_id"]})
+        self.assertEqual(2, col.get_card(card_ids[0]).flags & 0x7)
+        self.assertEqual(0, col.get_card(card_ids[1]).flags & 0x7)
+
+    def test_restore_queues_handles_cross_state_transitions(self) -> None:
+        # The helper's trickiest paths: suspended -> re-bury (unsuspend first),
+        # sched-buried -> manual-buried (unbury first), any -> suspended.
+        from chat_with_your_cards.proposals import _restore_card_queues
+
+        manager, col, pushed, card_ids = self._setup()
+        a, b, c = card_ids
+        col.get_card(a).queue = -1  # now suspended, was manual-buried
+        col.get_card(b).queue = -2  # now sched-buried, was manual-buried
+        col.get_card(c).queue = 2  # now normal, was suspended
+        calls = _restore_card_queues(col, {a: -3, b: -3, c: -1})
+        self.assertEqual(-3, col.get_card(a).queue)
+        self.assertEqual(-3, col.get_card(b).queue)
+        self.assertEqual(-1, col.get_card(c).queue)
+        self.assertEqual(4, calls)  # unsuspend, unbury, bury(manual), suspend
+
+    def test_clear_flag_label_and_noop_warning(self) -> None:
+        manager, col, pushed, card_ids = self._setup()
+        result = manager.submit_card_state(
+            {"op": "set_card_flag", "card_ids": card_ids, "flag": 0}
+        )
+        proposal = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertTrue(
+            any("already flagged no flag" in w for w in proposal["warnings"])
+        )
+        self.assertIn("Clear the flag", proposal["samples"][0]["text"])
+        manager.accept({"id": result["proposal_id"]})
+        self.assertIn("clear the flag on 3 card(s)", manager._ledger[-1].label)
 
 
 class DeleteTests(unittest.TestCase):

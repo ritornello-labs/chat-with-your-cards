@@ -231,6 +231,62 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
 
     check("bulk move_cards apply+revert (real col.set_deck)", _move_cards)
 
+    def _card_state_flow() -> dict[str, Any]:
+        """Card-state ops (#3) against the real scheduler: suspend with an
+        already-suspended card (honest warning + selective revert), flags
+        with distinct priors, and bury/unbury through the registry tools."""
+        col = mw.col
+        nid1 = _new_note("card-state one", deck="ProbeState")
+        nid2 = _new_note("card-state two", deck="ProbeState")
+        cid1 = int(col.get_note(nid1).cards()[0].id)
+        cid2 = int(col.get_note(nid2).cards()[0].id)
+        col.sched.suspend_cards([cid2])  # pre-suspended: must survive revert
+
+        with _capture_pushes(proposals) as pushes:
+            result = proposals.submit_card_state(
+                {"op": "suspend_cards", "query": 'deck:"ProbeState"'}
+            )
+        cards = [p["proposal"] for p in pushes if p.get("type") == "proposal"]
+        if not any(
+            "already suspended" in w for p in cards for w in p.get("warnings", [])
+        ):
+            raise AssertionError(f"no already-suspended warning: {cards}")
+        proposals.accept({"id": result["proposal_id"]})
+        if col.get_card(cid1).queue != -1 or col.get_card(cid2).queue != -1:
+            raise AssertionError("suspend_cards did not suspend on the real scheduler")
+        proposals.revert({"id": result["proposal_id"]})
+        if col.get_card(cid1).queue == -1:
+            raise AssertionError("revert did not unsuspend the newly suspended card")
+        if col.get_card(cid2).queue != -1:
+            raise AssertionError("revert unsuspended a card that was suspended before")
+
+        flag_result = proposals.submit_card_state(
+            {"op": "set_card_flag", "card_ids": [cid1, cid2], "flag": 3}
+        )
+        proposals.accept({"id": flag_result["proposal_id"]})
+        if (int(col.get_card(cid1).flags) & 0x7) != 3:
+            raise AssertionError("set_card_flag did not set the real flag")
+        proposals.revert({"id": flag_result["proposal_id"]})
+        if (int(col.get_card(cid1).flags) & 0x7) != 0:
+            raise AssertionError("flag revert did not clear back to prior")
+
+        addon = importlib.import_module(ADDON_PACKAGE)
+        from chat_with_your_cards.tools import build_registry
+
+        registry = build_registry()
+        ctx = addon._ToolCtx()
+        bury = registry.call(ctx, "bury_cards", {"card_ids": [cid1]})
+        proposals.accept({"id": bury["proposal_id"]})
+        if col.get_card(cid1).queue != -3:
+            raise AssertionError("bury_cards did not manually bury")
+        unbury = registry.call(ctx, "unbury_cards", {"card_ids": [cid1]})
+        proposals.accept({"id": unbury["proposal_id"]})
+        if col.get_card(cid1).queue < 0:
+            raise AssertionError("unbury_cards did not restore the queue")
+        return {"cards": [cid1, cid2]}
+
+    check("card-state suspend/flag/bury apply+revert (real scheduler)", _card_state_flow)
+
     def _change_set() -> dict[str, Any]:
         ids = [_new_note(f"cs {i}", back="orig") for i in range(3)]
         cs = proposals.open_change_set({"title": "probe sweep"})
