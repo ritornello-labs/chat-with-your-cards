@@ -53,7 +53,18 @@ VIDEO_MIME_BY_EXT = {
     ".mp4": "video/mp4",
     ".webm": "video/webm",
 }
-MIME_BY_EXT = {**AUDIO_MIME_BY_EXT, **IMAGE_MIME_BY_EXT, **VIDEO_MIME_BY_EXT}
+# Documents (#15b): context material for the agent, not card media - note
+# proposals reject the kind (a PDF cannot render on a card), composer
+# attachments and store_media_asset accept it.
+DOCUMENT_MIME_BY_EXT = {
+    ".pdf": "application/pdf",
+}
+MIME_BY_EXT = {
+    **AUDIO_MIME_BY_EXT,
+    **IMAGE_MIME_BY_EXT,
+    **VIDEO_MIME_BY_EXT,
+    **DOCUMENT_MIME_BY_EXT,
+}
 
 
 def kind_for_ext(ext: str) -> str | None:
@@ -63,6 +74,8 @@ def kind_for_ext(ext: str) -> str | None:
         return "image"
     if ext in VIDEO_MIME_BY_EXT:
         return "video"
+    if ext in DOCUMENT_MIME_BY_EXT:
+        return "document"
     return None
 MAX_MEDIA_FILE_BYTES = 8_000_000  # matches show_image's inline budget
 MAX_MEDIA_PER_PROPOSAL = 4
@@ -117,8 +130,15 @@ class MediaStaging:
             raise MediaError(f"bad proposal id {proposal_id!r}")
         return self._root / proposal_id
 
-    def stage(self, proposal_id: str, items: list[dict[str, Any]]) -> list[StagedItem]:
-        """Validate and copy the agent's files; all-or-nothing."""
+    def stage(
+        self,
+        proposal_id: str,
+        items: list[dict[str, Any]],
+        kinds: set[str] | None = None,
+    ) -> list[StagedItem]:
+        """Validate and copy the agent's files; all-or-nothing. ``kinds``
+        restricts which media kinds this call site accepts (note proposals
+        exclude documents; the composer takes everything)."""
         if len(items) > MAX_MEDIA_PER_PROPOSAL:
             raise MediaError(
                 f"too many media files ({len(items)}); the cap is "
@@ -148,6 +168,11 @@ class MediaStaging:
                     raise MediaError(
                         f"unsupported media type {ext!r} for {filename!r} - "
                         "supported: " + ", ".join(sorted(MIME_BY_EXT))
+                    )
+                if kinds is not None and kind not in kinds:
+                    raise MediaError(
+                        f"{kind} files are not allowed here ({filename!r}); "
+                        "allowed: " + ", ".join(sorted(kinds))
                     )
                 if filename.lower() in seen_names:
                     raise MediaError(f"duplicate media filename {filename!r}")

@@ -127,8 +127,34 @@ function Composer({ store }: { store: ChatStore }) {
     }
   };
 
+  // Pasted images become attachments (#15): a clipboard screenshot has no
+  // path, so this is the one transport where bytes cross the bridge - the
+  // same route Anki's own editor paste uses. Text pastes pass through.
+  const onPaste = (e: React.ClipboardEvent) => {
+    const files = [...(e.clipboardData?.items ?? [])]
+      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => file !== null);
+    if (!files.length) return;
+    e.preventDefault();
+    for (const file of files.slice(0, 4)) {
+      if (file.size > 8_000_000) {
+        // Mirrors the staging cap; a silent drop would look like a broken paste.
+        store.dispatch({ type: "notice", text: `${file.name || "Pasted image"} is over the 8 MB cap` });
+        continue;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === "string") {
+          store.attachPasted(file.name || "", file.type, reader.result);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   return (
-    <ComposerPrimitive.Root className="cwyc-composer">
+    <ComposerPrimitive.Root className="cwyc-composer" onPaste={onPaste}>
       {/* What this chat changed, and the way back. Above the composer because
           it is about the session, not any one message (task #18). */}
       <LedgerStrip store={store} />

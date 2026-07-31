@@ -163,8 +163,16 @@ def event_to_dict(event: ChatEvent) -> dict[str, Any]:
 
 
 class ChatSession(Protocol):
-    def send(self, text: str, on_event: EventCallback) -> None:
-        """Send a user message; deliver resulting events via on_event."""
+    def send(
+        self,
+        text: str,
+        on_event: EventCallback,
+        extra_blocks: list[dict] | None = None,
+    ) -> None:
+        """Send a user message; deliver resulting events via on_event.
+        ``extra_blocks`` are optional Messages-API content blocks (#15b,
+        e.g. base64 image blocks) appended after the text; backends without
+        multimodal support ignore them."""
 
     def cancel(self) -> None:
         """Stop any in-flight response. No events after this except none."""

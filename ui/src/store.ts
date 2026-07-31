@@ -602,6 +602,12 @@ export class ChatStore {
     postCommand({ type: "remove_attachment", id });
   }
 
+  /** A pasted image (#15): bytes as a data: URL - the one attach transport
+   *  that crosses the bridge, since clipboard content has no path. */
+  attachPasted(name: string, mime: string, dataUrl: string): void {
+    postCommand({ type: "attach_pasted", name, mime, data: dataUrl });
+  }
+
   rejectProposal(id: string): void {
     postCommand({ type: "proposal_reject", id });
   }

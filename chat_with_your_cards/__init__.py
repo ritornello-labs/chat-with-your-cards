@@ -398,19 +398,169 @@ def _clear_composer_attachments(discard_files: bool) -> None:
 
 
 def _attachment_message_block(entries: list[dict[str, Any]]) -> str:
-    """The agent-facing description of what the user attached (#15a)."""
+    """The agent-facing description of what the user attached (#15a/b)."""
     lines = [
         f"- {entry['path']} ({entry['kind']}, {max(1, entry['size'] // 1024)} KB)"
         for entry in entries
     ]
+    notes = [
+        "To put one on a card, pass its path in propose_note's media[] "
+        "(reference images as <img src=\"name\">, audio/video as "
+        "[sound:name]). For a standalone asset use store_media_asset."
+    ]
+    images = [e for e in entries if e.get("kind") == "image"]
+    if images:
+        oversized = [
+            e["name"] for e in images if int(e.get("size", 0)) > IMAGE_BLOCK_MAX_BYTES
+        ]
+        if len(oversized) < len(images):
+            notes.append("The attached image(s) are also shown to you inline.")
+        if oversized:
+            notes.append(
+                "Too large to show inline (path only): " + ", ".join(oversized)
+            )
+    if any(e.get("kind") == "document" for e in entries):
+        notes.append(
+            "PDFs are context material, not card media: read them from the "
+            "path with your file tools; if file tools are off in this "
+            "session, say so instead of guessing at their contents."
+        )
     return (
         "<user-attachments>\nThe user attached these files for this message:\n"
         + "\n".join(lines)
-        + "\nTo put one on a card, pass its path in propose_note's media[] "
-        "(reference images as <img src=\"name\">, audio/video as "
-        "[sound:name]). For a standalone asset use store_media_asset.\n"
-        "</user-attachments>"
+        + "\n"
+        + "\n".join(notes)
+        + "\n</user-attachments>"
     )
+
+
+def _handle_dropped_paths(paths: list[str]) -> int:
+    """Files dragged from the OS onto the dock (#15). Paths arrive at the Qt
+    layer, so no bytes ever cross the webview bridge; same staging as the
+    picker. Returns how many staged."""
+    local = [p for p in paths if p and Path(p).is_file()]
+    if not local:
+        return 0
+    result = _stage_composer_files(local)
+    if result["errors"]:
+        _tooltip_result("; ".join(result["errors"][:2]))
+    return int(result["added"])
+
+
+def _install_drop_filter() -> None:
+    """Intercept OS file drops over the dock's webview (#15). QtWebEngine
+    routes drag events to a render child, so the filter watches the whole
+    webview subtree via the focus proxy; non-file drags pass through
+    untouched (text drags into the composer still work)."""
+    if state.dock is None:
+        return
+    from aqt.qt import QEvent, QObject
+
+    web = state.dock.web
+
+    class _DropFilter(QObject):
+        def eventFilter(self, _obj: Any, event: Any) -> bool:  # noqa: N802
+            etype = event.type()
+            if etype in (QEvent.Type.DragEnter, QEvent.Type.DragMove):
+                mime = event.mimeData()
+                if mime.hasUrls() and any(u.isLocalFile() for u in mime.urls()):
+                    event.acceptProposedAction()
+                    return True
+                return False
+            if etype == QEvent.Type.Drop:
+                mime = event.mimeData()
+                if mime.hasUrls():
+                    paths = [
+                        u.toLocalFile() for u in mime.urls() if u.isLocalFile()
+                    ]
+                    if paths and _handle_dropped_paths(paths):
+                        event.acceptProposedAction()
+                        return True
+                return False
+            return False
+
+    drop_filter = _DropFilter(web)
+    web.setAcceptDrops(True)
+    web.installEventFilter(drop_filter)
+    proxy = web.focusProxy()
+    if proxy is not None:
+        proxy.installEventFilter(drop_filter)
+
+
+def _attach_pasted(msg: dict[str, Any]) -> None:
+    """A pasted image from the composer (#15): the one transport where bytes
+    legitimately cross the bridge (a clipboard screenshot has no path) -
+    the same route Anki's own editor paste uses. Size is enforced twice:
+    the data-URL budget here, the staging byte cap after decode."""
+    import base64
+    import re as _re
+    import tempfile
+    import time as _time
+
+    data = str(msg.get("data", ""))
+    match = _re.match(r"^data:(image/[a-z+.-]+);base64,(.+)$", data, _re.S)
+    if match is None:
+        _tooltip_result("Could not read the pasted image")
+        return
+    if len(data) > 12_000_000:  # ~9 MB decoded; staging caps at 8 MB anyway
+        _tooltip_result("Pasted image is too large (8 MB cap)")
+        return
+    mime = match.group(1)
+    from .media_staging import IMAGE_MIME_BY_EXT
+
+    ext = next(
+        (e for e, m in IMAGE_MIME_BY_EXT.items() if m == mime), ".png"
+    )
+    try:
+        payload = base64.b64decode(match.group(2), validate=True)
+    except Exception:
+        _tooltip_result("Could not decode the pasted image")
+        return
+    tmp_dir = Path(tempfile.mkdtemp(prefix="cwyc-paste-"))
+    name = f"pasted-{_time.strftime('%Y%m%d-%H%M%S')}{ext}"
+    path = tmp_dir / name
+    path.write_bytes(payload)
+    result = _stage_composer_files([str(path)])
+    if result["errors"]:
+        _tooltip_result("; ".join(result["errors"][:2]))
+
+
+IMAGE_BLOCK_MAX_BYTES = 3_750_000  # the API's per-image request budget
+
+
+def _image_context_blocks(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Attached images as stream-json image content blocks (#15b), so the
+    agent SEES them rather than only knowing their paths. Oversized images
+    stay path-only (the block text says which)."""
+    import base64
+
+    blocks: list[dict[str, Any]] = []
+    for entry in entries:
+        if entry.get("kind") != "image":
+            continue
+        if int(entry.get("size", 0)) > IMAGE_BLOCK_MAX_BYTES:
+            continue
+        try:
+            payload = Path(entry["path"]).read_bytes()
+        except OSError:
+            continue
+        from .media_staging import MIME_BY_EXT
+        import os as _os
+
+        mime = MIME_BY_EXT.get(_os.path.splitext(entry["name"])[1].lower())
+        if not mime:
+            continue
+        blocks.append(
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": mime,
+                    "data": base64.b64encode(payload).decode("ascii"),
+                },
+            }
+        )
+    return blocks
 
 
 def _pick_composer_attachments() -> None:
@@ -510,6 +660,7 @@ def _setup() -> None:
         collapsed=bool(config.get("dock_collapsed", True)),
         side=str(config.get("dock_side", "right")),
     )
+    _install_drop_filter()
 
     from .transcripts import TranscriptStore
 
@@ -829,15 +980,19 @@ def _wire_bridge() -> None:
         ):
             defer_current_card()
         text = str(msg.get("text", ""))
+        extra_blocks: list[dict[str, Any]] = []
         if state.attachments:
-            # Paths ride the message (#15a); the files stay staged - the
-            # agent may only propose with them a turn later.
+            # Paths ride the message (#15a); attached images ALSO ride as
+            # inline image blocks so the agent sees them (#15b). The files
+            # stay staged - the agent may only propose with them a turn later.
+            extra_blocks = _image_context_blocks(state.attachments)
             text = text + "\n\n" + _attachment_message_block(state.attachments)
             _clear_composer_attachments(discard_files=False)
-        controller.send_user_message(text)
+        controller.send_user_message(text, extra_blocks=extra_blocks or None)
 
     bridge.on("send", _on_send)
     bridge.on("pick_attachments", lambda _msg: _pick_composer_attachments())
+    bridge.on("attach_pasted", _attach_pasted)
     bridge.on(
         "remove_attachment",
         lambda msg: _remove_composer_attachment(str(msg.get("id", ""))),

@@ -804,16 +804,27 @@ class ClaudeCliSession:
                 self._stderr_tail.append(line)
                 self._log.write(f"[stderr pid={process.pid}] {line}")
 
-    def send(self, text: str, on_event: EventCallback) -> None:
+    def send(
+        self,
+        text: str,
+        on_event: EventCallback,
+        extra_blocks: list[dict] | None = None,
+    ) -> None:
         if self._streaming:
             raise RuntimeError("send() while a response is still streaming")
         self._ensure_process()
         assert self._process is not None and self._process.stdin is not None
         self._on_event = on_event
         self._streaming = True
+        # Multimodal input (#15b): attached images ride as base64 image
+        # content blocks after the text, the Messages-API shape the CLI's
+        # stream-json input forwards.
+        content: list[dict] = [{"type": "text", "text": text}]
+        if extra_blocks:
+            content.extend(extra_blocks)
         payload = {
             "type": "user",
-            "message": {"role": "user", "content": [{"type": "text", "text": text}]},
+            "message": {"role": "user", "content": content},
         }
         try:
             self._process.stdin.write(json.dumps(payload) + "\n")

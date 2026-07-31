@@ -694,6 +694,70 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
 
     check("generic batch: mixed ops apply+outcomes+revert (#27)", _generic_batch_flow)
 
+    def _attachment_transports_flow() -> dict[str, Any]:
+        """#15 finish: OS-drop paths stage through the Qt-side handler, a
+        pasted data-URL stages through the bridge route, a PDF stages as
+        document context, and a real send through the bridge builds inline
+        image blocks, appends the block text, and clears the pending list."""
+        import base64
+        import importlib as _importlib
+        import tempfile
+
+        addon = _importlib.import_module(ADDON_PACKAGE)
+        addon._clear_composer_attachments(discard_files=True)
+        tmp = Path(tempfile.mkdtemp(prefix="cwyc-transport-"))
+        png = tmp / "drop.png"
+        png.write_bytes(_PNG_1PX)
+        pdf = tmp / "ref.pdf"
+        pdf.write_bytes(b"%PDF-1.4 fake probe")
+        if addon._handle_dropped_paths([str(png), str(pdf), ""]) != 2:
+            raise AssertionError("drop handler did not stage both files")
+        payload = base64.b64encode(_PNG_1PX).decode()
+        addon._attach_pasted(
+            {"name": "", "mime": "image/png", "data": f"data:image/png;base64,{payload}"}
+        )
+        kinds = sorted(e["kind"] for e in addon.state.attachments)
+        if kinds != ["document", "image", "image"]:
+            raise AssertionError(f"unexpected staged kinds: {kinds}")
+        blocks = addon._image_context_blocks(addon.state.attachments)
+        if len(blocks) != 2:
+            raise AssertionError(f"expected 2 image blocks, got {len(blocks)}")
+
+        # Spy on the backend send to prove blocks + block text arrive and the
+        # scripted backend accepts the multimodal signature.
+        session = addon.state.controller._session
+        captured: dict[str, Any] = {}
+        original_send = session.send
+
+        def spy(text: str, on_event: Any, extra_blocks: Any = None) -> None:
+            captured["text"] = text
+            captured["extra_blocks"] = extra_blocks
+            original_send(text, on_event, extra_blocks=extra_blocks)
+
+        session.send = spy
+        try:
+            addon.state.dock.bridge._handlers["send"](
+                {"text": "what do the attachments show?"}
+            )
+            _wait_until(
+                lambda: not addon.state.controller.streaming,
+                20_000,
+                "attachment send stream finished",
+            )
+        finally:
+            session.send = original_send
+        if len(captured.get("extra_blocks") or []) != 2:
+            raise AssertionError(f"image blocks did not reach the backend: {captured.keys()}")
+        if "<user-attachments>" not in captured["text"] or "ref.pdf" not in captured["text"]:
+            raise AssertionError("attachment block text missing from the sent message")
+        if "read them from the path" not in captured["text"]:
+            raise AssertionError("PDF guidance missing from the block text")
+        if addon.state.attachments:
+            raise AssertionError("pending attachments not cleared after send")
+        return {"kinds": kinds, "blocks": len(blocks)}
+
+    check("attachment transports: drop/paste/PDF + inline image send (#15)", _attachment_transports_flow)
+
     def _change_set() -> dict[str, Any]:
         ids = [_new_note(f"cs {i}", back="orig") for i in range(3)]
         cs = proposals.open_change_set({"title": "probe sweep"})

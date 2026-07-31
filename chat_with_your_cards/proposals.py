@@ -4525,7 +4525,9 @@ class ProposalManager:
                 "media attachments are not available in this session"
             )
         try:
-            staged = self._media.stage(proposal.id, items)
+            staged = self._media.stage(
+                proposal.id, items, kinds={"audio", "image", "video"}
+            )
         except MediaError as exc:
             raise ProposalError(str(exc)) from None
         proposal.media = [item.to_payload() for item in staged]

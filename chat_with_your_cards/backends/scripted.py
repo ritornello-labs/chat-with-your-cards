@@ -117,7 +117,14 @@ class ScriptedSession:
     def streaming(self) -> bool:
         return self._streaming
 
-    def send(self, text: str, on_event: EventCallback) -> None:
+    def send(
+        self,
+        text: str,
+        on_event: EventCallback,
+        extra_blocks: list[dict] | None = None,
+    ) -> None:
+        # extra_blocks (#15b) are accepted for interface parity and ignored:
+        # the scripted backend replays fixed timelines.
         if self._streaming:
             raise RuntimeError("send() while a response is still streaming")
         timeline = compile_script(select_script(text), self._rng)

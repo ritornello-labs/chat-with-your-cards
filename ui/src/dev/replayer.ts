@@ -1251,6 +1251,17 @@ export function installDevReplayer(): void {
         pushAttachments();
         break;
       }
+      case "attach_pasted": {
+        devAttachmentCounter += 1;
+        devAttachments.push({
+          id: `composer-paste${devAttachmentCounter}`,
+          name: String(msg.name || `pasted-${devAttachmentCounter}.png`),
+          kind: "image",
+          size: Math.round((String(msg.data).length * 3) / 4),
+        });
+        pushAttachments();
+        break;
+      }
       case "remove_attachment": {
         const index = devAttachments.findIndex((a) => a.id === String(msg.id));
         if (index >= 0) devAttachments.splice(index, 1);

@@ -219,7 +219,9 @@ class ChatController:
         """The harness's own session id (for --resume / open-in-Claude-Code)."""
         return getattr(self._session, "session_id", None)
 
-    def send_user_message(self, text: str) -> None:
+    def send_user_message(
+        self, text: str, extra_blocks: list[dict] | None = None
+    ) -> None:
         text = text.strip()
         if not text or self.streaming:
             return
@@ -233,7 +235,11 @@ class ChatController:
         # session whether or not the conversation needed collection
         # structure. The agent now fetches it on demand via the
         # get_collection_overview tool (see context.build_system_prompt).
-        self._session.send(wrap_user_message(text, card_block), self._on_event)
+        self._session.send(
+            wrap_user_message(text, card_block),
+            self._on_event,
+            extra_blocks=extra_blocks,
+        )
 
     def _context_for_send(self) -> tuple[str | None, str]:
         info = current_card_info()

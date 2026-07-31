@@ -97,6 +97,69 @@ class ComposerAttachmentTests(unittest.TestCase):
         self.assertFalse(path.exists())
         self.assertEqual([], addon.state.attachments)
 
+    def test_pdf_stages_as_document_with_agent_note(self) -> None:
+        # #15b: PDFs are context material - staged, path-listed, and the
+        # block tells the agent to READ it (or say file tools are off).
+        pdf = self._file("paper.pdf", b"%PDF-1.4 fake")
+        result = addon._stage_composer_files([str(pdf)])
+        self.assertEqual(1, result["added"])
+        self.assertEqual("document", addon.state.attachments[0]["kind"])
+        block = addon._attachment_message_block(addon.state.attachments)
+        self.assertIn("read them from the path", block)
+
+    def test_dropped_paths_stage_and_skip_missing(self) -> None:
+        png = self._file("dropped.png")
+        count = addon._handle_dropped_paths(
+            [str(png), str(self.base / "no-such-file.png"), ""]
+        )
+        self.assertEqual(1, count)
+        self.assertEqual("dropped.png", addon.state.attachments[0]["name"])
+
+    def test_attach_pasted_decodes_and_stages(self) -> None:
+        import base64
+
+        payload = base64.b64encode(b"\x89PNG-pasted-bytes").decode()
+        addon._attach_pasted(
+            {"name": "", "mime": "image/png", "data": f"data:image/png;base64,{payload}"}
+        )
+        self.assertEqual(1, len(addon.state.attachments))
+        entry = addon.state.attachments[0]
+        self.assertTrue(entry["name"].startswith("pasted-"), entry)
+        self.assertTrue(entry["name"].endswith(".png"))
+        self.assertEqual(b"\x89PNG-pasted-bytes", Path(entry["path"]).read_bytes())
+
+    def test_attach_pasted_rejects_garbage(self) -> None:
+        tooltips: list[str] = []
+        original = addon._tooltip_result
+        addon._tooltip_result = tooltips.append
+        try:
+            addon._attach_pasted({"data": "not-a-data-url"})
+        finally:
+            addon._tooltip_result = original
+        self.assertEqual([], addon.state.attachments)
+        self.assertTrue(tooltips and "Could not read" in tooltips[0])
+
+    def test_image_context_blocks_cap_and_filter(self) -> None:
+        addon._stage_composer_files(
+            [str(self._file("small.png")), str(self._file("word.mp3", b"\xff\xfbx"))]
+        )
+        big = dict(addon.state.attachments[0])
+        big["size"] = addon.IMAGE_BLOCK_MAX_BYTES + 1
+        entries = addon.state.attachments + [big]
+        blocks = addon._image_context_blocks(entries)
+        self.assertEqual(1, len(blocks))  # audio and oversized image skipped
+        self.assertEqual("image", blocks[0]["type"])
+        self.assertEqual("image/png", blocks[0]["source"]["media_type"])
+        import base64
+
+        self.assertEqual(
+            b"\x89PNGxxxx", base64.b64decode(blocks[0]["source"]["data"])
+        )
+        # And the message block is honest about what rides inline vs not.
+        block_text = addon._attachment_message_block(entries)
+        self.assertIn("also shown to you inline", block_text)
+        self.assertIn("Too large to show inline", block_text)
+
 
 if __name__ == "__main__":
     unittest.main()

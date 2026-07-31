@@ -809,6 +809,18 @@ class MediaProposalTests(unittest.TestCase):
         note = col.get_note(result["note_id"])
         self.assertIn("[sound:nihao.mp3]", note["Front"])
 
+    def test_documents_rejected_on_note_proposals(self) -> None:
+        # PDFs are agent context (#15b), never card media: a note proposal
+        # must reject the kind with a clear error.
+        manager, col, pushed = make_manager(media_staging=self.staging)
+        pdf = self.base / "paper.pdf"
+        pdf.write_bytes(b"%PDF-1.4 fake")
+        args = dict(CREATE_ARGS)
+        args["fields"] = {"Front": "f", "Back": "b"}
+        args["media"] = [{"path": str(pdf)}]
+        with self.assertRaisesRegex(ProposalError, "document files are not allowed"):
+            manager.submit_create(args)
+
     def test_bad_media_is_tool_error_and_nothing_staged(self) -> None:
         manager, col, pushed = make_manager(media_staging=self.staging)
         bad = self.base / "evil.exe"
