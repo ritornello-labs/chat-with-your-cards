@@ -538,10 +538,19 @@ export class ChatStore {
     postCommand({ type: "new_chat" });
   }
 
-  acceptProposal(id: string, fields: Record<string, string>, kind: string): void {
+  acceptProposal(
+    id: string,
+    fields: Record<string, string>,
+    kind: string,
+    excludedItems?: ReadonlySet<number>
+  ): void {
     const cmd: BridgeCommand = { type: "proposal_accept", id, fields };
     if (kind === "edit") {
       cmd.accepted_fields = Object.keys(fields);
+    }
+    // Per-item reject for batches (#27): indices the user unchecked.
+    if (excludedItems && excludedItems.size) {
+      cmd.excluded_items = [...excludedItems];
     }
     postCommand(cmd);
   }

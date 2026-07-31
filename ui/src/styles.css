@@ -1619,6 +1619,51 @@ body {
   position: relative;
 }
 
+/* Batch change-set item rows (#27): include checkboxes, risk badges,
+   per-item revertibility. */
+.cwyc-item-include {
+  margin: 2px 0 0;
+  flex: 0 0 auto;
+  align-self: flex-start;
+  accent-color: var(--cwyc-accent);
+}
+
+/* Op rows keep the head on one line: label gets the room and ellipsizes,
+   the risk pill never stretches with a wrapped row (it ballooned into an
+   oval when the flex head grew tall). */
+.cwyc-proposal-item-head .cwyc-proposal-item-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cwyc-proposal-item-excluded .cwyc-proposal-item-label,
+.cwyc-proposal-item-excluded .cwyc-proposal-item-revert {
+  text-decoration: line-through;
+  opacity: 0.55;
+}
+
+.cwyc-proposal-item-risk {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  padding: 1px 7px;
+  border: 1px solid var(--cwyc-border);
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--cwyc-text-dim);
+  white-space: nowrap;
+}
+
+.cwyc-proposal-item-revert {
+  display: block;
+  margin: 1px 0 2px 20px;
+  font-size: 11px;
+  color: var(--cwyc-text-dim);
+}
+
 /* Composer attachment list (#15a). */
 .cwyc-panel-attachments {
   min-width: 260px;

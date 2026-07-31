@@ -82,6 +82,11 @@ interface ItemRow {
   note_id?: number;
   label?: string;
   fields?: string[];
+  /** Generic-op batch items (#27). */
+  index?: number;
+  op?: string;
+  risk?: string;
+  revert?: string;
 }
 
 function asTextSample(value: unknown): TextSample | null {
@@ -191,7 +196,17 @@ function SkillDiff({ diff }: { diff: string }) {
   );
 }
 
-export function ProposalBody({ data }: { data: ProposalCardData }) {
+export function ProposalBody({
+  data,
+  excludedItems,
+  onToggleItem,
+}: {
+  data: ProposalCardData;
+  /** Batch per-item reject (#27): indices unchecked at review; only passed
+   *  for a PENDING change set, so resolved cards render read-only rows. */
+  excludedItems?: ReadonlySet<number>;
+  onToggleItem?: (index: number) => void;
+}) {
   const samples = Array.isArray(data.samples) ? data.samples : [];
   const items = Array.isArray(data.items) ? data.items : [];
   // No title fallback: the card header already shows the title, and a
@@ -222,19 +237,41 @@ export function ProposalBody({ data }: { data: ProposalCardData }) {
           <Collapsible total={rows.length} noun="notes">
             {rows.map((row, i) => {
               const sample = takeSample(diffSamples, row.label);
+              const index = typeof row.index === "number" ? row.index : i;
+              const excluded = excludedItems?.has(index) ?? false;
               return (
                 <li
-                  className={"cwyc-proposal-item" + (sample ? " cwyc-proposal-item-wide" : "")}
-                  key={row.note_id ?? i}
+                  className={
+                    "cwyc-proposal-item" +
+                    (sample ? " cwyc-proposal-item-wide" : "") +
+                    (excluded ? " cwyc-proposal-item-excluded" : "")
+                  }
+                  key={row.note_id ?? `${row.op ?? "item"}-${index}`}
                 >
                   <span className="cwyc-proposal-item-head">
-                    <span className="cwyc-proposal-item-label">
-                      {row.label || `Note ${row.note_id}`}
+                    {onToggleItem ? (
+                      <input
+                        type="checkbox"
+                        className="cwyc-item-include"
+                        checked={!excluded}
+                        aria-label={`Include ${row.label || row.op || "item"}`}
+                        data-testid={`item-include-${index}`}
+                        onChange={() => onToggleItem(index)}
+                      />
+                    ) : null}
+                    <span className="cwyc-proposal-item-label" title={row.label}>
+                      {row.label || (row.note_id ? `Note ${row.note_id}` : row.op)}
                     </span>
                     {row.fields?.length ? (
                       <span className="cwyc-proposal-item-fields">{row.fields.join(", ")}</span>
                     ) : null}
+                    {row.risk ? (
+                      <span className="cwyc-proposal-item-risk">{row.risk}</span>
+                    ) : null}
                   </span>
+                  {row.revert ? (
+                    <span className="cwyc-proposal-item-revert">{row.revert}</span>
+                  ) : null}
                   {sample ? <WordDiff before={sample.old} after={sample.new} /> : null}
                 </li>
               );

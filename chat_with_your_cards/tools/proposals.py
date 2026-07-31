@@ -547,8 +547,16 @@ def register_proposal_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolSpec(
             "add_to_change_set",
-            "Add one note's edits to an open change set. Same shape as "
-            "propose_note_edit but batched for review as a unit.",
+            "Add ONE item to an open change set - either a note's edits "
+            "(note_id + field_changes/tags, same shape as propose_note_edit) "
+            "OR a generic operation (op + args): suspend/unsuspend/bury/"
+            "unbury_cards, set_card_flag, add/remove_tags, set_due_date, "
+            "forget_cards, reposition_new_cards, set_deck_limits, "
+            "filtered_deck_action - args exactly as the standalone tool "
+            "takes them. The whole set reviews as ONE card (items listed "
+            "with risk class and per-item revertibility; the user can "
+            "exclude single items), draws the budget per ITEM, and applies "
+            "with explicit per-item outcomes.",
             {
                 "type": "object",
                 "properties": {
@@ -560,8 +568,19 @@ def register_proposal_tools(registry: ToolRegistry) -> None:
                     },
                     "add_tags": {"type": "array", "items": {"type": "string"}},
                     "remove_tags": {"type": "array", "items": {"type": "string"}},
+                    "op": {
+                        "type": "string",
+                        "description": "Batchable operation name (instead of "
+                        "note_id); see the tool description for the list.",
+                    },
+                    "args": {
+                        "type": "object",
+                        "description": "The op's arguments, exactly as its "
+                        "standalone tool takes them (minus rationale).",
+                        "additionalProperties": True,
+                    },
                 },
-                "required": ["change_set_id", "note_id"],
+                "required": ["change_set_id"],
             },
             add_to_change_set,
             writes=True,

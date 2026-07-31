@@ -70,6 +70,86 @@ DECK_LIMIT_KEYS = {
     "review_limit": "reviewLimit",
 }
 MAX_DECK_LIMIT = 100_000
+
+# ---- batchable operations (#27): change sets beyond note edits ----
+#
+# Curated allowlist. Each entry declares the RISK CLASS the review card
+# surfaces (the batch inherits the highest class present), an HONEST
+# revertibility label shown up front (undo-UX decision 2026-07-23: never
+# promise batch-wide undo the op class cannot deliver), and a light add-time
+# validator; full validation still happens through the op's own submit path
+# at apply, with an explicit per-item outcome.
+_RISK_ORDER = ("note edits", "note tags", "card state", "scheduling", "deck & structure")
+
+
+def _batch_v_cards(args: dict[str, Any]) -> None:
+    if bool(args.get("card_ids")) == bool(str(args.get("query") or "").strip()):
+        raise ProposalError("needs exactly one of card_ids or query")
+
+
+def _batch_v_flag(args: dict[str, Any]) -> None:
+    _batch_v_cards(args)
+    flag = int(args.get("flag", -99))
+    if not 0 <= flag <= 7:
+        raise ProposalError("flag must be 0-7")
+
+
+def _batch_v_tags(args: dict[str, Any]) -> None:
+    if not [t for t in (args.get("tags") or []) if str(t).strip()]:
+        raise ProposalError("needs a non-empty tags list")
+    if bool(args.get("note_ids")) == bool(str(args.get("query") or "").strip()):
+        raise ProposalError("needs exactly one of note_ids or query")
+
+
+def _batch_v_due(args: dict[str, Any]) -> None:
+    _batch_v_cards(args)
+    if not _DUE_DATE_RE.match(str(args.get("days", "")).strip()):
+        raise ProposalError("days must be 'n', 'n-m', or with trailing '!'")
+
+
+def _batch_v_limits(args: dict[str, Any]) -> None:
+    if not str(args.get("deck", "")).strip():
+        raise ProposalError("needs a deck")
+    if not any(k in args and args[k] is not None for k in DECK_LIMIT_KEYS):
+        raise ProposalError("needs at least one limit value")
+
+
+def _batch_v_filtered(args: dict[str, Any]) -> None:
+    if str(args.get("action", "")).strip() not in ("rebuild", "empty"):
+        raise ProposalError("action must be 'rebuild' or 'empty'")
+
+
+_CLEAN_REVERT = "reverts cleanly from the ledger"
+BATCHABLE_OPS: dict[str, dict[str, Any]] = {
+    "suspend_cards": {"risk": "card state", "revert": _CLEAN_REVERT, "validate": _batch_v_cards},
+    "unsuspend_cards": {"risk": "card state", "revert": _CLEAN_REVERT, "validate": _batch_v_cards},
+    "bury_cards": {"risk": "card state", "revert": _CLEAN_REVERT + " (also expires at rollover)", "validate": _batch_v_cards},
+    "unbury_cards": {"risk": "card state", "revert": _CLEAN_REVERT, "validate": _batch_v_cards},
+    "set_card_flag": {"risk": "card state", "revert": _CLEAN_REVERT, "validate": _batch_v_flag},
+    "add_tags": {"risk": "note tags", "revert": _CLEAN_REVERT + " (exact prior tag lists)", "validate": _batch_v_tags},
+    "remove_tags": {"risk": "note tags", "revert": _CLEAN_REVERT + " (exact prior tag lists)", "validate": _batch_v_tags},
+    "set_due_date": {"risk": "scheduling", "revert": _CLEAN_REVERT + " (exact scheduling restore)", "validate": _batch_v_due},
+    "forget_cards": {"risk": "scheduling", "revert": _CLEAN_REVERT + " (exact scheduling restore)", "validate": _batch_v_cards},
+    "reposition_new_cards": {"risk": "scheduling", "revert": _CLEAN_REVERT, "validate": _batch_v_cards},
+    "set_deck_limits": {"risk": "deck & structure", "revert": _CLEAN_REVERT + " (today-limits also self-expire)", "validate": _batch_v_limits},
+    "filtered_deck_action": {"risk": "deck & structure", "revert": "NOT revertible: the previous gathered set is not stored anywhere", "validate": _batch_v_filtered},
+}
+# submit_* dispatch for the internal apply path; deck ops go through
+# _accept_deck_op, bulk ops through _accept_bulk.
+_BATCH_SUBMIT = {
+    "suspend_cards": "submit_card_state",
+    "unsuspend_cards": "submit_card_state",
+    "bury_cards": "submit_card_state",
+    "unbury_cards": "submit_card_state",
+    "set_card_flag": "submit_card_state",
+    "add_tags": "submit_bulk_tags",
+    "remove_tags": "submit_bulk_tags",
+    "set_due_date": "submit_scheduling",
+    "forget_cards": "submit_scheduling",
+    "reposition_new_cards": "submit_scheduling",
+    "set_deck_limits": "submit_set_deck_limits",
+    "filtered_deck_action": "submit_filtered_deck_action",
+}
 _DUE_DATE_RE = re.compile(r"^\d+(-\d+)?!?$")
 # Every field the three ops can touch, captured per card at apply time so
 # revert is an exact update_card restore - including the new->review
@@ -270,12 +350,25 @@ class Proposal:
             "media": self.media,
             "preview_media": self.preview_media,
             "items": [
-                {
-                    "note_id": item["note_id"],
-                    "label": item.get("label", ""),
-                    "fields": sorted(item.get("field_changes", {})),
-                }
-                for item in self.items
+                (
+                    {
+                        # Generic-op item (#27): index lets the review card
+                        # exclude it on accept; risk/revert are shown up front.
+                        "index": index,
+                        "op": item["op"],
+                        "label": item.get("label", ""),
+                        "risk": item.get("risk", ""),
+                        "revert": item.get("revert", ""),
+                    }
+                    if "op" in item
+                    else {
+                        "index": index,
+                        "note_id": item["note_id"],
+                        "label": item.get("label", ""),
+                        "fields": sorted(item.get("field_changes", {})),
+                    }
+                )
+                for index, item in enumerate(self.items)
             ],
             "open": self.open,
         }
@@ -332,7 +425,18 @@ class ProposalManager:
         media_staging: Any | None = None,
     ) -> None:
         self._get_col = get_col
-        self._push = push
+        # Quiet mode (#27): while a batch applies its items through their
+        # ops' own submit/accept paths, per-item pushes and checkpoints are
+        # suppressed - the batch owns the card, the ledger row and the ONE
+        # backup checkpoint.
+        self._quiet = False
+
+        def _gated_push(payload: dict[str, Any]) -> None:
+            if self._quiet:
+                return
+            push(payload)
+
+        self._push = _gated_push
         self._config = config
         self._save_pins = save_pins
         # Called with the affected note ids after any collection write, so the
@@ -750,6 +854,14 @@ class ProposalManager:
         """Common tail for bulk submissions: apply directly under
         trusted-writes (within budget), otherwise render a proposal card."""
         self._proposals[proposal.id] = proposal
+        if self._quiet:
+            # Internal batch item (#27): the caller drives accept itself.
+            return {
+                "status": "pending_user_review",
+                "proposal_id": proposal.id,
+                "affected": proposal.count,
+                "warnings": proposal.warnings,
+            }
         if (
             self._trusted_enabled()
             and proposal.kind != "delete"
@@ -2110,7 +2222,14 @@ class ProposalManager:
         proposal = self._proposals.get(str(args.get("change_set_id", "")))
         if proposal is None or proposal.kind != "change_set" or not proposal.open:
             raise ProposalError("no open change set with that id")
+        if args.get("op"):
+            return self._add_operation_to_change_set(proposal, args)
         note_id = int(args.get("note_id", 0))
+        if not note_id:
+            raise ProposalError(
+                "each item needs either note_id (a note edit) or op + args "
+                "(a batchable operation)"
+            )
         changes = {str(k): str(v) for k, v in (args.get("field_changes") or {}).items()}
         add_tags = [str(t).strip() for t in (args.get("add_tags") or []) if str(t).strip()]
         remove_tags = [
@@ -2151,6 +2270,46 @@ class ProposalManager:
             self._push({"type": "proposal", "proposal": proposal.to_payload()})
         return {"status": "added", "notes_in_set": proposal.count}
 
+    def _add_operation_to_change_set(
+        self, proposal: Proposal, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Generic-op item (#27): {op, args} instead of note edits."""
+        op = str(args.get("op", ""))
+        spec = BATCHABLE_OPS.get(op)
+        if spec is None:
+            raise ProposalError(
+                f"op {op!r} is not batchable; batchable ops: "
+                + ", ".join(sorted(BATCHABLE_OPS))
+            )
+        op_args = args.get("args")
+        if not isinstance(op_args, dict) or not op_args:
+            raise ProposalError(f"{op} needs an `args` object")
+        try:
+            spec["validate"](op_args)
+        except ProposalError as exc:
+            raise ProposalError(f"{op}: {exc}") from None
+        selector = (
+            str(op_args.get("query") or op_args.get("deck") or op_args.get("pattern") or "")
+            or f"{len(op_args.get('card_ids') or op_args.get('note_ids') or op_args.get('decks') or [])} selected"
+        )
+        proposal.items.append(
+            {
+                "op": op,
+                "args": dict(op_args),
+                "label": f"{op.replace('_', ' ')} — {selector}"[:80],
+                "risk": spec["risk"],
+                "revert": spec["revert"],
+            }
+        )
+        proposal.count = len(proposal.items)
+        if proposal.count <= 3 or proposal.count % 25 == 0:
+            self._push({"type": "proposal", "proposal": proposal.to_payload()})
+        return {
+            "status": "added",
+            "notes_in_set": proposal.count,
+            "revertibility": spec["revert"],
+        }
+
     def close_change_set(self, args: dict[str, Any]) -> dict[str, Any]:
         proposal = self._proposals.get(str(args.get("change_set_id", "")))
         if proposal is None or proposal.kind != "change_set" or not proposal.open:
@@ -2167,6 +2326,11 @@ class ProposalManager:
             proposal.rationale = summary
         proposal.samples = []
         for item in proposal.items[:MAX_SAMPLES]:
+            if "op" in item:
+                proposal.samples.append(
+                    {"text": f"{item['label']} · {item['revert']}"}
+                )
+                continue
             name = next(iter(item["field_changes"]), None)
             if name is None:
                 continue
@@ -2177,6 +2341,22 @@ class ProposalManager:
                     "new": item["field_changes"][name],
                 }
             )
+        # The batch inherits its HIGHEST risk class (#27), and revertibility
+        # variance is declared before accept, never discovered after.
+        op_items = [item for item in proposal.items if "op" in item]
+        if op_items:
+            risks = {item["risk"] for item in op_items}
+            highest = max(risks, key=_RISK_ORDER.index)
+            proposal.warnings.append(
+                f"this batch includes {highest} operations"
+                + (f" (and {len(risks) - 1} lighter class(es))" if len(risks) > 1 else "")
+            )
+            irreversible = [i for i in op_items if i["revert"].startswith("NOT revertible")]
+            if irreversible:
+                proposal.warnings.append(
+                    f"{len(irreversible)} operation(s) can NOT be reverted from "
+                    "the ledger: " + "; ".join(i["label"] for i in irreversible[:3])
+                )
         if self._trusted_enabled() and self._budget_take(len(proposal.items)):
             self._push({"type": "proposal", "proposal": proposal.to_payload()})
             self.accept({"id": proposal.id, "_direct": True})
@@ -2245,6 +2425,8 @@ class ProposalManager:
         """
         col = self._col()
         self._checkpoint_warning = None
+        if backup_reason is not None and self._quiet:
+            backup_reason = None  # the batch took ONE checkpoint up front (#27)
         if backup_reason is not None and not self._checkpoint(backup_reason, critical_backup):
             if critical_backup:
                 raise ProposalError(
@@ -2481,6 +2663,38 @@ class ProposalManager:
         final_fields = {
             str(k): str(v) for k, v in (msg.get("fields") or proposal.fields).items()
         }
+        # Per-item reject (#27): the review card can exclude batch items at
+        # accept time; indices refer to the payload's item order.
+        excluded = msg.get("excluded_items")
+        if (
+            proposal.kind == "change_set"
+            and isinstance(excluded, list)
+            and excluded
+        ):
+            drop = {int(i) for i in excluded}
+            kept = [
+                item
+                for index, item in enumerate(proposal.items)
+                if index not in drop
+            ]
+            if not kept:
+                self._push(
+                    {
+                        "type": "proposal_error",
+                        "id": proposal.id,
+                        "message": "every item was excluded - reject the batch "
+                        "instead if none of it should apply",
+                    }
+                )
+                return
+            removed = len(proposal.items) - len(kept)
+            if removed:
+                proposal.items = kept
+                proposal.count = len(kept)
+                proposal.warnings.append(
+                    f"{removed} item(s) excluded by you at review"
+                )
+
         touched: list[int] = []
         try:
             # create/edit/bulk/delete/change_set all flow through the write
@@ -3181,7 +3395,150 @@ class ProposalManager:
         proposal.status = ACCEPTED
         return existing
 
+    def _internal_apply_op(self, op: str, op_args: dict[str, Any]) -> Proposal:
+        """Run ONE batch item through its op's own submit+accept path (#27),
+        quietly: no UI pushes, no per-item checkpoint, no trusted auto-apply.
+        Full validation therefore still happens exactly where the single-op
+        tools do it. Raises ProposalError on any failure; the caller records
+        the per-item outcome either way."""
+        submit = getattr(self, _BATCH_SUBMIT[op])
+        proposal_id: str | None = None
+        self._quiet = True
+        try:
+            result = submit({**op_args, "op": op})
+            proposal_id = str(result.get("proposal_id") or "")
+            internal = self._proposals.get(proposal_id)
+            if internal is None:
+                raise ProposalError(f"internal submission failed: {result}")
+            if internal.kind == "deck_op":
+                self._accept_deck_op(internal)
+            else:
+                self._accept_bulk(internal)
+            return internal
+        finally:
+            self._quiet = False
+            if proposal_id:
+                # Internal proposals never reach the UI's map.
+                self._proposals.pop(proposal_id, None)
+
     def _accept_change_set(self, proposal: Proposal) -> list[int]:
+        col = self._col()
+        note_items = [i for i in proposal.items if "op" not in i]
+        op_items = [i for i in proposal.items if "op" in i]
+        if not op_items:
+            return self._accept_change_set_notes(proposal)
+
+        # Generic batch (#27): ONE checkpoint up front, then every item
+        # applies with an explicit outcome - never a silent half-applied
+        # batch. Native undo entries are merged best-effort so the whole
+        # batch is one Cmd+Z where the backend allows it.
+        if not self._checkpoint(f"change set: {proposal.title}", False):
+            proposal.warnings.append(
+                "backup checkpoint failed (change set); proceeding without a "
+                "fresh backup — check disk space / permissions"
+            )
+        ledger_mark = len(self._ledger)
+        outcomes: list[str] = []
+        applied_notes: list[int] = []
+        undo_box: dict[str, Any] = {"target": None, "warned": False}
+
+        def merge_undo() -> None:
+            try:
+                status = col.undo_status()
+                step = int(getattr(status, "last_step", 0) or 0)
+                if not step:
+                    return
+                if undo_box["target"] is None:
+                    undo_box["target"] = step
+                elif step != undo_box["target"]:
+                    col.merge_undo_entries(undo_box["target"])
+            except Exception:
+                if not undo_box["warned"]:
+                    undo_box["warned"] = True
+                    proposal.warnings.append(
+                        "items remain separate steps in Anki's native undo "
+                        "(merge unavailable); the ledger still reverts the "
+                        "whole batch"
+                    )
+
+        if note_items:
+
+            def execute(col: Any, snap: invariants.Snapshot) -> _WriteResult:
+                applied, skipped = self._apply_items(col, proposal)
+                return _WriteResult(
+                    (applied, skipped),
+                    invariants.Expectation(),
+                    invariants.Scope(
+                        note_ids=tuple(int(n) for n in applied),
+                        written_note_ids=tuple(int(n) for n in applied),
+                    ),
+                    undo_steps=len(applied),
+                )
+
+            try:
+                applied_notes, skipped = self._apply_write(
+                    execute=execute, backup_reason=None, lenient_cards=True
+                )
+                line = f"note edits: {len(applied_notes)} applied"
+                if skipped:
+                    line += f", {len(skipped)} skipped (changed since planning)"
+                outcomes.append(line)
+                merge_undo()
+            except ProposalError as exc:
+                outcomes.append(f"note edits: FAILED — {exc}")
+
+        for item in op_items:
+            before_len = len(self._ledger)
+            try:
+                internal = self._internal_apply_op(item["op"], item["args"])
+                line = f"{item['label']}: applied"
+                if internal.warnings:
+                    line += f" ({'; '.join(internal.warnings[:2])})"
+                outcomes.append(line)
+                if len(self._ledger) == before_len:
+                    # Applied but left no revert data (e.g. filtered rebuild):
+                    # a tombstone sub so the batch REVERT names it too, not
+                    # only the review card.
+                    self._ledger.append(
+                        LedgerEntry(
+                            id=proposal.id,
+                            kind="batch_item",
+                            note_id=0,
+                            label=item["label"],
+                            data={},
+                            revertible=False,
+                        )
+                    )
+                merge_undo()
+            except ProposalError as exc:
+                outcomes.append(f"{item['label']}: FAILED — {exc}")
+
+        # One ledger row for the batch; per-item revert data rides inside,
+        # each sub keeping its own revertibility (declared up front at close).
+        subs = list(self._ledger[ledger_mark:])
+        del self._ledger[ledger_mark:]
+        self._ledger.append(
+            LedgerEntry(
+                id=proposal.id,
+                kind="batch",
+                note_id=0,
+                label=(proposal.title or "batch") + f" ({len(proposal.items)} items)",
+                data={"sub": subs},
+                revertible=any(s.revertible for s in subs),
+            )
+        )
+        failed = sum(1 for line in outcomes if "FAILED" in line)
+        if failed:
+            proposal.warnings.append(
+                f"{failed} of {len(outcomes)} item(s) FAILED — outcomes below"
+            )
+        proposal.warnings.extend(outcomes[:12])
+        if len(outcomes) > 12:
+            proposal.warnings.append(f"… and {len(outcomes) - 12} more outcome(s)")
+        proposal.status = ACCEPTED
+        return applied_notes
+
+    def _accept_change_set_notes(self, proposal: Proposal) -> list[int]:
         col = self._col()
         before = self._counts(col)
 
@@ -3229,6 +3586,8 @@ class ProposalManager:
         skipped: list[str] = []
         priors: list[dict[str, Any]] = []
         for item in proposal.items:
+            if "op" in item:
+                continue  # generic-op items apply through their own path (#27)
             try:
                 note = col.get_note(item["note_id"])
             except Exception:
@@ -3700,6 +4059,40 @@ class ProposalManager:
             # Tag revert rewrites notes via update_note; refresh tracked
             # learning snapshots so the restore is not read as a user edit.
             resync = [int(n) for n in entry.data.get("prior", {})]
+
+        if entry.kind == "batch":
+            # Generic batch (#27): revert items in REVERSE apply order, each
+            # through its own op-class revert path. Per-item revertibility was
+            # declared up front; a non-revertible sub is reported, never a
+            # silent skip, and one failure does not strand the rest.
+            failures: list[str] = []
+            reverted = 0
+            for sub in reversed(entry.data.get("sub", [])):
+                if sub.undone:
+                    continue
+                if not sub.revertible:
+                    failures.append(f"{sub.label}: not revertible")
+                    continue
+                try:
+                    self._revert_entry(sub, force=force)
+                    reverted += 1
+                except ProposalError as exc:
+                    failures.append(f"{sub.label}: {exc}")
+            if failures:
+                self._push(
+                    {
+                        "type": "notice",
+                        "text": f"Batch revert: {reverted} item(s) restored; "
+                        + "; ".join(failures[:3])
+                        + ("" if len(failures) <= 3 else f"; +{len(failures) - 3} more"),
+                    }
+                )
+            if reverted == 0 and failures:
+                raise ProposalError(
+                    "nothing in this batch could be reverted: " + failures[0]
+                )
+            entry.undone = True
+            return
 
         if entry.kind == "deck_op":
             # SAFETY: deck-op reverts flow through _revert_deck_op, which looks

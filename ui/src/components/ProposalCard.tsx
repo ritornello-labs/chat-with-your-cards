@@ -568,8 +568,31 @@ function LegacyProposalCard({ data, store }: ProposalCardProps) {
 
   const previews = asPreviews(data.previews);
 
+  // Per-item reject for batches (#27): unchecked indices are excluded at
+  // accept. Re-seeded when the proposal identity changes, like the drafts.
+  const [excludedItems, setExcludedItems] = useState<Set<number>>(new Set());
+  const excludedSeed = useRef(data.id);
+  if (excludedSeed.current !== data.id) {
+    excludedSeed.current = data.id;
+    setExcludedItems(new Set());
+  }
+  const batchReview = data.kind === "change_set" && pending;
+  const toggleItem = (index: number) =>
+    setExcludedItems((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+
   useProposalActionKeys(data.id, pending, {
-    accept: () => store.acceptProposal(data.id, values, data.kind),
+    accept: () =>
+      store.acceptProposal(
+        data.id,
+        values,
+        data.kind,
+        batchReview ? excludedItems : undefined
+      ),
     reject: () => store.rejectProposal(data.id),
   });
 
@@ -612,7 +635,11 @@ function LegacyProposalCard({ data, store }: ProposalCardProps) {
       <StagedVisualStrip media={(data as { media?: unknown }).media} />
 
       {!editableFields ? (
-        <ProposalBody data={data} />
+        <ProposalBody
+          data={data}
+          excludedItems={batchReview ? excludedItems : undefined}
+          onToggleItem={batchReview ? toggleItem : undefined}
+        />
       ) : fields.length > 0 ? (
         <div className="cwyc-proposal-fields">
           {fields.map((field) => (
@@ -716,7 +743,14 @@ function LegacyProposalCard({ data, store }: ProposalCardProps) {
           <button
             type="button"
             className="cwyc-btn-accept cwyc-primary"
-            onClick={() => store.acceptProposal(data.id, values, data.kind)}
+            onClick={() =>
+              store.acceptProposal(
+                data.id,
+                values,
+                data.kind,
+                batchReview ? excludedItems : undefined
+              )
+            }
             data-testid="proposal-approve"
           >
             {data.kind === "delete" ? "Delete" : data.kind === "deck_op" ? "Apply" : "Accept"}

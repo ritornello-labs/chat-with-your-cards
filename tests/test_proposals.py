@@ -1915,6 +1915,156 @@ class CardStateTests(unittest.TestCase):
         self.assertIn("clear the flag on 3 card(s)", manager._ledger[-1].label)
 
 
+class BatchChangeSetTests(unittest.TestCase):
+    """Change sets generalized to arbitrary ops (#27): validation, risk and
+    revertibility declared up front, per-item exclusion at accept, explicit
+    per-item outcomes, one batch ledger row, reverse-order revert."""
+
+    def _setup(self):
+        manager, col, pushed = make_manager()
+        note_ids = _seed_notes(manager, col, pushed)
+        card_ids = [col.get_note(nid)._cards[0].id for nid in note_ids]
+        cs = manager.open_change_set({"title": "big sweep"})
+        return manager, col, pushed, note_ids, card_ids, cs["change_set_id"]
+
+    def test_add_validation(self) -> None:
+        manager, col, pushed, nids, cids, cs_id = self._setup()
+        with self.assertRaisesRegex(ProposalError, "not batchable"):
+            manager.add_to_change_set(
+                {"change_set_id": cs_id, "op": "delete_notes", "args": {"x": 1}}
+            )
+        with self.assertRaisesRegex(ProposalError, "days must be"):
+            manager.add_to_change_set(
+                {
+                    "change_set_id": cs_id,
+                    "op": "set_due_date",
+                    "args": {"card_ids": cids, "days": "soon"},
+                }
+            )
+        with self.assertRaisesRegex(ProposalError, "note_id .*or op"):
+            manager.add_to_change_set({"change_set_id": cs_id})
+
+    def test_mixed_batch_apply_outcomes_and_revert(self) -> None:
+        manager, col, pushed, nids, cids, cs_id = self._setup()
+        # A filtered deck for the NOT-revertible item.
+        created = manager.submit_create_filtered_deck(
+            {
+                "name": "Cram",
+                "terms": [{"search": 'deck:"Default"', "limit": 1, "order": 6}],
+            }
+        )
+        manager.accept({"id": created["proposal_id"]})
+        col.sched.empty_filtered_deck(col.decks.id_for_name("Cram"))
+
+        manager.add_to_change_set(
+            {
+                "change_set_id": cs_id,
+                "note_id": nids[0],
+                "field_changes": {"Back": "batched back"},
+            }
+        )
+        manager.add_to_change_set(
+            {
+                "change_set_id": cs_id,
+                "op": "suspend_cards",
+                "args": {"card_ids": [cids[1]]},
+            }
+        )
+        manager.add_to_change_set(
+            {
+                "change_set_id": cs_id,
+                "op": "filtered_deck_action",
+                "args": {"deck": "Cram", "action": "rebuild"},
+            }
+        )
+        result = manager.close_change_set({"change_set_id": cs_id})
+        proposal = pushes_of(pushed, "proposal")[-1]["proposal"]
+        # Risk + revertibility declared before accept, never discovered after.
+        self.assertTrue(
+            any("deck & structure operations" in w for w in proposal["warnings"])
+        )
+        self.assertTrue(any("can NOT be reverted" in w for w in proposal["warnings"]))
+        op_rows = [i for i in proposal["items"] if "op" in i]
+        self.assertEqual(2, len(op_rows))
+        self.assertTrue(all("revert" in row and "index" in row for row in op_rows))
+
+        ledger_before = len(manager._ledger)
+        manager.accept({"id": result["change_set_id"]})
+        self.assertEqual("batched back", col.get_note(nids[0])["Back"])
+        self.assertEqual(-1, col.get_card(cids[1]).queue)
+        cram = col.decks.id_for_name("Cram")
+        self.assertEqual(1, len([c for c in col._cards.values() if c.did == cram]))
+        # ONE batch ledger row wrapping every item's revert data.
+        self.assertEqual(ledger_before + 1, len(manager._ledger))
+        batch = manager._ledger[-1]
+        self.assertEqual("batch", batch.kind)
+        self.assertEqual(3, len(batch.data["sub"]))
+        resolved = pushes_of(pushed, "proposal_resolved")[-1]
+        outcomes = [w for w in resolved["warnings"] if "applied" in w]
+        self.assertEqual(3, len(outcomes), resolved["warnings"])
+
+        manager.revert({"id": result["change_set_id"]})
+        self.assertNotEqual("batched back", col.get_note(nids[0])["Back"])
+        self.assertEqual(2, col.get_card(cids[1]).queue)
+        self.assertTrue(batch.undone)
+        notices = [p["text"] for p in pushes_of(pushed, "notice")]
+        self.assertTrue(any("not revertible" in t for t in notices), notices)
+
+    def test_excluded_items_are_skipped_with_a_note(self) -> None:
+        manager, col, pushed, nids, cids, cs_id = self._setup()
+        manager.add_to_change_set(
+            {
+                "change_set_id": cs_id,
+                "op": "suspend_cards",
+                "args": {"card_ids": [cids[0]]},
+            }
+        )
+        manager.add_to_change_set(
+            {
+                "change_set_id": cs_id,
+                "op": "set_card_flag",
+                "args": {"card_ids": [cids[1]], "flag": 2},
+            }
+        )
+        result = manager.close_change_set({"change_set_id": cs_id})
+        manager.accept({"id": result["change_set_id"], "excluded_items": [0]})
+        self.assertEqual(2, col.get_card(cids[0]).queue)  # suspend excluded
+        self.assertEqual(2, col.get_card(cids[1]).flags & 0x7)  # flag applied
+        resolved = pushes_of(pushed, "proposal_resolved")[-1]
+        self.assertTrue(
+            any("excluded by you" in w for w in resolved["warnings"]),
+            resolved["warnings"],
+        )
+
+    def test_failing_item_reports_and_does_not_strand_the_rest(self) -> None:
+        manager, col, pushed, nids, cids, cs_id = self._setup()
+        manager.add_to_change_set(
+            {
+                "change_set_id": cs_id,
+                "op": "set_deck_limits",
+                "args": {"deck": "NoSuchDeck", "new_limit_today": 0},
+            }
+        )
+        manager.add_to_change_set(
+            {
+                "change_set_id": cs_id,
+                "op": "suspend_cards",
+                "args": {"card_ids": [cids[0]]},
+            }
+        )
+        result = manager.close_change_set({"change_set_id": cs_id})
+        manager.accept({"id": result["change_set_id"]})
+        self.assertEqual(-1, col.get_card(cids[0]).queue)  # later item applied
+        resolved = pushes_of(pushed, "proposal_resolved")[-1]
+        self.assertTrue(
+            any("FAILED" in w for w in resolved["warnings"]), resolved["warnings"]
+        )
+        self.assertTrue(
+            any("1 of 2 item(s) FAILED" in w for w in resolved["warnings"]),
+            resolved["warnings"],
+        )
+
+
 class DeckLimitsTests(unittest.TestCase):
     """Per-deck limits (#25): today-only overrides + permanent caps, on the
     DECK object (not the preset), with -1 clearing and subtree cascade."""

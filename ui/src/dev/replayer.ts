@@ -551,6 +551,39 @@ function openChangeSetScript(): Step[] {
   ];
 }
 
+/** Generic batch (#27): a CLOSED change set mixing note edits and ops, with
+ *  per-item risk/revertibility and the exclusion checkboxes live. */
+function batchProposalScript(): Step[] {
+  const id = nextProposalId("bt");
+  return [
+    { kind: "text", text: "One batch for the whole cleanup - uncheck anything you disagree with:\n\n" },
+    {
+      kind: "proposal",
+      proposal: baseProposal({
+        id,
+        kind: "change_set",
+        title: "Post-exam cleanup",
+        rationale: "Suspend the leeches, push the backlog past the exam, rebuild the cram deck.",
+        count: 4,
+        open: false,
+        warnings: [
+          "this batch includes deck & structure operations (and 2 lighter class(es))",
+          "1 operation(s) can NOT be reverted from the ledger: filtered deck action — Cram::Exam",
+        ],
+        samples: [
+          { label: "Cauchy sequence", old: "Answer with the old phrasing", new: "Answer with the tightened phrasing" },
+        ],
+        items: [
+          { index: 0, note_id: 1500001, label: "Cauchy sequence", fields: ["Back"] },
+          { index: 1, op: "suspend_cards", label: "suspend cards — tag:leech", risk: "card state", revert: "reverts cleanly from the ledger" },
+          { index: 2, op: "set_due_date", label: "set due date — deck:\"Math\" is:due", risk: "scheduling", revert: "reverts cleanly from the ledger (exact scheduling restore)" },
+          { index: 3, op: "filtered_deck_action", label: "filtered deck action — Cram::Exam", risk: "deck & structure", revert: "NOT revertible: the previous gathered set is not stored anywhere" },
+        ],
+      }),
+    },
+  ];
+}
+
 function skillProposalScript(): Step[] {
   const id = nextProposalId("s");
   const diff = [
@@ -867,6 +900,7 @@ function selectScript(userText: string): Step[] {
   if (text.includes("bulk") || text.includes("replace")) return bulkProposalScript();
   if (text.includes("suspend") || text.includes("flag")) return suspendProposalScript();
   if (text.includes("delete")) return deleteProposalScript();
+  if (text.includes("batch")) return batchProposalScript();
   if (text.includes("collect") || text.includes("change set")) return openChangeSetScript();
   if (text.includes("skill")) return skillProposalScript();
   if (text.includes("edit")) return editProposalScript();

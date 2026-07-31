@@ -615,6 +615,85 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
 
     check("composer attachments stage/chip/remove (#15a)", _composer_attachments_flow)
 
+    def _generic_batch_flow() -> dict[str, Any]:
+        """#27 against real Anki: a mixed batch (note edit + suspend +
+        set_due_date) applies with per-item outcomes, merges into ONE native
+        undo step where the backend allows, lands as one batch ledger row,
+        and reverts in reverse order restoring everything."""
+        col = mw.col
+        nid1 = _new_note("batch note", deck="ProbeBatch27", back="orig back")
+        nid2 = _new_note("batch suspend", deck="ProbeBatch27")
+        nid3 = _new_note("batch due", deck="ProbeBatch27")
+        cid2 = int(col.get_note(nid2).cards()[0].id)
+        cid3 = int(col.get_note(nid3).cards()[0].id)
+        prior3 = col.get_card(cid3)
+        prior3_state = (prior3.type, prior3.queue, prior3.due, prior3.ivl)
+
+        cs = proposals.open_change_set({"title": "probe batch"})
+        cs_id = cs["change_set_id"]
+        proposals.add_to_change_set(
+            {
+                "change_set_id": cs_id,
+                "note_id": nid1,
+                "field_changes": {"Back": "batched back"},
+            }
+        )
+        proposals.add_to_change_set(
+            {"change_set_id": cs_id, "op": "suspend_cards", "args": {"card_ids": [cid2]}}
+        )
+        proposals.add_to_change_set(
+            {
+                "change_set_id": cs_id,
+                "op": "set_due_date",
+                "args": {"card_ids": [cid3], "days": "9!"},
+            }
+        )
+        with _capture_pushes(proposals) as pushes:
+            result = proposals.close_change_set({"change_set_id": cs_id})
+            card = next(p["proposal"] for p in pushes if p.get("type") == "proposal")
+            if not any("card state" in str(i.get("risk", "")) for i in card["items"]):
+                raise AssertionError(f"risk classes missing from items: {card['items']}")
+            proposals.accept({"id": result["change_set_id"]})
+            resolved = [p for p in pushes if p.get("type") == "proposal_resolved"][-1]
+
+        if col.get_note(nid1)["Back"] != "batched back":
+            raise AssertionError("batch note edit did not apply")
+        if col.get_card(cid2).queue != -1:
+            raise AssertionError("batch suspend did not apply")
+        today = int(col.sched.today)
+        if col.get_card(cid3).due != today + 9 or col.get_card(cid3).ivl != 9:
+            raise AssertionError("batch set_due_date did not apply")
+        outcomes = [w for w in resolved.get("warnings", []) if "applied" in w]
+        if len(outcomes) != 3:
+            raise AssertionError(f"expected 3 per-item outcomes: {resolved.get('warnings')}")
+        merge_warned = any(
+            "separate steps" in w for w in resolved.get("warnings", [])
+        )
+        undo_label = str(getattr(col.undo_status(), "undo", ""))
+
+        batch_entries = [e for e in proposals._ledger if e.kind == "batch"]
+        if len(batch_entries) != 1:
+            raise AssertionError(f"expected one batch ledger row: {proposals._ledger}")
+
+        proposals.revert({"id": result["change_set_id"]})
+        if col.get_note(nid1)["Back"] == "batched back":
+            raise AssertionError("batch revert did not restore the note")
+        if col.get_card(cid2).queue == -1:
+            raise AssertionError("batch revert did not unsuspend")
+        after3 = col.get_card(cid3)
+        if (after3.type, after3.queue, after3.due, after3.ivl) != prior3_state:
+            raise AssertionError(
+                f"batch revert did not restore scheduling: "
+                f"{(after3.type, after3.queue, after3.due, after3.ivl)} != {prior3_state}"
+            )
+        return {
+            "outcomes": len(outcomes),
+            "undo_label": undo_label,
+            "undo_merged": not merge_warned,
+        }
+
+    check("generic batch: mixed ops apply+outcomes+revert (#27)", _generic_batch_flow)
+
     def _change_set() -> dict[str, Any]:
         ids = [_new_note(f"cs {i}", back="orig") for i in range(3)]
         cs = proposals.open_change_set({"title": "probe sweep"})
