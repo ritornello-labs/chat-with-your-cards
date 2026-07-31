@@ -56,6 +56,7 @@ const COUNT_NOUNS: Record<string, [string, string]> = {
   forget_cards: ["card", "cards"],
   reposition_new_cards: ["card", "cards"],
   set_deck_limits: ["change", "changes"],
+  filtered_deck_action: ["deck", "decks"],
   find_replace: ["note", "notes"],
   rename_tag: ["note", "notes"],
   // skill_update counts the OBSERVED EDITS behind the suggestion, not notes.

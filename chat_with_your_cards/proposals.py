@@ -1805,21 +1805,72 @@ class ProposalManager:
         )
 
     def submit_filtered_deck_action(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Rebuild/empty filtered decks - ONE review card for many decks.
+
+        #27's quick win (user hit live 2026-07-23: 50 rebuilds meant 50
+        review cards). Selection: `deck` (one name), `decks` (list), or
+        `pattern` (glob over FILTERED deck names, e.g. 'Cram::*') - exactly
+        one of the three.
+        """
+        import fnmatch
+
         col = self._col()
-        deck_name = str(args.get("deck", "")).strip()
         action = str(args.get("action", "")).strip()
         if action not in ("rebuild", "empty"):
             raise ProposalError("action must be 'rebuild' or 'empty'")
-        _did, deck = self._deck_by_name(col, deck_name)
-        if not deck.get("dyn"):
-            raise ProposalError(f"{deck_name!r} is not a filtered deck")
+        deck_name = str(args.get("deck", "")).strip()
+        deck_list = [str(d).strip() for d in (args.get("decks") or []) if str(d).strip()]
+        pattern = str(args.get("pattern", "")).strip()
+        selectors = sum(1 for s in (deck_name, deck_list, pattern) if s)
+        if selectors != 1:
+            raise ProposalError(
+                "filtered_deck_action needs exactly one of deck, decks, or pattern"
+            )
+        if deck_name:
+            names = [deck_name]
+        elif deck_list:
+            names = list(dict.fromkeys(deck_list))
+        else:
+            names = [
+                n
+                for n in self._deck_names(col)
+                if fnmatch.fnmatchcase(n, pattern)
+            ]
+            # Pattern selection filters to filtered decks below; a pattern
+            # matching nothing filtered is a clean error, not a no-op.
+        resolved: list[str] = []
+        not_filtered: list[str] = []
+        for name in names:
+            _did, deck = self._deck_by_name(col, name)
+            if deck.get("dyn"):
+                resolved.append(name)
+            elif not pattern:
+                not_filtered.append(name)
+            # pattern mode: silently skip normal decks the glob swept up
+        if not_filtered:
+            raise ProposalError(
+                f"not filtered deck(s): {', '.join(repr(n) for n in not_filtered)}"
+            )
+        if not resolved:
+            raise ProposalError(
+                f"no filtered decks match {pattern!r}"
+                if pattern
+                else "no filtered decks selected"
+            )
         verb = "Rebuild" if action == "rebuild" else "Empty"
+        samples = [
+            f'{verb} filtered deck "{name}"' for name in resolved[: MAX_SAMPLES + 1]
+        ]
+        if len(resolved) > MAX_SAMPLES + 1:
+            samples = samples[: MAX_SAMPLES + 1]
+            samples.append(f"… and {len(resolved) - MAX_SAMPLES - 1} more")
         return self._deck_op_proposal(
             op="filtered_deck_action",
-            op_args={"deck": deck_name, "action": action},
-            deck=deck_name,
+            op_args={"decks": resolved, "action": action},
+            deck=resolved[0] if len(resolved) == 1 else f"{len(resolved)} filtered decks",
             rationale=str(args.get("rationale", "")),
-            samples=[f'{verb} filtered deck "{deck_name}"'],
+            samples=samples,
+            count=len(resolved),
         )
 
     def submit_skill_update(
@@ -2980,15 +3031,29 @@ class ProposalManager:
                     )
                 )
             elif proposal.op == "filtered_deck_action":
-                did, deck = self._deck_by_name(col, a["deck"])
-                if not deck.get("dyn"):
-                    raise ProposalError(f'{a["deck"]!r} is not a filtered deck')
-                if a["action"] == "rebuild":
-                    proposal.warnings = self._gather_note(
-                        self._rebuild_filtered(col, did)
+                # One card may carry many decks (#27 quick win). Per-deck
+                # outcomes surface as warnings so a batch never reads as one
+                # opaque success.
+                names = [
+                    str(n)
+                    for n in (
+                        a.get("decks") or ([a["deck"]] if a.get("deck") else [])
                     )
-                else:
-                    col.sched.empty_filtered_deck(did)
+                ]
+                outcomes: list[str] = []
+                for name in names:
+                    did, deck = self._deck_by_name(col, name)
+                    if not deck.get("dyn"):
+                        raise ProposalError(f"{name!r} is not a filtered deck")
+                    if a["action"] == "rebuild":
+                        note = self._gather_note(self._rebuild_filtered(col, did))
+                        if note:
+                            outcomes.append(
+                                f'"{name}": {note[0]}' if len(names) > 1 else note[0]
+                            )
+                    else:
+                        col.sched.empty_filtered_deck(did)
+                proposal.warnings = outcomes
                 # No ledger entry: nothing restorable (see _kind_revertible).
             else:
                 raise ProposalError(f"unknown deck op {proposal.op!r}")

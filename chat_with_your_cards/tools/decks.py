@@ -307,16 +307,31 @@ def register_deck_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolSpec(
             "filtered_deck_action",
-            "Rebuild a filtered deck (re-gather cards with its current "
-            "terms) or empty it (return all its cards to their home decks).",
+            "Rebuild filtered decks (re-gather with current terms) or empty "
+            "them (cards return home). Batch-friendly: pass one `deck`, a "
+            "`decks` list, or a `pattern` glob over filtered-deck names "
+            "(e.g. 'Cram::*') - ONE review card either way, with per-deck "
+            "gather counts on the resolved card.",
             {
                 "type": "object",
                 "properties": {
-                    "deck": {"type": "string"},
+                    "deck": {"type": "string", "description": "One filtered deck"},
+                    "decks": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Several filtered decks; exactly one "
+                        "of deck / decks / pattern",
+                    },
+                    "pattern": {
+                        "type": "string",
+                        "description": "Glob over filtered-deck names, e.g. "
+                        "'Cram::*' or '*Backlog*'; normal decks it sweeps up "
+                        "are skipped",
+                    },
                     "action": {"type": "string", "enum": ["rebuild", "empty"]},
                     "rationale": {"type": "string"},
                 },
-                "required": ["deck", "action"],
+                "required": ["action"],
             },
             filtered_deck_action,
             writes=True,

@@ -2704,6 +2704,48 @@ class DeckOpTests(unittest.TestCase):
                 {"name": "Default", "terms": [{"search": "a"}]}
             )
 
+    def test_filtered_deck_action_batches_many_decks(self) -> None:
+        # #27's quick win: the 50-rebuilds case is ONE review card with
+        # per-deck outcomes; a pattern sweeps filtered decks by glob.
+        manager, col, pushed = make_manager()
+        _seed_notes(manager, col, pushed)
+        for name in ("Cram::A", "Cram::B"):
+            manager.submit_create_filtered_deck(
+                {
+                    "name": name,
+                    "terms": [{"search": 'deck:"Default"', "limit": 1, "order": 6}],
+                }
+            )
+            self._accept_last(manager, pushed)
+        with self.assertRaisesRegex(ProposalError, "exactly one of"):
+            manager.submit_filtered_deck_action({"action": "rebuild"})
+        with self.assertRaisesRegex(ProposalError, "exactly one of"):
+            manager.submit_filtered_deck_action(
+                {"deck": "Cram::A", "decks": ["Cram::B"], "action": "rebuild"}
+            )
+        with self.assertRaisesRegex(ProposalError, "no filtered decks match"):
+            manager.submit_filtered_deck_action(
+                {"pattern": "Nope::*", "action": "rebuild"}
+            )
+        # Pattern sweeps both filtered decks and skips normal ones silently.
+        result = manager.submit_filtered_deck_action(
+            {"pattern": "Cram::*", "action": "rebuild"}
+        )
+        proposal = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertEqual(2, proposal["count"])
+        self.assertEqual("rebuild", proposal["op_args"]["action"])
+        self.assertEqual(["Cram::A", "Cram::B"], sorted(proposal["op_args"]["decks"]))
+        manager.accept({"id": result["proposal_id"]})
+        resolved = self._last_resolved(pushed)
+        # Per-deck outcomes, never one opaque success.
+        self.assertEqual(2, len(resolved["warnings"]))
+        self.assertTrue(all("gathered" in w for w in resolved["warnings"]))
+        # An explicit list containing a NORMAL deck is a loud error.
+        with self.assertRaisesRegex(ProposalError, "not filtered deck"):
+            manager.submit_filtered_deck_action(
+                {"decks": ["Cram::A", "Default"], "action": "empty"}
+            )
+
     def test_ops_reject_wrong_deck_type(self) -> None:
         manager, col, _pushed = make_manager()
         col.decks.new_filtered("Cram")

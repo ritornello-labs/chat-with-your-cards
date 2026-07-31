@@ -491,6 +491,38 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
 
     check("large preview window opens over a real proposal (#2)", _preview_window_flow)
 
+    def _batch_filtered_actions() -> dict[str, Any]:
+        """#27 quick win against real Anki: a pattern selects several
+        filtered decks, ONE review card rebuilds them all, per-deck gather
+        counts come back on the resolved card."""
+        for i in range(2):
+            _new_note(f"batch filter {i}", deck="ProbeBatchSrc")
+        for name in ("ProbeBatch::A", "ProbeBatch::B"):
+            created = proposals.submit_create_filtered_deck(
+                {
+                    "name": name,
+                    "terms": [
+                        {"search": 'deck:"ProbeBatchSrc"', "limit": 1, "order": 5}
+                    ],
+                }
+            )
+            proposals.accept({"id": created["proposal_id"]})
+        with _capture_pushes(proposals) as pushes:
+            result = proposals.submit_filtered_deck_action(
+                {"pattern": "ProbeBatch::*", "action": "rebuild"}
+            )
+            proposals.accept({"id": result["proposal_id"]})
+        cards = [p["proposal"] for p in pushes if p.get("type") == "proposal"]
+        if not cards or cards[0]["count"] != 2:
+            raise AssertionError(f"batch card wrong: {cards and cards[0].get('count')}")
+        resolved = [p for p in pushes if p.get("type") == "proposal_resolved"]
+        outcomes = resolved[-1].get("warnings") or []
+        if len(outcomes) != 2 or not all("gathered" in w for w in outcomes):
+            raise AssertionError(f"per-deck outcomes missing: {outcomes}")
+        return {"outcomes": outcomes}
+
+    check("batched filtered-deck rebuild via pattern (#27 quick win)", _batch_filtered_actions)
+
     def _change_set() -> dict[str, Any]:
         ids = [_new_note(f"cs {i}", back="orig") for i in range(3)]
         cs = proposals.open_change_set({"title": "probe sweep"})
