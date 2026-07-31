@@ -50,6 +50,10 @@ FLAG_NAMES = {
 # Explicit id lists ride in op_args, which ships verbatim to the UI payload -
 # a query is the right vehicle for anything bigger.
 MAX_EXPLICIT_CARD_IDS = 2000
+
+# Bulk tag ops (#4): Anki separates tags with spaces, so a "tag with spaces"
+# is actually several tags - reject it instead of silently splitting.
+MAX_TAGS_PER_OP = 10
 # Per-card inspection cap at submit (no-op / filtered-deck warnings). Purely
 # advisory: accept captures true prior state per card regardless of size.
 CARD_STATE_INSPECT_MAX = 500
@@ -896,6 +900,164 @@ class ProposalManager:
             warnings=warnings,
         )
         return self._finish_submission(proposal, len(card_ids))
+
+    def submit_bulk_tags(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Bulk tag add/remove (#4): Anki Browse's Add Tags / Remove Tags.
+
+        Same selection contract as the card-state ops - exactly one of
+        note_ids or query - one proposal card with an honest count. No
+        wildcards on either op (probed against the real backend 2026-07-31:
+        bulk_remove silently ignores '*'); removal instead follows Anki's
+        hierarchy semantics - removing "X" also removes "X::child" tags.
+        `remove_tags` over query 'tag:"X"' with tags ["X"] is the
+        delete-a-tag idiom.
+        """
+        col = self._col()
+        op = str(args.get("op", ""))
+        if op not in ("add_tags", "remove_tags"):
+            raise ProposalError(f"unknown tag op {op!r}")
+        tags = [str(t).strip() for t in (args.get("tags") or []) if str(t).strip()]
+        if not tags:
+            raise ProposalError(f"{op} needs a non-empty tags list")
+        if len(tags) > MAX_TAGS_PER_OP:
+            raise ProposalError(f"at most {MAX_TAGS_PER_OP} tags per operation")
+        for tag in tags:
+            if " " in tag or '"' in tag:
+                raise ProposalError(
+                    f"invalid tag {tag!r}: spaces separate tags in Anki - "
+                    "use :: for hierarchy or _ inside a name"
+                )
+            if "*" in tag:
+                # The backend silently ignores '*' (verified on 25.09), so a
+                # wildcard here would no-op while looking accepted.
+                hint = (
+                    " - removing a parent tag also removes its ::children"
+                    if op == "remove_tags"
+                    else ""
+                )
+                raise ProposalError(
+                    f"invalid tag {tag!r}: wildcards are not supported{hint}"
+                )
+        raw_ids = args.get("note_ids") or []
+        query = str(args.get("query") or "").strip()
+        if bool(raw_ids) == bool(query):
+            raise ProposalError(f"{op} needs exactly one of note_ids or query")
+        warnings: list[str] = []
+        if raw_ids:
+            ids = list(dict.fromkeys(int(n) for n in raw_ids))
+            if len(ids) > MAX_EXPLICIT_CARD_IDS:
+                raise ProposalError(
+                    f"{len(ids)} explicit note_ids is too many "
+                    f"(max {MAX_EXPLICIT_CARD_IDS}); pass a query instead"
+                )
+            live = []
+            missing = 0
+            for nid in ids:
+                try:
+                    col.get_note(nid)
+                except Exception:
+                    missing += 1
+                    continue
+                live.append(nid)
+            if not live:
+                raise ProposalError("none of those notes exist")
+            if missing:
+                warnings.append(f"{missing} note id(s) do not exist and were dropped")
+            scope_text = f"{len(live)} selected note(s)"
+        else:
+            try:
+                live = [int(n) for n in col.find_notes(query)]
+            except Exception as exc:
+                raise ProposalError(f"bad query {query!r}: {exc}") from None
+            if not live:
+                raise ProposalError(
+                    self._empty_query_error(col, query, f"no notes match {query!r}")
+                )
+            scope_text = f"{len(live)} note(s) matching {query!r}"
+        # Advisory no-op accounting, bounded like the card-state ops. Removal
+        # mirrors the backend's hierarchy semantics: "X" also hits "X::child".
+        if len(live) <= CARD_STATE_INSPECT_MAX:
+            wanted = {t.lower() for t in tags}
+            noop = 0
+            for nid in live:
+                have = {t.lower() for t in col.get_note(nid).tags}
+                if op == "add_tags" and wanted <= have:
+                    noop += 1
+                elif op == "remove_tags" and not any(
+                    h == w or h.startswith(w + "::") for h in have for w in wanted
+                ):
+                    noop += 1
+            if noop:
+                already = (
+                    "already carry all of those tags"
+                    if op == "add_tags"
+                    else "carry none of those tags"
+                )
+                warnings.append(f"{noop} of these note(s) {already} (no change)")
+        verb = "Add" if op == "add_tags" else "Remove"
+        joined = ", ".join(tags)
+        samples = [{"text": f"{verb} {joined} — {scope_text}"}]
+        for nid in live[:MAX_SAMPLES]:
+            try:
+                note = col.get_note(nid)
+                samples.append(
+                    {"text": _short_label(next(iter(dict(note.items()).values()), ""))}
+                )
+            except Exception:
+                continue
+        op_args: dict[str, Any] = {"tags": tags}
+        if raw_ids:
+            op_args["note_ids"] = live
+        else:
+            op_args["query"] = query
+        proposal = Proposal(
+            id=self._next_id(),
+            kind="bulk",
+            op=op,
+            op_args=op_args,
+            note_type="",
+            deck="",
+            tags=tags,
+            fields={},
+            rationale=str(args.get("rationale", "")),
+            count=len(live),
+            samples=samples,
+            warnings=warnings,
+        )
+        return self._finish_submission(proposal, len(live))
+
+    def submit_clear_unused_tags(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Anki's Clear Unused Tags: drop registry entries no note carries."""
+        col = self._col()
+        used: set[str] = set()
+        for (tags_str,) in col.db.all("select distinct tags from notes"):
+            for tag in str(tags_str).split():
+                used.add(tag.lower())
+        unused = [t for t in col.tags.all() if t.lower() not in used]
+        if not unused:
+            raise ProposalError("no unused tags - the tag list is already clean")
+        samples = [{"text": t} for t in unused[:MAX_SAMPLES]]
+        if len(unused) > MAX_SAMPLES:
+            samples.append({"text": f"… and {len(unused) - MAX_SAMPLES} more"})
+        proposal = Proposal(
+            id=self._next_id(),
+            kind="bulk",
+            op="clear_unused_tags",
+            op_args={},
+            note_type="",
+            deck="",
+            tags=[],
+            fields={},
+            rationale=str(args.get("rationale", "")),
+            count=len(unused),
+            samples=samples,
+            warnings=[
+                "Removes tag-list entries only; no note changes. Not "
+                "revertible from the chat (a tag reappears the moment a note "
+                "uses it again)."
+            ],
+        )
+        return self._finish_submission(proposal, len(unused))
 
     def submit_card_state(self, args: dict[str, Any]) -> dict[str, Any]:
         """Card-state ops (#3): suspend/unsuspend, bury/unbury, flags.
@@ -2085,7 +2247,92 @@ class ProposalManager:
             return applied
         if proposal.op in CARD_STATE_OPS:
             return self._accept_card_state(proposal)
+        if proposal.op in ("add_tags", "remove_tags"):
+            return self._accept_bulk_tags(proposal)
+        if proposal.op == "clear_unused_tags":
+            return self._accept_clear_unused(proposal)
         raise ProposalError(f"unknown bulk op {proposal.op!r}")
+
+    def _accept_bulk_tags(self, proposal: Proposal) -> list[int]:
+        """Apply a bulk tag add/remove.
+
+        Prior state is each note's FULL tag list at apply time - removal may
+        use wildcards whose expansion is the backend's business, so recording
+        "what to reverse" would mean reimplementing its matching; recording
+        the whole list makes revert an exact restore instead (same shape as
+        change-set revert: one update_note per surviving note).
+        """
+        op = proposal.op
+        tags_str = " ".join(proposal.op_args["tags"])
+
+        def execute(col: Any, before: invariants.Snapshot) -> _WriteResult:
+            if "note_ids" in proposal.op_args:
+                candidates = [int(n) for n in proposal.op_args["note_ids"]]
+            else:
+                candidates = [int(n) for n in col.find_notes(proposal.op_args["query"])]
+            prior: dict[int, list[str]] = {}
+            for nid in candidates:
+                try:
+                    prior[nid] = list(col.get_note(nid).tags)
+                except Exception:
+                    continue
+            if not prior:
+                raise ProposalError("none of those notes exist anymore")
+            note_ids = list(prior)
+            if op == "add_tags":
+                col.tags.bulk_add(note_ids, tags_str)
+            else:
+                col.tags.bulk_remove(note_ids, tags_str)
+            verb = "add" if op == "add_tags" else "remove"
+            self._ledger.append(
+                LedgerEntry(
+                    id=proposal.id,
+                    kind="bulk",
+                    note_id=0,
+                    label=f"{verb} tags {tags_str} ({len(note_ids)} notes)",
+                    data={"op": op, "tags": proposal.op_args["tags"], "prior": prior},
+                )
+            )
+            return _WriteResult(
+                note_ids,
+                invariants.Expectation(),
+                invariants.Scope(
+                    note_ids=tuple(note_ids),
+                    # bulk_add/bulk_remove stamp the notes they touch
+                    written_note_ids=tuple(note_ids),
+                ),
+            )
+
+        note_ids = self._apply_write(
+            execute=execute, backup_reason=f"bulk {proposal.op}"
+        )
+        proposal.status = ACCEPTED
+        if self._checkpoint_warning:
+            proposal.warnings.append(self._checkpoint_warning)
+        return note_ids
+
+    def _accept_clear_unused(self, proposal: Proposal) -> list[int]:
+        def execute(col: Any, before: invariants.Snapshot) -> _WriteResult:
+            col.tags.clear_unused_tags()
+            self._ledger.append(
+                LedgerEntry(
+                    id=proposal.id,
+                    kind="bulk",
+                    note_id=0,
+                    label=f"clear {proposal.count} unused tag(s)",
+                    data={"op": "clear_unused_tags"},
+                    revertible=False,
+                )
+            )
+            return _WriteResult([], invariants.Expectation(), invariants.Scope())
+
+        note_ids = self._apply_write(
+            execute=execute, backup_reason=f"bulk {proposal.op}"
+        )
+        proposal.status = ACCEPTED
+        if self._checkpoint_warning:
+            proposal.warnings.append(self._checkpoint_warning)
+        return note_ids
 
     def _accept_card_state(self, proposal: Proposal) -> list[int]:
         """Apply a suspend/unsuspend/bury/unbury/flag proposal.
@@ -2168,6 +2415,9 @@ class ProposalManager:
         # Rebuild/empty leave nothing to restore: the previous queue content
         # is not stored anywhere, and re-running them is one chat message.
         if proposal.kind == "deck_op" and proposal.op == "filtered_deck_action":
+            return False
+        # Registry-only cleanup: a tag reappears the moment a note uses it.
+        if proposal.op == "clear_unused_tags":
             return False
         return True
 
@@ -2855,6 +3105,10 @@ class ProposalManager:
         resync: list[int] = [entry.note_id] if entry.note_id else []
         if entry.kind == "change_set":
             resync = [int(i["note_id"]) for i in entry.data.get("items", [])]
+        elif entry.kind == "bulk" and entry.data.get("op") in ("add_tags", "remove_tags"):
+            # Tag revert rewrites notes via update_note; refresh tracked
+            # learning snapshots so the restore is not read as a user edit.
+            resync = [int(n) for n in entry.data.get("prior", {})]
 
         if entry.kind == "deck_op":
             # SAFETY: deck-op reverts flow through _revert_deck_op, which looks
@@ -2908,6 +3162,32 @@ class ProposalManager:
                 ),
                 # One set_deck RPC per distinct prior home deck, not per card.
                 steps=len(by_deck),
+            )
+        elif entry.kind == "bulk" and entry.data.get("op") in ("add_tags", "remove_tags"):
+            tag_prior = {
+                int(n): list(v) for n, v in entry.data.get("prior", {}).items()
+            }
+            done_box = {"n": 0}
+
+            def mutate_tags() -> None:
+                restored = 0
+                for nid, old_tags in tag_prior.items():
+                    try:
+                        note = col.get_note(nid)
+                    except Exception:
+                        continue  # note deleted since; nothing to restore
+                    if list(note.tags) == old_tags:
+                        continue
+                    note.tags = list(old_tags)
+                    col.update_note(note)
+                    restored += 1
+                done_box["n"] = restored
+
+            self._revert_write(
+                col,
+                mutate_tags,
+                invariants.Scope(note_ids=tuple(tag_prior)),
+                steps=lambda: done_box["n"],
             )
         elif entry.kind == "bulk" and entry.data.get("op") in CARD_STATE_OPS:
             op = entry.data["op"]

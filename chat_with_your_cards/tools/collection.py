@@ -15,6 +15,10 @@ from .registry import ToolContext, ToolRegistry, ToolSpec
 SNIPPET_CHARS = 120
 DEFAULT_SEARCH_LIMIT = 20
 MAX_SEARCH_LIMIT = 100
+# detail='ids' returns bare integers, so it can afford a far higher page cap
+# than full summaries. Raised from the flat 100 (#4): the old cap meant "tag
+# every note matching this search" could not even enumerate its targets.
+MAX_IDS_LIMIT = 1000
 # Card templates / note-type CSS are returned VERBATIM (not stripped): the
 # agent needs the real markup to diagnose rendering - an <iframe src=...>,
 # a conditional section, a CSS rule. Generous per-string cap so a pathological
@@ -69,17 +73,35 @@ def guard_empty_search(col: Any, query: str) -> None:
 
 
 def search_notes(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    """Note search with the same detail/limit/offset contract as find_cards
+    (#4): 'count' for the number, 'ids' pages up to 1000 note ids at a time
+    (enough to feed the bulk tools' note_ids), 'full' pages summaries."""
     query = str(args["query"])
-    limit = min(int(args.get("limit", DEFAULT_SEARCH_LIMIT)), MAX_SEARCH_LIMIT)
-    note_ids = list(ctx.col.find_notes(query))
+    detail = str(args.get("detail", "full"))
+    if detail not in DETAIL_LEVELS:
+        raise ValueError(f"detail must be one of {list(DETAIL_LEVELS)}; got {detail!r}")
+    cap = MAX_IDS_LIMIT if detail == "ids" else MAX_SEARCH_LIMIT
+    limit = max(1, min(int(args.get("limit", DEFAULT_SEARCH_LIMIT)), cap))
+    offset = max(0, int(args.get("offset", 0)))
+    note_ids = [int(nid) for nid in ctx.col.find_notes(query)]
     if not note_ids:
         guard_empty_search(ctx.col, query)
-    return {
+    if detail == "count":
+        return {"query": query, "total": len(note_ids)}
+    page_ids = note_ids[offset : offset + limit]
+    next_offset = offset + len(page_ids)
+    result: dict[str, Any] = {
         "query": query,
         "total": len(note_ids),
-        "shown": min(limit, len(note_ids)),
-        "notes": [_note_summary(ctx.col, nid) for nid in note_ids[:limit]],
+        "offset": offset,
+        "shown": len(page_ids),
+        "next_offset": next_offset if next_offset < len(note_ids) else None,
     }
+    if detail == "ids":
+        result["note_ids"] = page_ids
+    else:
+        result["notes"] = [_note_summary(ctx.col, nid) for nid in page_ids]
+    return result
 
 
 def _deck_name(col: Any, deck_id: int) -> str:
@@ -145,7 +167,8 @@ def find_cards(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     detail = str(args.get("detail", "full"))
     if detail not in DETAIL_LEVELS:
         raise ValueError(f"detail must be one of {list(DETAIL_LEVELS)}; got {detail!r}")
-    limit = max(1, min(int(args.get("limit", DEFAULT_SEARCH_LIMIT)), MAX_SEARCH_LIMIT))
+    cap = MAX_IDS_LIMIT if detail == "ids" else MAX_SEARCH_LIMIT
+    limit = max(1, min(int(args.get("limit", DEFAULT_SEARCH_LIMIT)), cap))
     offset = max(0, int(args.get("offset", 0)))
     card_ids = [int(card_id) for card_id in ctx.col.find_cards(query)]
     if not card_ids:
@@ -434,12 +457,29 @@ def build_registry() -> ToolRegistry:
         ToolSpec(
             "search_notes",
             "Search the collection with Anki search syntax (e.g. deck:\"X\", "
-            "tag:foo, field content words). Returns note summaries.",
+            "tag:foo, field content words). `detail` picks how much comes "
+            "back: 'count' for just the number, 'ids' for note ids (pages up "
+            f"to {MAX_IDS_LIMIT} at a time - enough to feed bulk tools), "
+            "'full' for note summaries. Page with offset; `total` is always "
+            "the full match count.",
             {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Anki search query"},
-                    "limit": {"type": "integer", "default": DEFAULT_SEARCH_LIMIT},
+                    "detail": {
+                        "type": "string",
+                        "enum": list(DETAIL_LEVELS),
+                        "default": "full",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": MAX_IDS_LIMIT,
+                        "default": DEFAULT_SEARCH_LIMIT,
+                        "description": f"Page size (max {MAX_SEARCH_LIMIT} for "
+                        f"'full', {MAX_IDS_LIMIT} for 'ids').",
+                    },
+                    "offset": {"type": "integer", "minimum": 0, "default": 0},
                 },
                 "required": ["query"],
             },
@@ -472,9 +512,10 @@ def build_registry() -> ToolRegistry:
                     "limit": {
                         "type": "integer",
                         "minimum": 1,
-                        "maximum": MAX_SEARCH_LIMIT,
+                        "maximum": MAX_IDS_LIMIT,
                         "default": DEFAULT_SEARCH_LIMIT,
-                        "description": "Page size for 'ids'/'full'. Ignored for "
+                        "description": f"Page size (max {MAX_SEARCH_LIMIT} for "
+                        f"'full', {MAX_IDS_LIMIT} for 'ids'). Ignored for "
                         "detail='count', and never affects `total`.",
                     },
                     "offset": {

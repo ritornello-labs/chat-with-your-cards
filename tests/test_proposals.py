@@ -246,11 +246,49 @@ class FakeSched:
 class FakeTags:
     def __init__(self, col: "FakeCol") -> None:
         self._col = col
+        # Registry entries with no note carrying them (Clear Unused Tags).
+        self._registry: list[str] = []
 
     def rename(self, old: str, new: str) -> None:
         for note in self._col._notes.values():
             if old in note.tags:
                 note.tags = [new if t == old else t for t in note.tags]
+
+    def bulk_add(self, note_ids: list[int], tags: str) -> None:
+        added = tags.split()
+        for nid in note_ids:
+            note = self._col._notes[nid]
+            have = {t.lower() for t in note.tags}
+            for tag in added:
+                if tag.lower() not in have:
+                    note.tags.append(tag)
+                    have.add(tag.lower())
+            note.usn = -1
+
+    def bulk_remove(self, note_ids: list[int], tags: str) -> None:
+        # Mirrors the real backend (probed on 25.09): exact case-insensitive
+        # names, no wildcards, and removing "X" also removes "X::child".
+        wanted = [p.lower() for p in tags.split()]
+        for nid in note_ids:
+            note = self._col._notes[nid]
+            note.tags = [
+                t
+                for t in note.tags
+                if not any(
+                    t.lower() == w or t.lower().startswith(w + "::") for w in wanted
+                )
+            ]
+            note.usn = -1
+
+    def all(self) -> list[str]:
+        names = set(self._registry)
+        for note in self._col._notes.values():
+            names.update(note.tags)
+        return sorted(names)
+
+    def clear_unused_tags(self) -> None:
+        used = {t.lower() for n in self._col._notes.values() for t in n.tags}
+        self._registry = [t for t in self._registry if t.lower() in used]
 
 
 class FakeDB:
@@ -274,15 +312,20 @@ class FakeDB:
         try:
             conn.executescript(
                 "create table col (id integer primary key, scm integer);"
-                "create table notes (id integer primary key, usn integer);"
+                "create table notes (id integer primary key, usn integer, "
+                "tags text);"
                 "create table cards (id integer primary key, nid integer, "
                 "did integer, odid integer, usn integer);"
             )
             conn.execute("insert into col (id, scm) values (1, ?)", (self._col._scm,))
             for nid, note in self._col._notes.items():
                 conn.execute(
-                    "insert into notes (id, usn) values (?, ?)",
-                    (int(nid), int(getattr(note, "usn", -1))),
+                    "insert into notes (id, usn, tags) values (?, ?, ?)",
+                    (
+                        int(nid),
+                        int(getattr(note, "usn", -1)),
+                        " " + " ".join(note.tags) + " " if note.tags else "",
+                    ),
                 )
             for cid, card in self._col._cards.items():
                 conn.execute(
@@ -1485,6 +1528,104 @@ class BulkOpsTests(unittest.TestCase):
             manager.submit_move_cards(
                 {"query": 'deck:"Default"', "deck": "Cram"}
             )
+
+
+class BulkTagsTests(unittest.TestCase):
+    """Bulk tag add/remove + Clear Unused Tags (#4): validation, wildcard
+    removal, exact prior-tag-list restore on revert, registry cleanup."""
+
+    def _setup(self):
+        manager, col, pushed = make_manager()
+        note_ids = _seed_notes(manager, col, pushed)  # all tagged "analysis"
+        return manager, col, pushed, note_ids
+
+    def test_validation(self) -> None:
+        manager, col, pushed, nids = self._setup()
+        with self.assertRaisesRegex(ProposalError, "non-empty tags"):
+            manager.submit_bulk_tags({"op": "add_tags", "note_ids": nids, "tags": []})
+        with self.assertRaisesRegex(ProposalError, "exactly one"):
+            manager.submit_bulk_tags({"op": "add_tags", "tags": ["x"]})
+        with self.assertRaisesRegex(ProposalError, "spaces separate tags"):
+            manager.submit_bulk_tags(
+                {"op": "add_tags", "note_ids": nids, "tags": ["two words"]}
+            )
+        with self.assertRaisesRegex(ProposalError, "wildcards are not supported"):
+            manager.submit_bulk_tags(
+                {"op": "add_tags", "note_ids": nids, "tags": ["temp::*"]}
+            )
+        with self.assertRaisesRegex(ProposalError, "::children"):
+            manager.submit_bulk_tags(
+                {"op": "remove_tags", "note_ids": nids, "tags": ["temp::*"]}
+            )
+        with self.assertRaisesRegex(ProposalError, "at most"):
+            manager.submit_bulk_tags(
+                {"op": "add_tags", "note_ids": nids, "tags": [f"t{i}" for i in range(11)]}
+            )
+
+    def test_add_apply_and_revert_restores_exact_priors(self) -> None:
+        manager, col, pushed, nids = self._setup()
+        col._notes[nids[0]].tags.append("probe-x")  # already carries one
+        result = manager.submit_bulk_tags(
+            {"op": "add_tags", "query": 'tag:"analysis"', "tags": ["probe-x", "probe-y"]}
+        )
+        self.assertEqual(3, result["affected"])
+        manager.accept({"id": result["proposal_id"]})
+        for nid in nids:
+            self.assertIn("probe-x", col._notes[nid].tags)
+            self.assertIn("probe-y", col._notes[nid].tags)
+        manager.revert({"id": result["proposal_id"]})
+        self.assertIn("probe-x", col._notes[nids[0]].tags)  # pre-existing kept
+        self.assertNotIn("probe-y", col._notes[nids[0]].tags)
+        self.assertNotIn("probe-x", col._notes[nids[1]].tags)
+
+    def test_remove_parent_takes_children_and_revert_restores(self) -> None:
+        # Anki's hierarchy semantics (probed 2026-07-31): removing "temp"
+        # also removes "temp::a"/"temp::b", even when bare "temp" is absent.
+        manager, col, pushed, nids = self._setup()
+        col._notes[nids[0]].tags += ["temp::a", "temp::b"]
+        col._notes[nids[1]].tags.append("temp::a")
+        before = {nid: list(col._notes[nid].tags) for nid in nids}
+        result = manager.submit_bulk_tags(
+            {"op": "remove_tags", "note_ids": nids, "tags": ["temp"]}
+        )
+        manager.accept({"id": result["proposal_id"]})
+        for nid in nids:
+            self.assertFalse(
+                [t for t in col._notes[nid].tags if t.startswith("temp::")]
+            )
+        manager.revert({"id": result["proposal_id"]})
+        for nid in nids:
+            self.assertEqual(before[nid], col._notes[nid].tags)
+
+    def test_noop_warning_for_notes_already_tagged(self) -> None:
+        manager, col, pushed, nids = self._setup()
+        result = manager.submit_bulk_tags(
+            {"op": "add_tags", "note_ids": nids, "tags": ["analysis"]}
+        )
+        proposal = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertTrue(
+            any("already carry all" in w for w in proposal["warnings"]), proposal
+        )
+        self.assertIsNotNone(result["proposal_id"])
+
+    def test_clear_unused_tags_cleans_registry_and_is_not_revertible(self) -> None:
+        manager, col, pushed, nids = self._setup()
+        col.tags._registry = ["orphan-a", "orphan-b", "analysis"]
+        result = manager.submit_clear_unused_tags({})
+        self.assertEqual(2, result["affected"])  # analysis is in use
+        manager.accept({"id": result["proposal_id"]})
+        self.assertNotIn("orphan-a", col.tags.all())
+        self.assertIn("analysis", col.tags.all())
+        self.assertFalse(manager._ledger[-1].revertible)
+        manager.revert({"id": result["proposal_id"]})
+        notices = [p["text"] for p in pushes_of(pushed, "notice")]
+        self.assertTrue(any("cannot be reverted" in t for t in notices), notices)
+        self.assertFalse(manager._ledger[-1].undone)
+
+    def test_clear_unused_tags_rejects_clean_registry(self) -> None:
+        manager, col, pushed, nids = self._setup()
+        with self.assertRaisesRegex(ProposalError, "already clean"):
+            manager.submit_clear_unused_tags({})
 
 
 class CardStateTests(unittest.TestCase):

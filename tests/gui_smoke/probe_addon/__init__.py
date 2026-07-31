@@ -287,6 +287,45 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
 
     check("card-state suspend/flag/bury apply+revert (real scheduler)", _card_state_flow)
 
+    def _bulk_tags_flow() -> dict[str, Any]:
+        """Bulk tags (#4) against the real backend: query-scoped add with
+        exact-prior revert, wildcard remove, and Clear Unused Tags."""
+        col = mw.col
+        nid1 = _new_note("tags one", deck="ProbeTags", tags=["probe-bulk::keep"])
+        nid2 = _new_note("tags two", deck="ProbeTags")
+        result = proposals.submit_bulk_tags(
+            {"op": "add_tags", "query": 'deck:"ProbeTags"', "tags": ["probe-bulk::new"]}
+        )
+        proposals.accept({"id": result["proposal_id"]})
+        if "probe-bulk::new" not in col.get_note(nid2).tags:
+            raise AssertionError("bulk_add did not tag on the real backend")
+        proposals.revert({"id": result["proposal_id"]})
+        if "probe-bulk::new" in col.get_note(nid2).tags:
+            raise AssertionError("tag revert did not restore the prior tag list")
+        if "probe-bulk::keep" not in col.get_note(nid1).tags:
+            raise AssertionError("tag revert clobbered an unrelated tag")
+
+        # Hierarchy semantics: removing the parent "probe-bulk" must take
+        # "probe-bulk::keep" with it (probed on 25.09; '*' is NOT supported).
+        wiped = proposals.submit_bulk_tags(
+            {"op": "remove_tags", "note_ids": [nid1, nid2], "tags": ["probe-bulk"]}
+        )
+        proposals.accept({"id": wiped["proposal_id"]})
+        if any(t.startswith("probe-bulk") for t in col.get_note(nid1).tags):
+            raise AssertionError("parent-tag remove left probe-bulk tags behind")
+        proposals.revert({"id": wiped["proposal_id"]})
+        if "probe-bulk::keep" not in col.get_note(nid1).tags:
+            raise AssertionError("remove revert did not restore tags")
+
+        # Registry now holds probe-bulk::new with no note carrying it.
+        unused_before = proposals.submit_clear_unused_tags({})
+        proposals.accept({"id": unused_before["proposal_id"]})
+        if "probe-bulk::new" in list(col.tags.all()):
+            raise AssertionError("clear_unused_tags left the orphan registry entry")
+        return {"notes": [nid1, nid2], "cleared": unused_before["affected"]}
+
+    check("bulk tags add/remove/clear apply+revert (real col.tags)", _bulk_tags_flow)
+
     def _change_set() -> dict[str, Any]:
         ids = [_new_note(f"cs {i}", back="orig") for i in range(3)]
         cs = proposals.open_change_set({"title": "probe sweep"})

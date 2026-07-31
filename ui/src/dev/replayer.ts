@@ -401,6 +401,33 @@ function bulkProposalScript(): Step[] {
   ];
 }
 
+/** bulk tags (#4): headline sample + note labels, submit_bulk_tags's shape. */
+function tagsProposalScript(): Step[] {
+  const id = nextProposalId("t");
+  return [
+    { kind: "text", text: "All ten mention the epsilon-delta pattern - tagging them:\n\n" },
+    {
+      kind: "proposal",
+      proposal: baseProposal({
+        id,
+        kind: "bulk",
+        op: "add_tags",
+        op_args: { tags: ["analysis::epsilon-delta"], query: '"epsilon" deck:"Math::Analysis"' },
+        tags: ["analysis::epsilon-delta"],
+        rationale: "One tag makes the whole pattern retrievable as a cram deck later.",
+        count: 10,
+        samples: [
+          { text: "Add analysis::epsilon-delta — 10 note(s) matching '\"epsilon\" deck:\"Math::Analysis\"'" },
+          { text: "Cauchy sequence" },
+          { text: "Uniform continuity" },
+          { text: "Squeeze theorem" },
+        ],
+        warnings: ["3 of these note(s) already carry all of those tags (no change)"],
+      }),
+    },
+  ];
+}
+
 /** card-state bulk op (#3): headline sample + card labels + honest warnings,
  *  exactly the payload shape proposals.py's submit_card_state pushes. */
 function suspendProposalScript(): Step[] {
@@ -790,6 +817,7 @@ function selectScript(userText: string): Step[] {
   if (text.includes("image") || text.includes("picture")) return IMAGE_SCRIPT;
   if (text.includes("think") || text.includes("reason")) return REASONING_SCRIPT;
   if (text.includes("grade") || text.includes("fail") || text.includes("again")) return gradingScript();
+  if (text.includes("tags")) return tagsProposalScript();
   if (text.includes("tag")) return tagEditProposalScript();
   if (text.includes("bulk") || text.includes("replace")) return bulkProposalScript();
   if (text.includes("suspend") || text.includes("flag")) return suspendProposalScript();

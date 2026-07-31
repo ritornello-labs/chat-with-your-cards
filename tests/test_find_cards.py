@@ -4,7 +4,13 @@ import unittest
 from types import SimpleNamespace
 from typing import Any
 
-from chat_with_your_cards.tools.collection import find_cards, get_card
+from chat_with_your_cards.tools.collection import (
+    MAX_IDS_LIMIT,
+    MAX_SEARCH_LIMIT,
+    find_cards,
+    get_card,
+    search_notes,
+)
 from chat_with_your_cards.tools import build_registry
 
 
@@ -255,9 +261,69 @@ class FindCardsTests(unittest.TestCase):
         spec = next(spec for spec in build_registry().specs() if spec.name == "find_cards")
 
         self.assertFalse(spec.writes)
-        self.assertEqual(spec.input_schema["properties"]["limit"]["maximum"], 100)
+        # Raised for detail='ids' (#4); 'full' stays capped in the handler.
+        self.assertEqual(
+            spec.input_schema["properties"]["limit"]["maximum"], MAX_IDS_LIMIT
+        )
         self.assertIn("exact matching cards", spec.description)
         self.assertIn("blindly", spec.description)
+
+    def test_ids_detail_allows_pages_beyond_the_full_cap(self) -> None:
+        """#4: the flat 100-cap meant bulk selection could not even enumerate
+        its targets. detail='ids' now pages up to MAX_IDS_LIMIT."""
+        col, ctx = _fixture()
+        col.matches = list(range(1000, 1400))
+
+        result = find_cards(ctx, {"query": "*", "detail": "ids", "limit": 400})
+        self.assertEqual(400, len(result["card_ids"]))
+        self.assertIsNone(result["next_offset"])
+
+        # 'full' keeps the old cap: summaries are expensive context.
+        col.matches = [102, 103, 101]
+        result = find_cards(ctx, {"query": "*", "detail": "full", "limit": 400})
+        self.assertEqual(3, result["shown"])
+
+
+class SearchNotesPagingTests(unittest.TestCase):
+    """search_notes gained find_cards' detail/limit/offset contract (#4)."""
+
+    def _ctx(self, n: int = 250) -> Any:
+        notes = {
+            nid: FakeNote(nid, front=f"front {nid}", back="back")
+            for nid in range(1, n + 1)
+        }
+        col = SimpleNamespace(
+            find_notes=lambda query: list(notes),
+            get_note=lambda nid: notes[nid],
+        )
+        return SimpleNamespace(col=col)
+
+    def test_detail_count(self) -> None:
+        result = search_notes(self._ctx(), {"query": "*", "detail": "count"})
+        self.assertEqual(result, {"query": "*", "total": 250})
+
+    def test_detail_ids_pages_beyond_the_old_cap(self) -> None:
+        result = search_notes(
+            self._ctx(), {"query": "*", "detail": "ids", "limit": 250}
+        )
+        self.assertEqual(250, len(result["note_ids"]))
+        self.assertIsNone(result["next_offset"])
+        self.assertNotIn("notes", result)
+
+    def test_detail_ids_offset_paging(self) -> None:
+        result = search_notes(
+            self._ctx(), {"query": "*", "detail": "ids", "limit": 100, "offset": 200}
+        )
+        self.assertEqual(50, result["shown"])
+        self.assertEqual(200, result["offset"])
+        self.assertIsNone(result["next_offset"])
+
+    def test_full_detail_stays_capped(self) -> None:
+        result = search_notes(self._ctx(), {"query": "*", "limit": 250})
+        self.assertEqual(MAX_SEARCH_LIMIT, result["shown"])
+        self.assertEqual(MAX_SEARCH_LIMIT, result["next_offset"])
+        self.assertEqual(250, result["total"])
+        self.assertIn("fields_preview", result["notes"][0])
 
 
 if __name__ == "__main__":

@@ -37,6 +37,50 @@ def delete_notes(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     return ctx.proposals.submit_delete_notes(args)
 
 
+def _bulk_tags(op: str):
+    def call(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+        return ctx.proposals.submit_bulk_tags({**args, "op": op})
+
+    return call
+
+
+def clear_unused_tags(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    return ctx.proposals.submit_clear_unused_tags(args)
+
+
+def _bulk_tags_schema(op: str) -> dict[str, Any]:
+    tag_desc = (
+        "Tags to add (use :: for hierarchy)"
+        if op == "add_tags"
+        else "Tags to remove. No wildcards - removing 'X' also removes its "
+        "'X::child' tags (Anki's hierarchy semantics)."
+    )
+    return {
+        "type": "object",
+        "properties": {
+            "tags": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 1,
+                "description": tag_desc,
+            },
+            "note_ids": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "description": "Exact note ids (from search_notes detail='ids'). "
+                "Exactly one of note_ids / query.",
+            },
+            "query": {
+                "type": "string",
+                "description": "Anki search selecting the notes. Exactly one "
+                "of note_ids / query.",
+            },
+            "rationale": {"type": "string"},
+        },
+        "required": ["tags"],
+    }
+
+
 def _card_state(op: str):
     def call(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
         return ctx.proposals.submit_card_state({**args, "op": op})
@@ -273,6 +317,45 @@ def register_proposal_tools(registry: ToolRegistry) -> None:
             delete_notes,
             writes=True,
             trusted_only=True,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            "add_tags",
+            "Add tags to many notes at once (Anki Browse's Add Tags). Select "
+            "with an Anki query or exact note_ids. One confirmation with the "
+            "affected count; revertible (restores each note's exact prior "
+            "tag list).",
+            _bulk_tags_schema("add_tags"),
+            _bulk_tags("add_tags"),
+            writes=True,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            "remove_tags",
+            "Remove tags from many notes at once (Anki Browse's Remove "
+            "Tags). Removing a tag also removes its ::children. Deleting a "
+            "tag outright = remove_tags(tags=['X'], query='tag:\"X\"'). One "
+            "confirmation; revertible.",
+            _bulk_tags_schema("remove_tags"),
+            _bulk_tags("remove_tags"),
+            writes=True,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            "clear_unused_tags",
+            "Drop tag-list entries that no note carries (Anki's Clear Unused "
+            "Tags). Touches the tag registry only, never notes. Not "
+            "revertible from the chat, but harmless: a tag reappears the "
+            "moment a note uses it.",
+            {
+                "type": "object",
+                "properties": {"rationale": {"type": "string"}},
+            },
+            clear_unused_tags,
+            writes=True,
         )
     )
     registry.register(
