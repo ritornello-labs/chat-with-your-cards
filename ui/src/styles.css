@@ -1619,6 +1619,46 @@ body {
   position: relative;
 }
 
+/* Composer attachment list (#15a). */
+.cwyc-panel-attachments {
+  min-width: 260px;
+}
+
+.cwyc-attach-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+.cwyc-attach-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cwyc-attach-meta {
+  color: var(--cwyc-text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.cwyc-attach-remove {
+  border: none;
+  background: none;
+  color: var(--cwyc-text-dim);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.cwyc-attach-remove:hover {
+  color: var(--cwyc-red);
+}
+
 /* Staged image/video attachments on proposal cards (#10). */
 .cwyc-visual-strip {
   display: flex;

@@ -276,6 +276,83 @@ export function ModeChip({ store }: { store: ChatStore }) {
   );
 }
 
+/** Composer attachments (#15a): same category as Pins - context riding the
+ *  NEXT message, not a mode. Zero attachments: click opens the native
+ *  picker. With attachments: click opens a small list with per-file remove
+ *  and an add-more action, so a mistaken pick is one click to fix. */
+export function AttachButton({ store }: { store: ChatStore }) {
+  const { ui } = useChatState(store);
+  const [open, setOpen] = useState(false);
+  const ref = useDismiss(open, () => setOpen(false));
+  const panel = useSmartPanel(open);
+  const count = ui.attachments.length;
+
+  return (
+    <div className="cwyc-ctl" ref={ref}>
+      <button
+        type="button"
+        className={"cwyc-chip cwyc-chip-pin" + (count ? " cwyc-chip-on" : "")}
+        title="Attach files for your next message (they can go onto cards)"
+        data-testid="attach-button"
+        onClick={() => {
+          if (count === 0) store.pickAttachments();
+          else setOpen((o) => !o);
+        }}
+      >
+        <svg viewBox="0 0 14 14" width="11" height="11" aria-hidden="true" fill="none">
+          <path
+            d="M9.9 3.4 5.6 7.7a1.6 1.6 0 1 0 2.3 2.3l4-4a3 3 0 1 0-4.3-4.2l-4 4a4.4 4.4 0 1 0 6.3 6.2l3.4-3.4"
+            stroke="currentColor"
+            strokeWidth="1.3"
+            strokeLinecap="round"
+            transform="scale(0.82) translate(1.2 1.2)"
+          />
+        </svg>
+        Attach
+        {count ? <span className="cwyc-chip-count">{count}</span> : null}
+      </button>
+      {open && count ? (
+        <div
+          className={panel.panelClass + " cwyc-panel-attachments"}
+          style={panel.panelStyle}
+          ref={panel.panelRef}
+        >
+          <div className="cwyc-panel-title">Files for your next message</div>
+          {ui.attachments.map((item) => (
+            <div className="cwyc-attach-row" key={item.id}>
+              <span className="cwyc-attach-name" title={item.name}>
+                {item.name}
+              </span>
+              <span className="cwyc-attach-meta">
+                {item.kind} · {Math.max(1, Math.round(item.size / 1024))} KB
+              </span>
+              <button
+                type="button"
+                className="cwyc-attach-remove"
+                aria-label={`Remove ${item.name}`}
+                data-testid={`attach-remove-${item.id}`}
+                onClick={() => store.removeAttachment(item.id)}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            className="cwyc-mode-detail-toggle"
+            onClick={() => {
+              store.pickAttachments();
+              setOpen(false);
+            }}
+          >
+            Add more…
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function PinsButton({ store }: { store: ChatStore }) {
   const { ui } = useChatState(store);
   const [open, setOpen] = useState(false);

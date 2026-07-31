@@ -9,7 +9,7 @@ import { ReasoningBlock } from "./components/ReasoningBlock";
 import { ErrorBanner } from "./components/ErrorBanner";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { TextPart } from "./components/TextPart";
-import { ModeChip, ModelPicker, PinsButton, ToolsChip } from "./components/ComposerControls";
+import { AttachButton, ModeChip, ModelPicker, PinsButton, ToolsChip } from "./components/ComposerControls";
 import { VimComposer } from "./components/VimComposer";
 import { LedgerStrip } from "./components/LedgerStrip";
 import { Announcer } from "./components/Announcer";
@@ -151,6 +151,7 @@ function Composer({ store }: { store: ChatStore }) {
             than being wedged among the mode chips. */}
         <div className="cwyc-composer-context">
           <PinsButton store={store} />
+          <AttachButton store={store} />
           <SetAsideChip store={store} />
         </div>
         <div className="cwyc-composer-left">

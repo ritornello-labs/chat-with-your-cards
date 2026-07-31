@@ -371,6 +371,13 @@ export interface UiState {
   /** Badge count. Usually setAside.length, but review_state can update it
    *  alone (cheap count without re-rendering every card summary). */
   readonly setAsideCount: number;
+  /** Files staged for the NEXT message (#15a, `attachments` pushes). */
+  readonly attachments: readonly {
+    id: string;
+    name: string;
+    kind: string;
+    size: number;
+  }[];
 }
 
 /** The permission ladder, most restrictive first (#26). Hints describe
@@ -414,6 +421,7 @@ const DEFAULT_UI_STATE: UiState = {
   pane: "chat",
   setAside: [],
   setAsideCount: 0,
+  attachments: [],
 };
 
 export interface ChatState {
@@ -573,6 +581,16 @@ export class ChatStore {
    *  the current draft fields so the big window matches the in-card state. */
   openPreviewWindow(id: string, fields: Record<string, string>): void {
     postCommand({ type: "proposal_preview_window", id, fields });
+  }
+
+  /** Native file picker for next-message attachments (#15a); paths never
+   *  cross the bridge - Python stages and answers with `attachments`. */
+  pickAttachments(): void {
+    postCommand({ type: "pick_attachments" });
+  }
+
+  removeAttachment(id: string): void {
+    postCommand({ type: "remove_attachment", id });
   }
 
   rejectProposal(id: string): void {
@@ -921,6 +939,21 @@ export class ChatStore {
           };
         });
         this.ui = { ...this.ui, setAside: entries, setAsideCount: entries.length };
+        this.emit();
+        break;
+      }
+      case "attachments": {
+        const raw = (event as { items?: unknown[] }).items;
+        const items = (Array.isArray(raw) ? raw : []).map((item) => {
+          const a = item as { id?: unknown; name?: unknown; kind?: unknown; size?: unknown };
+          return {
+            id: String(a.id ?? ""),
+            name: String(a.name ?? ""),
+            kind: String(a.kind ?? "file"),
+            size: Number(a.size ?? 0),
+          };
+        });
+        this.ui = { ...this.ui, attachments: items };
         this.emit();
         break;
       }

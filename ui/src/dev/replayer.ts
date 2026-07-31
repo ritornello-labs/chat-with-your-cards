@@ -71,6 +71,14 @@ interface DevAsideEntry {
   front: string;
   back: string;
 }
+// Composer attachments (#15a): the dev stand-in for Python's staged list.
+const devAttachments: { id: string; name: string; kind: string; size: number }[] = [];
+let devAttachmentCounter = 0;
+
+function pushAttachments(): void {
+  window.chatUI?.dispatch({ type: "attachments", items: [...devAttachments] });
+}
+
 const devAside: DevAsideEntry[] = [
   {
     card_id: 424001,
@@ -1189,7 +1197,30 @@ export function installDevReplayer(): void {
           window.chatUI?.dispatch({ type: "setup_needed", platform: "darwin" });
           break;
         }
+        if (devAttachments.length) {
+          // Mirror Python: pending attachments ride this message, then clear.
+          devAttachments.length = 0;
+          pushAttachments();
+        }
         scheduleAll(compile(selectScript(text)));
+        break;
+      }
+      case "pick_attachments": {
+        // Simulate the native picker (#15a): one fake image per click.
+        devAttachmentCounter += 1;
+        devAttachments.push({
+          id: `composer-dev${devAttachmentCounter}`,
+          name: devAttachmentCounter === 1 ? "epsilon-band.png" : `sketch-${devAttachmentCounter}.png`,
+          kind: "image",
+          size: 34_000,
+        });
+        pushAttachments();
+        break;
+      }
+      case "remove_attachment": {
+        const index = devAttachments.findIndex((a) => a.id === String(msg.id));
+        if (index >= 0) devAttachments.splice(index, 1);
+        pushAttachments();
         break;
       }
       case "recheck_backend":

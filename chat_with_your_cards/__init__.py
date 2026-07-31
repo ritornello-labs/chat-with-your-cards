@@ -135,6 +135,11 @@ class AddonState:
     # Record-and-push into the chat transcript + webview (set in _setup). Tools
     # use it via _ToolCtx.push_ui to surface UI (e.g. show_image's inline image).
     record_push: Any = None
+    # Composer attachments (#15a): files the user picked for the NEXT message,
+    # staged under user_files/staging (one pseudo-proposal dir per file so
+    # each can be removed individually). Entries: {id, name, kind, size, path}.
+    # Cleared after the message they ride on is sent, and on new chat.
+    attachments: list[dict[str, Any]] = field(default_factory=list)
 
 
 state = AddonState()
@@ -308,6 +313,125 @@ def _deferred_entries() -> list[dict[str, Any]]:
         except Exception:
             continue
     return entries
+
+
+def _push_attachments() -> None:
+    """Composer attachment chips (#15a). Transient chrome, never recorded:
+    the UI shows name/kind/size; the staged PATH is agent-facing only and
+    rides the message text at send."""
+    if state.dock is None:
+        return
+    state.dock.bridge.push(
+        {
+            "type": "attachments",
+            "items": [
+                {k: entry[k] for k in ("id", "name", "kind", "size")}
+                for entry in state.attachments
+            ],
+        }
+    )
+
+
+def _stage_composer_files(paths: list[Any]) -> dict[str, Any]:
+    """Validate + stage user-picked files for the NEXT message (#15a).
+
+    Each file gets its own pseudo-proposal staging dir (so one chip can be
+    removed without touching the others); the existing startup sweep cleans
+    abandoned dirs. Per-file errors are collected, never fatal for the batch.
+    """
+    import os
+    import uuid
+
+    from .media_staging import MediaError, MediaStaging
+
+    staging = MediaStaging(USER_FILES / "staging")
+    errors: list[str] = []
+    added = 0
+    for raw in paths:
+        pseudo_id = f"composer-{uuid.uuid4().hex[:10]}"
+        try:
+            staged = staging.stage(pseudo_id, [{"path": str(raw)}])
+        except MediaError as exc:
+            errors.append(f"{os.path.basename(str(raw))}: {exc}")
+            continue
+        item = staged[0]
+        state.attachments.append(
+            {
+                "id": pseudo_id,
+                "name": item.filename,
+                "kind": item.kind,
+                "size": item.size,
+                "path": str(item.path),
+            }
+        )
+        added += 1
+    _push_attachments()
+    return {"added": added, "errors": errors}
+
+
+def _remove_composer_attachment(attachment_id: str) -> None:
+    from .media_staging import MediaStaging
+
+    staging = MediaStaging(USER_FILES / "staging")
+    kept: list[dict[str, Any]] = []
+    for entry in state.attachments:
+        if entry["id"] == str(attachment_id):
+            staging.discard(entry["id"])
+        else:
+            kept.append(entry)
+    state.attachments = kept
+    _push_attachments()
+
+
+def _clear_composer_attachments(discard_files: bool) -> None:
+    """After send the files must SURVIVE (the agent may propose with them a
+    turn later; the 7-day sweep is the backstop) - only the pending list
+    clears. New chat discards outright."""
+    if discard_files:
+        from .media_staging import MediaStaging
+
+        staging = MediaStaging(USER_FILES / "staging")
+        for entry in state.attachments:
+            staging.discard(entry["id"])
+    state.attachments = []
+    _push_attachments()
+
+
+def _attachment_message_block(entries: list[dict[str, Any]]) -> str:
+    """The agent-facing description of what the user attached (#15a)."""
+    lines = [
+        f"- {entry['path']} ({entry['kind']}, {max(1, entry['size'] // 1024)} KB)"
+        for entry in entries
+    ]
+    return (
+        "<user-attachments>\nThe user attached these files for this message:\n"
+        + "\n".join(lines)
+        + "\nTo put one on a card, pass its path in propose_note's media[] "
+        "(reference images as <img src=\"name\">, audio/video as "
+        "[sound:name]). For a standalone asset use store_media_asset.\n"
+        "</user-attachments>"
+    )
+
+
+def _pick_composer_attachments() -> None:
+    """Native file picker (#15a): paths stay on the Python side, so no file
+    bytes ever cross the webview bridge."""
+    from aqt.qt import QFileDialog
+
+    from .media_staging import MIME_BY_EXT
+
+    exts = " ".join(f"*{ext}" for ext in sorted(MIME_BY_EXT))
+    paths, _selected_filter = QFileDialog.getOpenFileNames(
+        mw,
+        "Attach files to your next message",
+        "",
+        f"Media files ({exts})",
+    )
+    if not paths:
+        return
+    result = _stage_composer_files(list(paths))
+    if result["errors"]:
+        _tooltip_result("; ".join(result["errors"][:2]))
 
 
 def _push_deferred_list() -> None:
@@ -704,9 +828,20 @@ def _wire_bridge() -> None:
             and getattr(mw.reviewer, "card", None) is not None
         ):
             defer_current_card()
-        controller.send_user_message(str(msg.get("text", "")))
+        text = str(msg.get("text", ""))
+        if state.attachments:
+            # Paths ride the message (#15a); the files stay staged - the
+            # agent may only propose with them a turn later.
+            text = text + "\n\n" + _attachment_message_block(state.attachments)
+            _clear_composer_attachments(discard_files=False)
+        controller.send_user_message(text)
 
     bridge.on("send", _on_send)
+    bridge.on("pick_attachments", lambda _msg: _pick_composer_attachments())
+    bridge.on(
+        "remove_attachment",
+        lambda msg: _remove_composer_attachment(str(msg.get("id", ""))),
+    )
     bridge.on("defer_current", lambda _msg: _tooltip_result(defer_current_card()))
     bridge.on(
         "undo_defer",
@@ -717,7 +852,13 @@ def _wire_bridge() -> None:
     bridge.on("get_deferred", lambda _msg: _push_deferred_list())
     bridge.on("unbury_all_deferred", lambda _msg: _tooltip_result(unbury_all_deferred()))
     bridge.on("cancel", lambda _msg: controller.cancel())
-    bridge.on("new_chat", lambda _msg: new_chat())
+
+    def _on_new_chat(_msg: dict[str, Any]) -> None:
+        # A new chat abandons the pending message; its attachments go too.
+        _clear_composer_attachments(discard_files=True)
+        new_chat()
+
+    bridge.on("new_chat", _on_new_chat)
     bridge.on("toggle_focus", lambda _msg: toggle_chat_focus())
     bridge.on("focus_reviewer", lambda _msg: shortcuts_mod.focus_main_window())
 

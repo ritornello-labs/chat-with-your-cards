@@ -203,6 +203,21 @@ export interface DeferredListEvent {
   entries: SetAsideEntryPayload[];
 }
 
+/** Composer attachments (#15a): files staged for the NEXT message. Pushed on
+ *  every change so the chips row never goes stale. No paths - those are
+ *  agent-facing and ride the message text at send. */
+export interface AttachmentPayload {
+  id: string;
+  name: string;
+  kind: string;
+  size: number;
+}
+
+export interface AttachmentsEvent {
+  type: "attachments";
+  items: AttachmentPayload[];
+}
+
 export interface GradingCardSummary {
   card_id: number;
   note_id: number;
@@ -416,6 +431,7 @@ export type KnownChatEvent =
   | ReviewStateEvent
   | CardDeferredEvent
   | DeferredListEvent
+  | AttachmentsEvent
   | LedgerEvent
   | GradingEvent
   | UsageEvent

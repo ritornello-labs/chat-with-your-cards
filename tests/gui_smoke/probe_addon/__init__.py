@@ -570,6 +570,51 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
 
     check("media beyond audio: image attach + store asset (#10)", _media_beyond_audio)
 
+    def _composer_attachments_flow() -> dict[str, Any]:
+        """#15a on real Anki: staging a picked file pushes the chip event
+        (count visible in the DOM), the agent-facing block carries the
+        staged path, and removal clears the chip again. The native picker
+        dialog itself is not driven - paths enter via the same helper the
+        picker calls."""
+        import importlib as _importlib
+        import tempfile
+
+        addon = _importlib.import_module(ADDON_PACKAGE)
+        png = Path(tempfile.mkdtemp(prefix="cwyc-attach-")) / "attach-probe.png"
+        png.write_bytes(_PNG_1PX)
+        result = addon._stage_composer_files([str(png)])
+        if result["added"] != 1 or result["errors"]:
+            raise AssertionError(f"composer staging failed: {result}")
+        entry = addon.state.attachments[-1]
+        if not Path(entry["path"]).is_file():
+            raise AssertionError(f"staged file missing: {entry}")
+        block = addon._attachment_message_block(addon.state.attachments)
+        if entry["path"] not in block or "media[]" not in block:
+            raise AssertionError(f"agent block malformed: {block}")
+
+        web = state.dock.web
+        chip_js = (
+            "(function(){var b=document.querySelector("
+            "'[data-testid=\"attach-button\"]');"
+            "return b ? b.textContent : '(missing)';})()"
+        )
+        _wait_until(
+            lambda: "1" in str(_eval_js(web, chip_js, 2000, "attach chip")),
+            5000,
+            "attach chip shows count 1",
+        )
+        addon._remove_composer_attachment(entry["id"])
+        _wait_until(
+            lambda: "1" not in str(_eval_js(web, chip_js, 2000, "attach chip")),
+            5000,
+            "attach chip cleared after removal",
+        )
+        if addon.state.attachments:
+            raise AssertionError("attachment list not cleared after removal")
+        return {"staged": entry["name"]}
+
+    check("composer attachments stage/chip/remove (#15a)", _composer_attachments_flow)
+
     def _change_set() -> dict[str, Any]:
         ids = [_new_note(f"cs {i}", back="orig") for i in range(3)]
         cs = proposals.open_change_set({"title": "probe sweep"})
