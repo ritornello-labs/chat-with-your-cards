@@ -15,9 +15,9 @@ final name before the note is created. On reject/supersede the staging
 directory is deleted. A startup sweep clears directories left behind by
 crashes or never-resolved proposals.
 
-Audio only for now, deliberately: images already flow inline as data URIs in
-fields, and video has no proposal use case yet. The shape (kind field, mime
-map) leaves room to widen.
+Widened beyond audio (#10, 2026-07-31): images unblock every visual deck
+(maps, diagrams, image occlusion) and video rides the same [sound:...]
+marker Anki itself uses for it. The kind is derived from the extension.
 """
 
 from __future__ import annotations
@@ -40,12 +40,38 @@ AUDIO_MIME_BY_EXT = {
     ".m4a": "audio/mp4",
     ".flac": "audio/flac",
 }
+IMAGE_MIME_BY_EXT = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".svg": "image/svg+xml",
+    ".avif": "image/avif",
+}
+VIDEO_MIME_BY_EXT = {
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+}
+MIME_BY_EXT = {**AUDIO_MIME_BY_EXT, **IMAGE_MIME_BY_EXT, **VIDEO_MIME_BY_EXT}
+
+
+def kind_for_ext(ext: str) -> str | None:
+    if ext in AUDIO_MIME_BY_EXT:
+        return "audio"
+    if ext in IMAGE_MIME_BY_EXT:
+        return "image"
+    if ext in VIDEO_MIME_BY_EXT:
+        return "video"
+    return None
 MAX_MEDIA_FILE_BYTES = 8_000_000  # matches show_image's inline budget
 MAX_MEDIA_PER_PROPOSAL = 4
 SWEEP_MAX_AGE_DAYS = 7
 
-# Anki's sound marker: [sound:filename.mp3]
+# Anki's sound marker: [sound:filename.mp3] - used for video too.
 SOUND_RE = re.compile(r"\[sound:([^\]]+)\]")
+# <img src="filename.png"> in any quoting style; group 1 = the filename.
+IMG_SRC_RE = re.compile(r"<img\b[^>]*?\bsrc=[\"']?([^\"'>\s]+)", re.I)
 
 # Media filenames must be safe as a bare path component AND inside a
 # [sound:...] marker: no separators, no brackets, nothing hidden.
@@ -63,13 +89,14 @@ class StagedItem:
     mime: str
     size: int
     path: Path
+    kind: str = "audio"
 
     def to_payload(self) -> dict[str, Any]:
         with self.path.open("rb") as handle:
             data = base64.b64encode(handle.read()).decode("ascii")
         return {
             "id": self.id,
-            "kind": "audio",
+            "kind": self.kind,
             "name": self.filename,
             "mime": self.mime,
             "bytes": self.size,
@@ -115,12 +142,12 @@ class MediaStaging:
                         "brackets, or colons; max 120 chars)"
                     )
                 ext = os.path.splitext(filename)[1].lower()
-                mime = AUDIO_MIME_BY_EXT.get(ext)
-                if mime is None:
+                mime = MIME_BY_EXT.get(ext)
+                kind = kind_for_ext(ext)
+                if mime is None or kind is None:
                     raise MediaError(
                         f"unsupported media type {ext!r} for {filename!r} - "
-                        "audio only for now: "
-                        + ", ".join(sorted(AUDIO_MIME_BY_EXT))
+                        "supported: " + ", ".join(sorted(MIME_BY_EXT))
                     )
                 if filename.lower() in seen_names:
                     raise MediaError(f"duplicate media filename {filename!r}")
@@ -143,6 +170,7 @@ class MediaStaging:
                         mime=mime,
                         size=size,
                         path=dest,
+                        kind=kind,
                     )
                 )
         except Exception:
@@ -183,6 +211,16 @@ def sound_markers(fields: dict[str, str]) -> set[str]:
     return found
 
 
+def media_references(fields: dict[str, str]) -> set[str]:
+    """Every media filename a field references: [sound:...] (audio AND
+    video, Anki's own convention) plus <img src=...>."""
+    found = sound_markers(fields)
+    for value in fields.values():
+        for match in IMG_SRC_RE.finditer(value):
+            found.add(match.group(1).strip())
+    return found
+
+
 def rewrite_sound_markers(fields: dict[str, str], renames: dict[str, str]) -> dict[str, str]:
     """Rewrite [sound:old] -> [sound:new] per `renames`, other text untouched."""
     if not renames:
@@ -193,3 +231,17 @@ def rewrite_sound_markers(fields: dict[str, str], renames: dict[str, str]) -> di
         return f"[sound:{renames.get(name, name)}]"
 
     return {name: SOUND_RE.sub(sub, value) for name, value in fields.items()}
+
+
+def rewrite_media_markers(fields: dict[str, str], renames: dict[str, str]) -> dict[str, str]:
+    """Rewrite [sound:old]->[sound:new] AND <img src="old">-><img src="new">
+    per `renames`; everything else untouched."""
+    if not renames:
+        return fields
+    fields = rewrite_sound_markers(fields, renames)
+
+    def sub(match: re.Match[str]) -> str:
+        name = match.group(1).strip()
+        return match.group(0).replace(match.group(1), renames.get(name, name))
+
+    return {name: IMG_SRC_RE.sub(sub, value) for name, value in fields.items()}

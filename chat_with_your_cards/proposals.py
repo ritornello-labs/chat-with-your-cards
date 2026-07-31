@@ -1093,6 +1093,79 @@ class ProposalManager:
         )
         return self._finish_submission(proposal, len(unused))
 
+    def submit_store_media_asset(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Place a non-note asset in collection.media (#10): fonts and CSS
+        for styling, shared images templates reference by name. Staged like
+        note media so the review card can PREVIEW the file; imported through
+        col.media.add_file on accept; revert moves it to Anki's media trash.
+        """
+        if self._media is None:
+            raise ProposalError("media staging is not available in this session")
+        from .media_staging import MediaError
+
+        proposal_id = self._next_id()
+        try:
+            staged = self._media.stage(
+                proposal_id,
+                [
+                    {
+                        "path": str(args.get("path", "")),
+                        "filename": str(args.get("filename", "") or ""),
+                    }
+                ],
+            )
+        except MediaError as exc:
+            raise ProposalError(str(exc)) from None
+        item = staged[0]
+        proposal = Proposal(
+            id=proposal_id,
+            kind="bulk",
+            op="store_media_asset",
+            op_args={"filename": item.filename},
+            note_type="",
+            deck="",
+            tags=[],
+            fields={},
+            rationale=str(args.get("rationale", "")),
+            count=1,
+            samples=[
+                {
+                    "text": f'Store "{item.filename}" '
+                    f"({item.size // 1024} KB {item.kind}) in the media folder"
+                }
+            ],
+            media=[item.to_payload()],
+        )
+        return self._finish_submission(proposal, 1)
+
+    def _accept_store_media(self, proposal: Proposal) -> list[int]:
+        col = self._col()
+        name = str(proposal.op_args["filename"])
+        staged_path = self._media.staged_path(proposal.id, name) if self._media else None
+        if staged_path is None or not staged_path.is_file():
+            raise ProposalError(f"staged file {name!r} is gone (cleaned up?)")
+        try:
+            final = str(col.media.add_file(str(staged_path)))
+        except Exception as exc:
+            raise ProposalError(str(exc)) from None
+        if final != name:
+            proposal.warnings.append(
+                f"renamed on import (name already taken): {name} -> {final}"
+            )
+        self._ledger.append(
+            LedgerEntry(
+                id=proposal.id,
+                kind="bulk",
+                note_id=0,
+                label=f'store media "{final}"',
+                data={"op": "store_media_asset", "final": final},
+            )
+        )
+        if self._media is not None:
+            self._media.discard(proposal.id)
+        proposal.status = ACCEPTED
+        return []
+
     def submit_card_state(self, args: dict[str, Any]) -> dict[str, Any]:
         """Card-state ops (#3): suspend/unsuspend, bury/unbury, flags.
 
@@ -2601,6 +2674,8 @@ class ProposalManager:
             return self._accept_scheduling(proposal)
         if proposal.op == "clear_unused_tags":
             return self._accept_clear_unused(proposal)
+        if proposal.op == "store_media_asset":
+            return self._accept_store_media(proposal)
         raise ProposalError(f"unknown bulk op {proposal.op!r}")
 
     def _accept_bulk_tags(self, proposal: Proposal) -> list[int]:
@@ -3679,6 +3754,15 @@ class ProposalManager:
                 # One set_deck RPC per distinct prior home deck, not per card.
                 steps=len(by_deck),
             )
+        elif entry.kind == "bulk" and entry.data.get("op") == "store_media_asset":
+            final = str(entry.data.get("final", ""))
+
+            def mutate_media() -> None:
+                # Anki's media trash, not deletion: recoverable from the
+                # Check Media screen if the revert was itself a mistake.
+                col.media.trash_files([final])
+
+            self._revert_write(col, mutate_media, invariants.Scope(), steps=0)
         elif entry.kind == "bulk" and entry.data.get("op") in ("add_tags", "remove_tags"):
             tag_prior = {
                 int(n): list(v) for n, v in entry.data.get("prior", {}).items()
@@ -4041,7 +4125,7 @@ class ProposalManager:
         dir and attach playable data-URI payload entries to the proposal.
         Raises ProposalError (surfaced as the tool error) on any problem -
         all-or-nothing, nothing half-staged."""
-        from .media_staging import MediaError, sound_markers
+        from .media_staging import MediaError, media_references
 
         if self._media is None:
             raise ProposalError(
@@ -4056,13 +4140,18 @@ class ProposalManager:
         # (the field may reference media already in the collection), but the
         # mismatches the agent most plausibly made by accident are surfaced
         # on the review card.
-        referenced = sound_markers(proposal.fields)
+        referenced = media_references(proposal.fields)
         for item in staged:
             if item.filename not in referenced:
+                how = (
+                    "<img src=...> reference"
+                    if item.kind == "image"
+                    else "[sound:...] marker"
+                )
                 proposal.warnings.append(
-                    f"attached audio {item.filename!r} is not referenced by any "
-                    "field ([sound:...] marker missing) - it would be imported "
-                    "but never played"
+                    f"attached {item.kind} {item.filename!r} is not referenced "
+                    f"by any field ({how} missing) - it would be imported but "
+                    "never shown"
                 )
 
     def _attach_preview_media(self, col: Any, proposal: Proposal) -> None:
@@ -4126,7 +4215,7 @@ class ProposalManager:
         own API - it de-duplicates and renames on content collision) and
         rewrite [sound:] markers to the final names. Idempotent: entries that
         already carry final_name (a re-add after undo) are skipped."""
-        from .media_staging import rewrite_sound_markers
+        from .media_staging import rewrite_media_markers
 
         if not proposal.media or self._media is None:
             return
@@ -4137,7 +4226,7 @@ class ProposalManager:
             staged_path = self._media.staged_path(proposal.id, entry["name"])
             if not staged_path.is_file():
                 proposal.warnings.append(
-                    f"staged audio {entry['name']!r} is gone (cleaned up?); "
+                    f"staged media {entry['name']!r} is gone (cleaned up?); "
                     "the note was created without importing it"
                 )
                 continue
@@ -4146,9 +4235,9 @@ class ProposalManager:
             if final != entry["name"]:
                 renames[entry["name"]] = final
         if renames:
-            proposal.fields = rewrite_sound_markers(proposal.fields, renames)
+            proposal.fields = rewrite_media_markers(proposal.fields, renames)
             proposal.warnings.append(
-                "audio renamed on import (name already taken in your media "
+                "media renamed on import (name already taken in your media "
                 "folder): "
                 + ", ".join(f"{old} -> {new}" for old, new in renames.items())
             )

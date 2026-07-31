@@ -185,19 +185,21 @@ def register_proposal_tools(registry: ToolRegistry) -> None:
                     },
                     "media": {
                         "type": "array",
-                        "description": "Audio files to attach (e.g. TTS you "
-                        "generated): each is staged now, playable on the review "
-                        "card, and imported into the collection's media folder "
-                        "only when the user accepts. Reference each file in a "
-                        "field as [sound:filename] - unreferenced attachments "
-                        "are flagged on the card. mp3/wav/ogg/opus/m4a/flac, "
-                        "max 4 files.",
+                        "description": "Media files to attach (TTS audio, a "
+                        "map/diagram image, short video): each is staged now, "
+                        "previewed on the review card, and imported into the "
+                        "collection's media folder only when the user accepts. "
+                        "Reference audio/video in a field as [sound:filename] "
+                        "and images as <img src=\"filename\"> - unreferenced "
+                        "attachments are flagged on the card. Audio "
+                        "mp3/wav/ogg/opus/m4a/flac, images png/jpg/jpeg/gif/"
+                        "webp/svg/avif, video mp4/webm; max 4 files.",
                         "items": {
                             "type": "object",
                             "properties": {
                                 "path": {
                                     "type": "string",
-                                    "description": "Absolute local path to the audio file",
+                                    "description": "Absolute local path to the media file",
                                 },
                                 "filename": {
                                     "type": "string",

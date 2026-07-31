@@ -523,6 +523,53 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
 
     check("batched filtered-deck rebuild via pattern (#27 quick win)", _batch_filtered_actions)
 
+    def _media_beyond_audio() -> dict[str, Any]:
+        """#10 on real Anki: an image attachment stages with kind=image,
+        imports through col.media.add_file on accept with the <img src>
+        reference intact, and store_media_asset round-trips (import ->
+        ledger revert -> media trash)."""
+        import tempfile
+
+        col = mw.col
+        tmp_dir = Path(tempfile.mkdtemp(prefix="cwyc-media-probe-"))
+        png = tmp_dir / "probe-media.png"
+        png.write_bytes(_PNG_1PX)
+
+        with _capture_pushes(proposals) as pushes:
+            result = proposals.submit_create(
+                {
+                    "note_type": "Basic",
+                    "deck": "ProbeMedia",
+                    "fields": {
+                        "Front": 'what map? <img src="probe-media.png">',
+                        "Back": "b",
+                    },
+                    "tags": [],
+                    "media": [{"path": str(png)}],
+                }
+            )
+        card = next(p["proposal"] for p in pushes if p.get("type") == "proposal")
+        if card["media"][0]["kind"] != "image":
+            raise AssertionError(f"staged image kind wrong: {card['media'][0]}")
+        if any("not referenced" in w for w in card.get("warnings", [])):
+            raise AssertionError("referenced image flagged as unreferenced")
+        proposals.accept({"id": result["proposal_id"]})
+        if not col.media.have("probe-media.png"):
+            raise AssertionError("accepted image did not land in collection.media")
+
+        asset = tmp_dir / "_probe-asset.png"
+        asset.write_bytes(_PNG_1PX)
+        stored = proposals.submit_store_media_asset({"path": str(asset)})
+        proposals.accept({"id": stored["proposal_id"]})
+        if not col.media.have("_probe-asset.png"):
+            raise AssertionError("store_media_asset did not import the file")
+        proposals.revert({"id": stored["proposal_id"]})
+        if col.media.have("_probe-asset.png"):
+            raise AssertionError("revert did not trash the stored asset")
+        return {"note_media": "probe-media.png", "asset": "_probe-asset.png"}
+
+    check("media beyond audio: image attach + store asset (#10)", _media_beyond_audio)
+
     def _change_set() -> dict[str, Any]:
         ids = [_new_note(f"cs {i}", back="orig") for i in range(3)]
         cs = proposals.open_change_set({"title": "probe sweep"})

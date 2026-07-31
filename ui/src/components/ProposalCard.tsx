@@ -153,6 +153,38 @@ function previewSrcdoc(side: string, css: string | null | undefined): string {
  * reduced-motion guard). Edits default to the interesting side (After);
  * creations start front-up like a real card on the desk.
  */
+/** Staged image/video attachments (#10). The interaction-schema's
+ *  MediaAttachment is audio-only by design (the player strip), so visuals
+ *  render in this CWYC-owned strip instead of widening a schema shared with
+ *  other hosts. data:-URI sources only - same trust boundary as the player. */
+function StagedVisualStrip({ media }: { media: unknown }) {
+  if (!Array.isArray(media)) return null;
+  const visuals = media.filter(
+    (item): item is { kind: string; src: string; name?: string } =>
+      !!item &&
+      typeof item === "object" &&
+      ((item as { kind?: unknown }).kind === "image" ||
+        (item as { kind?: unknown }).kind === "video") &&
+      typeof (item as { src?: unknown }).src === "string" &&
+      (item as { src: string }).src.startsWith("data:")
+  );
+  if (!visuals.length) return null;
+  return (
+    <div className="cwyc-visual-strip" data-testid="proposal-visuals">
+      {visuals.map((item, i) => (
+        <figure className="cwyc-visual-item" key={i}>
+          {item.kind === "image" ? (
+            <img src={item.src} alt={item.name ?? "attached image"} />
+          ) : (
+            <video src={item.src} controls preload="metadata" />
+          )}
+          <figcaption>{item.name}</figcaption>
+        </figure>
+      ))}
+    </div>
+  );
+}
+
 /** The flip preview plus the large-window launcher (#2): the in-card
  *  preview is a small square, and complex cards need room. Desktop opens a
  *  resizable QDialog rendering through the same ephemeral templates. */
@@ -415,14 +447,23 @@ function SharedCreateProposalCard({ data, store }: ProposalCardProps) {
       className={"cwyc-interaction-card" + (isActive ? " cwyc-proposal-active" : "")}
       error={data.errorMessage}
       renderBlock={(block) => {
-        if (block.type === "card_preview" && previews) {
-          // This route has no field-draft state; {} makes Python fall back
-          // to the proposal's own values (#2).
+        if (block.type === "card_preview") {
+          // Rendered preview (when Python could produce one) plus staged
+          // visuals (#10) - an attached image must be reviewable even
+          // though the ephemeral render cannot resolve it yet (the file is
+          // not in collection.media until accept). No field-draft state on
+          // this route; {} makes Python fall back to the proposal's own
+          // values (#2).
           return (
-            <PreviewZone
-              previews={previews}
-              onExpand={() => store.openPreviewWindow(data.id, {})}
-            />
+            <>
+              {previews ? (
+                <PreviewZone
+                  previews={previews}
+                  onExpand={() => store.openPreviewWindow(data.id, {})}
+                />
+              ) : null}
+              <StagedVisualStrip media={(data as { media?: unknown }).media} />
+            </>
           );
         }
         // The schema's key_value block is read-only by definition; swap in the
@@ -568,6 +609,7 @@ function LegacyProposalCard({ data, store }: ProposalCardProps) {
           onExpand={() => store.openPreviewWindow(data.id, values)}
         />
       ) : null}
+      <StagedVisualStrip media={(data as { media?: unknown }).media} />
 
       {!editableFields ? (
         <ProposalBody data={data} />

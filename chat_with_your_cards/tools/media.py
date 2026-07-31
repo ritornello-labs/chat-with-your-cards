@@ -232,7 +232,42 @@ def show_image(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     return {"status": "displayed", "caption": caption, "bytes": size}
 
 
+def store_media_asset(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    return ctx.proposals.submit_store_media_asset(args)
+
+
 def register_media_tools(registry: ToolRegistry) -> None:
+    registry.register(
+        ToolSpec(
+            "store_media_asset",
+            "Place a NON-NOTE asset in the collection's media folder: a font "
+            "for @font-face styling, a shared image templates reference by "
+            "name, a stylesheet. One confirmation with a preview; revertible "
+            "(the file moves to Anki's media trash). For media a specific "
+            "note uses, attach it to propose_note instead. Files starting "
+            "with _ are protected from Check Media's unused cleanup - prefer "
+            "that convention for template assets.",
+            {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute local path to the file",
+                    },
+                    "filename": {
+                        "type": "string",
+                        "description": "Name to store as (defaults to the "
+                        "file's basename); use _prefixed names for template "
+                        "assets, e.g. '_mapstyle.css'",
+                    },
+                    "rationale": {"type": "string"},
+                },
+                "required": ["path"],
+            },
+            store_media_asset,
+            writes=True,
+        )
+    )
     registry.register(
         ToolSpec(
             "show_image",

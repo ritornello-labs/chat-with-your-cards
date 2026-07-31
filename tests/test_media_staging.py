@@ -54,11 +54,52 @@ class StagingTests(unittest.TestCase):
         with self.assertRaises(MediaError):
             self.staging.stage("p1", [{"path": str(self.base / "nope.mp3")}])
 
-    def test_non_audio_extension_rejected(self) -> None:
-        src = self.base / "evil.svg"
-        src.write_text("<svg/>")
-        with self.assertRaises(MediaError):
+    def test_unsupported_extension_rejected(self) -> None:
+        src = self.base / "evil.exe"
+        src.write_bytes(b"MZ....")
+        with self.assertRaisesRegex(MediaError, "unsupported media type"):
             self.staging.stage("p1", [{"path": str(src)}])
+
+    def test_image_and_video_staged_with_kinds(self) -> None:
+        # #10: images and video ride the same staging path as audio.
+        png = self.base / "map.png"
+        png.write_bytes(b"\x89PNG" + b"x" * 100)
+        webm = self.base / "clip.webm"
+        webm.write_bytes(b"\x1a\x45\xdf\xa3" + b"x" * 100)
+        staged = self.staging.stage(
+            "p1", [{"path": str(png)}, {"path": str(webm)}]
+        )
+        payloads = {item.filename: item.to_payload() for item in staged}
+        self.assertEqual("image", payloads["map.png"]["kind"])
+        self.assertTrue(payloads["map.png"]["src"].startswith("data:image/png;base64,"))
+        self.assertEqual("video", payloads["clip.webm"]["kind"])
+        self.assertTrue(payloads["clip.webm"]["src"].startswith("data:video/webm;base64,"))
+
+    def test_media_references_cover_img_and_sound(self) -> None:
+        from chat_with_your_cards.media_staging import media_references
+
+        refs = media_references(
+            {
+                "Front": 'Where? <img src="map.png"> and <IMG SRC=\'alt.webp\'>',
+                "Back": "[sound:word.mp3] <img src=bare.gif>",
+            }
+        )
+        self.assertEqual({"map.png", "alt.webp", "word.mp3", "bare.gif"}, refs)
+
+    def test_rewrite_media_markers_rewrites_img_and_sound(self) -> None:
+        from chat_with_your_cards.media_staging import rewrite_media_markers
+
+        fields = {
+            "Front": '<img src="map.png"> stays <img src="other.png">',
+            "Back": "[sound:word.mp3]",
+        }
+        out = rewrite_media_markers(
+            fields, {"map.png": "map-2.png", "word.mp3": "word-2.mp3"}
+        )
+        self.assertEqual(
+            '<img src="map-2.png"> stays <img src="other.png">', out["Front"]
+        )
+        self.assertEqual("[sound:word-2.mp3]", out["Back"])
 
     def test_bad_filenames_rejected(self) -> None:
         src = self._audio()

@@ -1619,6 +1619,35 @@ body {
   position: relative;
 }
 
+/* Staged image/video attachments on proposal cards (#10). */
+.cwyc-visual-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.cwyc-visual-item {
+  margin: 0;
+  max-width: 100%;
+}
+
+.cwyc-visual-item img,
+.cwyc-visual-item video {
+  display: block;
+  max-width: 100%;
+  max-height: 180px;
+  border: 1px solid var(--cwyc-border);
+  border-radius: 8px;
+  background: var(--cwyc-bg);
+}
+
+.cwyc-visual-item figcaption {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--cwyc-text-dim);
+}
+
 /* Permission ladder + per-class matrix (#26). The rail marks the
    restrictive -> permissive ordering; the matrix names the operation
    classes whose carve-outs are hardcoded in Python. */

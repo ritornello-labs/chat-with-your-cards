@@ -298,6 +298,16 @@ function createProposalScript(): Step[] {
             bytes: 2444,
             src: demoWavDataUri(),
           },
+          {
+            // #10: a staged image draws in the CWYC visual strip.
+            id: "m-demo-2",
+            kind: "image",
+            name: "epsilon-band.png",
+            mime: "image/png",
+            bytes: 68,
+            src:
+              "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAG0lEQVR4nGNgYGD4z8DAwMDEgAaGgADjfwYGBgB50QIDU9zC1gAAAABJRU5ErkJggg==",
+          },
         ],
         // task #25: a [sound:...] ref to media already in the collection,
         // resolved server-side to a data: URI - draws on the same strip.

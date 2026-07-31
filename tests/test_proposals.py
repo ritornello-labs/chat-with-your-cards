@@ -451,6 +451,9 @@ class FakeMedia:
         base = _os.path.basename(path)
         return self.rename_map.get(base, base)
 
+    def trash_files(self, names: list[str]) -> None:
+        self.trashed = getattr(self, "trashed", []) + list(names)
+
 
 class FakeCol:
     def __init__(self) -> None:
@@ -694,6 +697,67 @@ class MediaProposalTests(unittest.TestCase):
         result = manager.submit_create(args)
         self.assertTrue([w for w in result["warnings"] if "not referenced" in w])
 
+    def test_image_attachment_referenced_by_img_src(self) -> None:
+        # #10: an <img src> reference counts; kind rides the payload so the
+        # UI can render the visual strip instead of an audio player.
+        manager, col, pushed = make_manager(media_staging=self.staging)
+        png = self.base / "map.png"
+        png.write_bytes(b"\x89PNG" + b"x" * 50)
+        args = dict(CREATE_ARGS)
+        args["fields"] = {"Front": 'Where is this? <img src="map.png">', "Back": "b"}
+        args["media"] = [{"path": str(png)}]
+        result = manager.submit_create(args)
+        (proposal,) = pushes_of(pushed, "proposal")
+        media = proposal["proposal"]["media"]
+        self.assertEqual("image", media[0]["kind"])
+        self.assertFalse(
+            [w for w in result["warnings"] if "not referenced" in w], result["warnings"]
+        )
+        # Unreferenced image points at the <img> convention, not [sound:].
+        png2 = self.base / "unused.png"
+        png2.write_bytes(b"\x89PNG" + b"x" * 50)
+        args2 = dict(CREATE_ARGS)
+        args2["fields"] = {"Front": "no reference", "Back": "b"}
+        args2["media"] = [{"path": str(png2)}]
+        result2 = manager.submit_create(args2)
+        self.assertTrue(
+            [w for w in result2["warnings"] if "<img src=...>" in w],
+            result2["warnings"],
+        )
+
+    def test_image_rename_on_import_rewrites_img_src(self) -> None:
+        manager, col, pushed = make_manager(media_staging=self.staging)
+        col.media.rename_map["map.png"] = "map-2.png"
+        png = self.base / "map.png"
+        png.write_bytes(b"\x89PNG" + b"x" * 50)
+        args = dict(CREATE_ARGS)
+        args["fields"] = {"Front": '<img src="map.png">', "Back": "b"}
+        args["media"] = [{"path": str(png)}]
+        result = manager.submit_create(args)
+        manager.accept({"id": result["proposal_id"]})
+        nid = pushes_of(pushed, "proposal_resolved")[-1]["note_id"]
+        self.assertIn('<img src="map-2.png">', col.get_note(nid)["Front"])
+
+    def test_store_media_asset_flow(self) -> None:
+        # #10: non-note assets (fonts, shared images) via one confirmation;
+        # revert moves the imported file to Anki's media trash.
+        manager, col, pushed = make_manager(media_staging=self.staging)
+        font = self.base / "_style.css"
+        font.write_text(".card { color: teal; }")
+        with self.assertRaisesRegex(ProposalError, "unsupported media type"):
+            manager.submit_store_media_asset({"path": str(font)})
+        png = self.base / "_shared-map.png"
+        png.write_bytes(b"\x89PNG" + b"x" * 50)
+        result = manager.submit_store_media_asset({"path": str(png)})
+        proposal = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertIn('Store "_shared-map.png"', proposal["samples"][0]["text"])
+        self.assertEqual("image", proposal["media"][0]["kind"])
+        manager.accept({"id": result["proposal_id"]})
+        self.assertTrue(col.media.added)
+        self.assertIn("store media", manager._ledger[-1].label)
+        manager.revert({"id": result["proposal_id"]})
+        self.assertEqual(["_shared-map.png"], col.media.trashed)
+
     def test_media_without_staging_support_is_a_clear_error(self) -> None:
         manager, col, pushed = make_manager()  # no media_staging injected
         with self.assertRaises(ProposalError):
@@ -747,8 +811,8 @@ class MediaProposalTests(unittest.TestCase):
 
     def test_bad_media_is_tool_error_and_nothing_staged(self) -> None:
         manager, col, pushed = make_manager(media_staging=self.staging)
-        bad = self.base / "evil.svg"
-        bad.write_text("<svg/>")
+        bad = self.base / "evil.exe"
+        bad.write_bytes(b"MZ....")
         with self.assertRaises(ProposalError):
             manager.submit_create(self._args_with_media(path=str(bad)))
         self.assertEqual(pushes_of(pushed, "proposal"), [])
