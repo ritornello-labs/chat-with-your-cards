@@ -54,6 +54,28 @@ MAX_EXPLICIT_CARD_IDS = 2000
 # Bulk tag ops (#4): Anki separates tags with spaces, so a "tag with spaces"
 # is actually several tags - reject it instead of silently splitting.
 MAX_TAGS_PER_OP = 10
+
+# Scheduling writes (#6). Anki's set_due_date grammar: "n" days from today,
+# "n-m" a random day in that range, trailing "!" also sets the interval.
+SCHEDULING_OPS = {"set_due_date", "forget_cards", "reposition_new_cards"}
+_DUE_DATE_RE = re.compile(r"^\d+(-\d+)?!?$")
+# Every field the three ops can touch, captured per card at apply time so
+# revert is an exact update_card restore - including the new->review
+# conversion Anki's own UI calls not-practically-reversible, and the FSRS
+# memory state forget destroys.
+_SCHED_FIELDS = (
+    "type",
+    "queue",
+    "due",
+    "ivl",
+    "factor",
+    "left",
+    "odue",
+    "reps",
+    "lapses",
+    "custom_data",
+    "memory_state",
+)
 # Per-card inspection cap at submit (no-op / filtered-deck warnings). Purely
 # advisory: accept captures true prior state per card regardless of size.
 CARD_STATE_INSPECT_MAX = 500
@@ -1082,42 +1104,9 @@ class ProposalManager:
             flag = int(args["flag"])
             if not 0 <= flag <= 7:
                 raise ProposalError(f"flag must be 0-7, got {flag}")
-        raw_ids = args.get("card_ids") or []
-        query = str(args.get("query") or "").strip()
-        if bool(raw_ids) == bool(query):
-            raise ProposalError(f"{op} needs exactly one of card_ids or query")
-        warnings: list[str] = []
-        if raw_ids:
-            ids = list(dict.fromkeys(int(c) for c in raw_ids))
-            if len(ids) > MAX_EXPLICIT_CARD_IDS:
-                raise ProposalError(
-                    f"{len(ids)} explicit card_ids is too many "
-                    f"(max {MAX_EXPLICIT_CARD_IDS}); pass a query instead"
-                )
-            live = []
-            missing = 0
-            for cid in ids:
-                try:
-                    col.get_card(cid)
-                except Exception:
-                    missing += 1
-                    continue
-                live.append(cid)
-            if not live:
-                raise ProposalError("none of those cards exist")
-            if missing:
-                warnings.append(f"{missing} card id(s) do not exist and were dropped")
-            scope_text = f"{len(live)} selected card(s)"
-        else:
-            try:
-                live = [int(c) for c in col.find_cards(query)]
-            except Exception as exc:
-                raise ProposalError(f"bad query {query!r}: {exc}") from None
-            if not live:
-                raise ProposalError(
-                    self._empty_query_error(col, query, f"no cards match {query!r}")
-                )
-            scope_text = f"{len(live)} card(s) matching {query!r}"
+        live, scope_text, warnings, selection = self._resolve_card_selection(
+            col, args, op
+        )
         # Honest accounting, bounded: inspecting every card of a huge query
         # would stall submit, and the warnings are advisory - accept captures
         # true prior state per card regardless.
@@ -1169,9 +1158,7 @@ class ProposalManager:
                 )
             except Exception:
                 continue
-        op_args: dict[str, Any] = (
-            {"card_ids": live} if raw_ids else {"query": query}
-        )
+        op_args: dict[str, Any] = dict(selection)
         if flag is not None:
             op_args["flag"] = flag
         proposal = Proposal(
@@ -1192,6 +1179,201 @@ class ProposalManager:
             warnings=warnings,
         )
         return self._finish_submission(proposal, len(live))
+
+    def _resolve_card_selection(
+        self, col: Any, args: dict[str, Any], op: str
+    ) -> tuple[list[int], str, list[str], dict[str, Any]]:
+        """Shared card-selection contract (#3/#6): exactly one of card_ids or
+        query; returns (live ids, human scope text, warnings, the op_args
+        fragment recording how the selection was made)."""
+        raw_ids = args.get("card_ids") or []
+        query = str(args.get("query") or "").strip()
+        if bool(raw_ids) == bool(query):
+            raise ProposalError(f"{op} needs exactly one of card_ids or query")
+        warnings: list[str] = []
+        if raw_ids:
+            ids = list(dict.fromkeys(int(c) for c in raw_ids))
+            if len(ids) > MAX_EXPLICIT_CARD_IDS:
+                raise ProposalError(
+                    f"{len(ids)} explicit card_ids is too many "
+                    f"(max {MAX_EXPLICIT_CARD_IDS}); pass a query instead"
+                )
+            live = []
+            missing = 0
+            for cid in ids:
+                try:
+                    col.get_card(cid)
+                except Exception:
+                    missing += 1
+                    continue
+                live.append(cid)
+            if not live:
+                raise ProposalError("none of those cards exist")
+            if missing:
+                warnings.append(f"{missing} card id(s) do not exist and were dropped")
+            return live, f"{len(live)} selected card(s)", warnings, {"card_ids": live}
+        try:
+            live = [int(c) for c in col.find_cards(query)]
+        except Exception as exc:
+            raise ProposalError(f"bad query {query!r}: {exc}") from None
+        if not live:
+            raise ProposalError(
+                self._empty_query_error(col, query, f"no cards match {query!r}")
+            )
+        return (
+            live,
+            f"{len(live)} card(s) matching {query!r}",
+            warnings,
+            {"query": query},
+        )
+
+    @staticmethod
+    def _sched_summary(card: Any, today: int) -> str:
+        """One-line scheduling state for the proposal card's before/after diff."""
+        ctype = int(card.type)
+        if ctype == 0:
+            return f"new · position {int(card.due)}"
+        if int(card.queue) == -1:
+            state = "suspended"
+        elif ctype in (1, 3):
+            state = "learning"
+        else:
+            state = "review"
+        due = int(card.odue or card.due) if int(getattr(card, "odid", 0)) else int(card.due)
+        parts = [state]
+        if ctype in (2, 3):
+            delta = due - today
+            parts.append(f"due in {delta}d" if delta >= 0 else f"overdue {-delta}d")
+            parts.append(f"ivl {int(card.ivl)}d")
+        return " · ".join(parts)
+
+    def submit_scheduling(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Scheduling writes (#6): Set Due Date / Forget / Reposition.
+
+        These rewrite scheduling state in bulk, so the proposal card gets a
+        LOUDER diff than a note edit: per-sample before/after scheduling
+        lines plus the total count. Revert is an exact update_card restore
+        of every captured field (_SCHED_FIELDS) - including the new->review
+        conversion and the FSRS memory state forget destroys.
+        """
+        col = self._col()
+        op = str(args.get("op", ""))
+        if op not in SCHEDULING_OPS:
+            raise ProposalError(f"unknown scheduling op {op!r}")
+        op_params: dict[str, Any] = {}
+        if op == "set_due_date":
+            days = str(args.get("days", "")).strip()
+            if not _DUE_DATE_RE.match(days):
+                raise ProposalError(
+                    f"invalid days {days!r}: use 'n' (days from today), 'n-m' "
+                    "(random in range), optionally ending in '!' to also set "
+                    "the interval"
+                )
+            op_params["days"] = days
+        elif op == "forget_cards":
+            op_params["restore_position"] = bool(args.get("restore_position", False))
+            op_params["reset_counts"] = bool(args.get("reset_counts", False))
+        else:
+            op_params["starting_from"] = max(0, int(args.get("starting_from", 0)))
+            op_params["step_size"] = max(1, int(args.get("step_size", 1)))
+            op_params["randomize"] = bool(args.get("randomize", False))
+            op_params["shift_existing"] = bool(args.get("shift_existing", False))
+
+        live, scope_text, warnings, selection = self._resolve_card_selection(
+            col, args, op
+        )
+        today = int(col.sched.today)
+
+        headline = {
+            "set_due_date": f"Set due date to {op_params.get('days')} — {scope_text}",
+            "forget_cards": f"Forget (reset to new) — {scope_text}",
+            "reposition_new_cards": (
+                f"Reposition from {op_params.get('starting_from')} "
+                f"step {op_params.get('step_size')} — {scope_text}"
+            ),
+        }[op]
+        samples: list[dict[str, Any]] = [{"text": headline}]
+        if len(live) <= CARD_STATE_INSPECT_MAX:
+            new_count = 0
+            position = op_params.get("starting_from", 0)
+            for index, cid in enumerate(live):
+                card = col.get_card(cid)
+                if int(card.type) == 0:
+                    new_count += 1
+                if index < MAX_SAMPLES:
+                    try:
+                        note = card.note()
+                        label = _short_label(
+                            next(iter(dict(note.items()).values()), "")
+                        )
+                    except Exception:
+                        label = f"card {cid}"
+                    samples.append(
+                        {
+                            "label": label,
+                            "old": self._sched_summary(card, today),
+                            "new": self._sched_after_text(op, op_params, card, index, position),
+                        }
+                    )
+            if op == "set_due_date" and new_count:
+                warnings.append(
+                    f"{new_count} new card(s) become review cards (revert "
+                    "restores their exact new-card state)"
+                )
+            if op == "reposition_new_cards" and new_count < len(live):
+                warnings.append(
+                    f"{len(live) - new_count} card(s) are not new and are "
+                    "unaffected by repositioning"
+                )
+        if op == "set_due_date" and str(op_params.get("days", "")).endswith("!"):
+            warnings.append(
+                "the '!' form also overwrites each card's interval"
+            )
+        if op == "forget_cards":
+            warnings.append(
+                "clears interval, ease and FSRS memory state; the review log "
+                "is preserved, and revert restores the captured state"
+            )
+        if op_params.get("shift_existing"):
+            warnings.append(
+                "shift_existing renumbers OTHER new cards too; revert "
+                "restores only the selected cards"
+            )
+        proposal = Proposal(
+            id=self._next_id(),
+            kind="bulk",
+            op=op,
+            op_args={**selection, **op_params},
+            note_type="",
+            deck="",
+            tags=[],
+            fields={},
+            rationale=str(args.get("rationale", "")),
+            count=len(live),
+            samples=samples,
+            warnings=warnings,
+        )
+        return self._finish_submission(proposal, len(live))
+
+    @staticmethod
+    def _sched_after_text(
+        op: str, params: dict[str, Any], card: Any, index: int, start: int
+    ) -> str:
+        if op == "set_due_date":
+            days = str(params["days"]).rstrip("!")
+            base = f"review · due in {days}d"
+            if str(params["days"]).endswith("!"):
+                base += f" · ivl := {days}d"
+            return base
+        if op == "forget_cards":
+            return "new" + (
+                " · original position" if params.get("restore_position") else ""
+            )
+        if int(card.type) != 0:
+            return "(not a new card - unaffected)"
+        if params.get("randomize"):
+            return "new · random position"
+        return f"new · position {start + index * int(params.get('step_size', 1))}"
 
     def submit_delete_notes(self, args: dict[str, Any]) -> dict[str, Any]:
         col = self._col()
@@ -2249,6 +2431,8 @@ class ProposalManager:
             return self._accept_card_state(proposal)
         if proposal.op in ("add_tags", "remove_tags"):
             return self._accept_bulk_tags(proposal)
+        if proposal.op in SCHEDULING_OPS:
+            return self._accept_scheduling(proposal)
         if proposal.op == "clear_unused_tags":
             return self._accept_clear_unused(proposal)
         raise ProposalError(f"unknown bulk op {proposal.op!r}")
@@ -2300,6 +2484,92 @@ class ProposalManager:
                     note_ids=tuple(note_ids),
                     # bulk_add/bulk_remove stamp the notes they touch
                     written_note_ids=tuple(note_ids),
+                ),
+            )
+
+        note_ids = self._apply_write(
+            execute=execute, backup_reason=f"bulk {proposal.op}"
+        )
+        proposal.status = ACCEPTED
+        if self._checkpoint_warning:
+            proposal.warnings.append(self._checkpoint_warning)
+        return note_ids
+
+    def _accept_scheduling(self, proposal: Proposal) -> list[int]:
+        """Apply a set_due_date / forget / reposition proposal.
+
+        Prior state per card = every field the ops can touch (_SCHED_FIELDS,
+        including memory_state and custom_data as live objects - the ledger
+        is in-process, never serialized), captured at apply time so revert is
+        an exact update_card restore regardless of what the backend did.
+        """
+        op = proposal.op
+        params = proposal.op_args
+
+        def execute(col: Any, before: invariants.Snapshot) -> _WriteResult:
+            if "card_ids" in params:
+                candidates = [int(c) for c in params["card_ids"]]
+            else:
+                candidates = [int(c) for c in col.find_cards(params["query"])]
+            prior: dict[int, dict[str, Any]] = {}
+            cards: list[int] = []
+            new_ids: list[int] = []
+            for cid in candidates:
+                try:
+                    card = col.get_card(cid)
+                except Exception:
+                    continue
+                prior[cid] = {name: getattr(card, name) for name in _SCHED_FIELDS}
+                cards.append(cid)
+                if int(card.type) == 0:
+                    new_ids.append(cid)
+            if not cards:
+                raise ProposalError("none of those cards exist anymore")
+            if op == "set_due_date":
+                col.sched.set_due_date(cards, str(params["days"]))
+                label = f"set due date {params['days']} ({len(cards)} cards)"
+                written = cards
+            elif op == "forget_cards":
+                col.sched.schedule_cards_as_new(
+                    cards,
+                    restore_position=bool(params.get("restore_position")),
+                    reset_counts=bool(params.get("reset_counts")),
+                )
+                label = f"forget {len(cards)} card(s)"
+                written = cards
+            else:
+                if not new_ids:
+                    raise ProposalError(
+                        "none of those cards are new; repositioning only "
+                        "affects the new-card queue"
+                    )
+                col.sched.reposition_new_cards(
+                    new_ids,
+                    starting_from=int(params.get("starting_from", 0)),
+                    step_size=int(params.get("step_size", 1)),
+                    randomize=bool(params.get("randomize", False)),
+                    shift_existing=bool(params.get("shift_existing", False)),
+                )
+                label = f"reposition {len(new_ids)} new card(s)"
+                # Only the new cards are stamped; claiming the rest would
+                # fail the written-rows invariant.
+                written = new_ids
+            self._ledger.append(
+                LedgerEntry(
+                    id=proposal.id,
+                    kind="bulk",
+                    note_id=0,
+                    label=label,
+                    data={"op": op, "prior": prior},
+                )
+            )
+            note_ids = [int(col.get_card(cid).nid) for cid in cards[:50]]
+            return _WriteResult(
+                note_ids,
+                invariants.Expectation(),
+                invariants.Scope(
+                    card_ids=tuple(cards),
+                    written_card_ids=tuple(written),
                 ),
             )
 
@@ -3188,6 +3458,35 @@ class ProposalManager:
                 mutate_tags,
                 invariants.Scope(note_ids=tuple(tag_prior)),
                 steps=lambda: done_box["n"],
+            )
+        elif entry.kind == "bulk" and entry.data.get("op") in SCHEDULING_OPS:
+            sched_prior = {
+                int(c): dict(v) for c, v in entry.data.get("prior", {}).items()
+            }
+            restored_box = {"n": 0}
+
+            def mutate_sched() -> None:
+                restored = 0
+                for cid, fields in sched_prior.items():
+                    try:
+                        card = col.get_card(cid)
+                    except Exception:
+                        continue  # card deleted since; nothing to restore
+                    if all(
+                        getattr(card, name) == value for name, value in fields.items()
+                    ):
+                        continue
+                    for name, value in fields.items():
+                        setattr(card, name, value)
+                    col.update_card(card)
+                    restored += 1
+                restored_box["n"] = restored
+
+            self._revert_write(
+                col,
+                mutate_sched,
+                invariants.Scope(card_ids=tuple(sched_prior)),
+                steps=lambda: restored_box["n"],
             )
         elif entry.kind == "bulk" and entry.data.get("op") in CARD_STATE_OPS:
             op = entry.data["op"]

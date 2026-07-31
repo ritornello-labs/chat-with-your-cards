@@ -39,6 +39,14 @@ class FakeCard:
         self.type = 2  # review card unless a test says otherwise
         self.queue = 2  # >=0 normal, -1 suspended, -2 sched-buried, -3 manual
         self.flags = 0  # low 3 bits = user flag
+        # Scheduling fields the #6 ops capture/restore (_SCHED_FIELDS).
+        self.due = 0
+        self.ivl = 0
+        self.factor = 0
+        self.left = 0
+        self.odue = 0
+        self.lapses = 0
+        self.custom_data = ""
 
 
 class FakeNote:
@@ -178,6 +186,7 @@ class FakeDecks:
 class FakeSched:
     def __init__(self, col: "FakeCol") -> None:
         self._col = col
+        self.today = 0
 
     def rebuild_filtered_deck(self, did: int) -> int:
         self._return_home(did)
@@ -241,6 +250,54 @@ class FakeSched:
             if card.queue in (-2, -3):
                 self._requeue(card)
                 card.usn = -1
+
+    # --- scheduling writes (#6), deterministic mirrors of the backend ---
+
+    def set_due_date(self, ids: list[int], days: str) -> None:
+        n = int(days.rstrip("!").split("-")[0])  # deterministic: range start
+        for cid in ids:
+            card = self._col._cards[cid]
+            card.type, card.queue = 2, 2
+            card.due = self.today + n
+            if days.endswith("!") or card.ivl == 0:
+                card.ivl = max(1, n)
+            card.usn = -1
+
+    def schedule_cards_as_new(
+        self,
+        ids: list[int],
+        *,
+        restore_position: bool = False,
+        reset_counts: bool = False,
+        context: Any = None,
+    ) -> None:
+        for cid in ids:
+            card = self._col._cards[cid]
+            card.type = card.queue = 0
+            card.due = 0
+            card.ivl = 0
+            card.factor = 0
+            card.memory_state = None
+            if reset_counts:
+                card.reps = card.lapses = 0
+            card.usn = -1
+
+    def reposition_new_cards(
+        self,
+        ids: list[int],
+        starting_from: int,
+        step_size: int,
+        randomize: bool,
+        shift_existing: bool,
+    ) -> None:
+        position = starting_from
+        for cid in ids:
+            card = self._col._cards[cid]
+            if card.type != 0:
+                continue
+            card.due = position
+            position += step_size
+            card.usn = -1
 
 
 class FakeTags:
@@ -467,6 +524,11 @@ class FakeCol:
 
     def get_card(self, card_id: int) -> FakeCard:
         return self._cards[card_id]
+
+    def update_card(self, card: FakeCard) -> None:
+        # get_card returns the shared object, so the mutation is already
+        # visible; mirror the backend's pending-sync stamp.
+        card.usn = -1
 
     def set_user_flag_for_cards(self, flag: int, cids: list[int]) -> None:
         for cid in cids:
@@ -1769,6 +1831,112 @@ class CardStateTests(unittest.TestCase):
         self.assertIn("Clear the flag", proposal["samples"][0]["text"])
         manager.accept({"id": result["proposal_id"]})
         self.assertIn("clear the flag on 3 card(s)", manager._ledger[-1].label)
+
+
+class SchedulingTests(unittest.TestCase):
+    """Set Due Date / Forget / Reposition (#6): loud before/after samples,
+    full-field prior capture, exact update_card restore on revert."""
+
+    def _setup(self):
+        manager, col, pushed = make_manager()
+        note_ids = _seed_notes(manager, col, pushed)
+        card_ids = [col.get_note(nid)._cards[0].id for nid in note_ids]
+        for cid in card_ids:  # seeded cards start as new
+            card = col.get_card(cid)
+            card.type = card.queue = 0
+        for position, cid in enumerate(card_ids):
+            col.get_card(cid).due = position
+        return manager, col, pushed, card_ids
+
+    def test_days_validation(self) -> None:
+        manager, col, pushed, cids = self._setup()
+        for bad in ("", "abc", "5-", "-3", "3--5", "!5"):
+            with self.assertRaisesRegex(ProposalError, "invalid days"):
+                manager.submit_scheduling(
+                    {"op": "set_due_date", "card_ids": cids, "days": bad}
+                )
+        for good in ("0", "7", "3-10", "14!", "3-10!"):
+            result = manager.submit_scheduling(
+                {"op": "set_due_date", "card_ids": cids, "days": good}
+            )
+            self.assertIn("proposal_id", result)
+
+    def test_set_due_date_apply_revert_restores_new_state(self) -> None:
+        manager, col, pushed, cids = self._setup()
+        result = manager.submit_scheduling(
+            {"op": "set_due_date", "card_ids": [cids[0]], "days": "5!"}
+        )
+        proposal = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertTrue(
+            any("new card(s) become review" in w for w in proposal["warnings"])
+        )
+        self.assertTrue(any("overwrites each card's interval" in w for w in proposal["warnings"]))
+        # Loud diff: sample rows carry old/new scheduling lines.
+        diff = [s for s in proposal["samples"] if "old" in s]
+        self.assertTrue(diff and "new · position" in diff[0]["old"], diff)
+        self.assertIn("due in 5d", diff[0]["new"])
+        manager.accept({"id": result["proposal_id"]})
+        card = col.get_card(cids[0])
+        self.assertEqual((2, 2, 5, 5), (card.type, card.queue, card.due, card.ivl))
+        manager.revert({"id": result["proposal_id"]})
+        self.assertEqual((0, 0, 0, 0), (card.type, card.queue, card.due, card.ivl))
+
+    def test_forget_restores_everything_including_memory_state(self) -> None:
+        manager, col, pushed, cids = self._setup()
+        card = col.get_card(cids[0])
+        sentinel = object()  # stands in for the FSRS memory-state proto
+        card.type, card.queue, card.due, card.ivl = 2, 2, 40, 30
+        card.factor, card.reps, card.lapses = 2600, 12, 3
+        card.memory_state = sentinel
+        result = manager.submit_scheduling(
+            {"op": "forget_cards", "card_ids": [cids[0]], "reset_counts": True}
+        )
+        proposal = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertTrue(any("FSRS memory state" in w for w in proposal["warnings"]))
+        manager.accept({"id": result["proposal_id"]})
+        self.assertEqual(0, card.type)
+        self.assertEqual(0, card.reps)
+        self.assertIsNone(card.memory_state)
+        manager.revert({"id": result["proposal_id"]})
+        self.assertEqual((2, 2, 40, 30), (card.type, card.queue, card.due, card.ivl))
+        self.assertEqual((2600, 12, 3), (card.factor, card.reps, card.lapses))
+        self.assertIs(sentinel, card.memory_state)
+
+    def test_reposition_skips_non_new_and_reverts_positions(self) -> None:
+        manager, col, pushed, cids = self._setup()
+        review = col.get_card(cids[2])
+        review.type, review.queue, review.due = 2, 2, 99
+        result = manager.submit_scheduling(
+            {
+                "op": "reposition_new_cards",
+                "card_ids": cids,
+                "starting_from": 10,
+                "step_size": 2,
+            }
+        )
+        proposal = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertTrue(any("not new" in w for w in proposal["warnings"]))
+        manager.accept({"id": result["proposal_id"]})
+        self.assertEqual(10, col.get_card(cids[0]).due)
+        self.assertEqual(12, col.get_card(cids[1]).due)
+        self.assertEqual(99, review.due)  # untouched
+        manager.revert({"id": result["proposal_id"]})
+        self.assertEqual(0, col.get_card(cids[0]).due)
+        self.assertEqual(1, col.get_card(cids[1]).due)
+
+    def test_reposition_with_no_new_cards_fails_cleanly(self) -> None:
+        manager, col, pushed, cids = self._setup()
+        for cid in cids:
+            card = col.get_card(cid)
+            card.type = card.queue = 2
+        result = manager.submit_scheduling(
+            {"op": "reposition_new_cards", "card_ids": cids}
+        )
+        manager.accept({"id": result["proposal_id"]})
+        errors = pushes_of(pushed, "proposal_error")
+        self.assertTrue(
+            any("none of those cards are new" in e["message"] for e in errors), errors
+        )
 
 
 class DeleteTests(unittest.TestCase):

@@ -34,6 +34,9 @@ const OP_LABELS: Record<string, string> = {
   add_tags: "Add tags",
   remove_tags: "Remove tags",
   clear_unused_tags: "Clear unused tags",
+  set_due_date: "Set due date",
+  forget_cards: "Forget cards",
+  reposition_new_cards: "Reposition new cards",
 };
 
 /** What `count` counts - "400 item(s)" says less than nothing. Keyed by op,
@@ -48,6 +51,9 @@ const COUNT_NOUNS: Record<string, [string, string]> = {
   add_tags: ["note", "notes"],
   remove_tags: ["note", "notes"],
   clear_unused_tags: ["tag", "tags"],
+  set_due_date: ["card", "cards"],
+  forget_cards: ["card", "cards"],
+  reposition_new_cards: ["card", "cards"],
   find_replace: ["note", "notes"],
   rename_tag: ["note", "notes"],
   // skill_update counts the OBSERVED EDITS behind the suggestion, not notes.

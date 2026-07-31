@@ -88,6 +88,32 @@ def _card_state(op: str):
     return call
 
 
+def _scheduling(op: str):
+    def call(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+        return ctx.proposals.submit_scheduling({**args, "op": op})
+
+    return call
+
+
+def _scheduling_schema(extra: dict[str, Any], required: list[str]) -> dict[str, Any]:
+    properties: dict[str, Any] = {
+        "card_ids": {
+            "type": "array",
+            "items": {"type": "integer"},
+            "description": "Exact card ids (from find_cards). Exactly one of "
+            "card_ids / query.",
+        },
+        "query": {
+            "type": "string",
+            "description": "Anki search selecting the cards. Exactly one of "
+            "card_ids / query.",
+        },
+        "rationale": {"type": "string"},
+    }
+    properties.update(extra)
+    return {"type": "object", "properties": properties, "required": required}
+
+
 # Shared schema for the card-state ops: exactly one of card_ids / query.
 def _card_state_schema(extra: dict[str, Any] | None = None) -> dict[str, Any]:
     properties: dict[str, Any] = {
@@ -317,6 +343,77 @@ def register_proposal_tools(registry: ToolRegistry) -> None:
             delete_notes,
             writes=True,
             trusted_only=True,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            "set_due_date",
+            "Set when cards come up next (Anki's Set Due Date). days='7' = "
+            "due in a week; '0' = today; '3-10' = spread randomly across "
+            "that range (the backlog-spreading idiom); '7!' also rewrites "
+            "the interval. New cards become review cards. The proposal shows "
+            "per-card before/after scheduling; revertible (exact restore, "
+            "including new-card state and FSRS memory).",
+            _scheduling_schema(
+                {
+                    "days": {
+                        "type": "string",
+                        "description": "'n', 'n-m', or with trailing '!' to "
+                        "also set the interval, e.g. '7', '3-10', '14!'",
+                    }
+                },
+                ["days"],
+            ),
+            _scheduling("set_due_date"),
+            writes=True,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            "forget_cards",
+            "Reset cards to new (Anki's Forget): clears interval, ease and "
+            "FSRS memory state; the review log survives. The 'start this "
+            "deck over' tool. Revertible (the captured scheduling state, "
+            "including FSRS memory, is restored exactly).",
+            _scheduling_schema(
+                {
+                    "restore_position": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Put cards back at their original "
+                        "new-queue position instead of the end.",
+                    },
+                    "reset_counts": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Also zero the review/lapse counters.",
+                    },
+                },
+                [],
+            ),
+            _scheduling("forget_cards"),
+            writes=True,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            "reposition_new_cards",
+            "Renumber NEW cards' queue positions (Anki's Reposition) - the "
+            "'study the basics first' tool. Non-new cards in the selection "
+            "are unaffected. shift_existing makes room by renumbering other "
+            "new cards (warned; undo restores only the selected cards). "
+            "Revertible.",
+            _scheduling_schema(
+                {
+                    "starting_from": {"type": "integer", "default": 0},
+                    "step_size": {"type": "integer", "default": 1},
+                    "randomize": {"type": "boolean", "default": False},
+                    "shift_existing": {"type": "boolean", "default": False},
+                },
+                [],
+            ),
+            _scheduling("reposition_new_cards"),
+            writes=True,
         )
     )
     registry.register(

@@ -326,6 +326,82 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
 
     check("bulk tags add/remove/clear apply+revert (real col.tags)", _bulk_tags_flow)
 
+    def _scheduling_flow() -> dict[str, Any]:
+        """Scheduling writes (#6) against the real v3 scheduler: set_due_date
+        '5!' converts a new card and revert restores its exact new-card
+        state; forget resets a review card and revert brings the schedule
+        back; reposition renumbers only new cards."""
+        col = mw.col
+        nid1 = _new_note("sched one", deck="ProbeSched")
+        nid2 = _new_note("sched two", deck="ProbeSched")
+        cid1 = int(col.get_note(nid1).cards()[0].id)
+        cid2 = int(col.get_note(nid2).cards()[0].id)
+        before = col.get_card(cid1)
+        prior_state = (before.type, before.queue, before.due, before.ivl)
+
+        due = proposals.submit_scheduling(
+            {"op": "set_due_date", "card_ids": [cid1], "days": "5!"}
+        )
+        proposals.accept({"id": due["proposal_id"]})
+        card = col.get_card(cid1)
+        today = int(col.sched.today)
+        if (card.type, card.queue) != (2, 2) or card.due != today + 5 or card.ivl != 5:
+            raise AssertionError(
+                f"set_due_date 5! wrong result: type={card.type} queue={card.queue} "
+                f"due={card.due} (today {today}) ivl={card.ivl}"
+            )
+        proposals.revert({"id": due["proposal_id"]})
+        card = col.get_card(cid1)
+        if (card.type, card.queue, card.due, card.ivl) != prior_state:
+            raise AssertionError(
+                f"set_due_date revert did not restore the new-card state: "
+                f"{(card.type, card.queue, card.due, card.ivl)} != {prior_state}"
+            )
+
+        proposals.accept(
+            {
+                "id": proposals.submit_scheduling(
+                    {"op": "set_due_date", "card_ids": [cid2], "days": "10"}
+                )["proposal_id"]
+            }
+        )
+        forget = proposals.submit_scheduling(
+            {"op": "forget_cards", "card_ids": [cid2], "reset_counts": True}
+        )
+        proposals.accept({"id": forget["proposal_id"]})
+        if col.get_card(cid2).type != 0:
+            raise AssertionError("forget did not reset the card to new")
+        proposals.revert({"id": forget["proposal_id"]})
+        card = col.get_card(cid2)
+        if card.type != 2 or card.due != today + 10:
+            raise AssertionError(
+                f"forget revert did not restore the schedule: type={card.type} due={card.due}"
+            )
+
+        # Bring both back to new for repositioning.
+        proposals.accept(
+            {
+                "id": proposals.submit_scheduling(
+                    {"op": "forget_cards", "query": 'deck:"ProbeSched"'}
+                )["proposal_id"]
+            }
+        )
+        repos = proposals.submit_scheduling(
+            {
+                "op": "reposition_new_cards",
+                "card_ids": [cid1, cid2],
+                "starting_from": 500,
+                "step_size": 3,
+            }
+        )
+        proposals.accept({"id": repos["proposal_id"]})
+        dues = sorted((int(col.get_card(cid1).due), int(col.get_card(cid2).due)))
+        if dues != [500, 503]:
+            raise AssertionError(f"reposition produced wrong positions: {dues}")
+        return {"cards": [cid1, cid2], "positions": dues}
+
+    check("scheduling set-due/forget/reposition apply+revert (real v3)", _scheduling_flow)
+
     def _change_set() -> dict[str, Any]:
         ids = [_new_note(f"cs {i}", back="orig") for i in range(3)]
         cs = proposals.open_change_set({"title": "probe sweep"})

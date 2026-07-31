@@ -1605,6 +1605,14 @@ body {
   border-radius: 4px;
 }
 
+/* When a deletion is immediately followed by its replacement (whole-tail
+   rewrites, e.g. the #6 scheduling diffs: "ivl 21d" -> "due in 16-20d"),
+   there is no equal-text space between them and the two chips glue into
+   one unreadable run. Only the adjacent case needs air. */
+#cwyc-root .eui-diff-del + .eui-diff-ins {
+  margin-left: 0.35em;
+}
+
 .cwyc-field-input {
   width: 100%;
   border: 1px solid var(--cwyc-border);

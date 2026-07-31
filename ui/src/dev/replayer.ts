@@ -401,6 +401,32 @@ function bulkProposalScript(): Step[] {
   ];
 }
 
+/** scheduling write (#6): before/after diff samples, submit_scheduling's shape. */
+function schedulingProposalScript(): Step[] {
+  const id = nextProposalId("sd");
+  return [
+    { kind: "text", text: "Your exam is on the 14th - pushing these past it:\n\n" },
+    {
+      kind: "proposal",
+      proposal: baseProposal({
+        id,
+        kind: "bulk",
+        op: "set_due_date",
+        op_args: { days: "16-20", query: 'deck:"Math::Analysis" is:due' },
+        rationale: "Spreads the backlog across the four days after the exam.",
+        count: 41,
+        samples: [
+          { text: "Set due date to 16-20 — 41 card(s) matching 'deck:\"Math::Analysis\" is:due'" },
+          { label: "Cauchy sequence", old: "review · overdue 3d · ivl 21d", new: "review · due in 16-20d" },
+          { label: "Uniform continuity", old: "review · due in 0d · ivl 4d", new: "review · due in 16-20d" },
+          { label: "Heine-Borel", old: "new · position 12", new: "review · due in 16-20d" },
+        ],
+        warnings: ["7 new card(s) become review cards (revert restores their exact new-card state)"],
+      }),
+    },
+  ];
+}
+
 /** bulk tags (#4): headline sample + note labels, submit_bulk_tags's shape. */
 function tagsProposalScript(): Step[] {
   const id = nextProposalId("t");
@@ -817,6 +843,7 @@ function selectScript(userText: string): Step[] {
   if (text.includes("image") || text.includes("picture")) return IMAGE_SCRIPT;
   if (text.includes("think") || text.includes("reason")) return REASONING_SCRIPT;
   if (text.includes("grade") || text.includes("fail") || text.includes("again")) return gradingScript();
+  if (text.includes("due") || text.includes("sched")) return schedulingProposalScript();
   if (text.includes("tags")) return tagsProposalScript();
   if (text.includes("tag")) return tagEditProposalScript();
   if (text.includes("bulk") || text.includes("replace")) return bulkProposalScript();
