@@ -1,7 +1,0 @@
-Starting Anki 25.09.5...
-2026-07-31 23:37:10,235:INFO:aqt.mediasrv: Serving on http://127.0.0.1:39357
-Qt info: Sandboxing disabled by user. 
-Starting main loop...
-Qt warning: QWidget::setMinimumSize: (chat_with_your_cards_dock/ChatDock) Negative sizes (44,-1) are not possible 
-JS warning /_addons/chat_with_your_cards/web/next/bundle.js:63 cwyc: window.pycmd is not wired; dropped command [object Object]
-addons21/chat_with_your_cards/__init__.py:1132:all_names is deprecated: please use 'all_names_and_ids'

@@ -19,3 +19,6 @@ meta.json
 
 # Local backups of the Anki-managed meta.json (never commit user config)
 chat_with_your_cards/meta.json.bak*
+
+# Scratch dirs from parallel agent sessions
+.tmp/
