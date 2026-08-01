@@ -46,6 +46,7 @@ const OP_LABELS: Record<string, string> = {
   assign_preset: "Assign preset",
   set_deck_description: "Deck description",
   saved_search: "Saved search",
+  import_csv: "CSV import",
 };
 
 /** What `count` counts - "400 item(s)" says less than nothing. Keyed by op,
@@ -65,6 +66,7 @@ const COUNT_NOUNS: Record<string, [string, string]> = {
   reposition_new_cards: ["card", "cards"],
   set_deck_limits: ["change", "changes"],
   filtered_deck_action: ["deck", "decks"],
+  import_csv: ["row", "rows"],
   find_replace: ["note", "notes"],
   rename_tag: ["note", "notes"],
   // skill_update counts the OBSERVED EDITS behind the suggestion, not notes.

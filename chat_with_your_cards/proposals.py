@@ -1450,6 +1450,186 @@ class ProposalManager:
             samples=[f'Description for "{deck_name}": {preview}'],
         )
 
+    @staticmethod
+    def _csv_metadata_for(col: Any, args: dict[str, Any]) -> Any:
+        """CSV metadata with the proposal's overrides applied (#11). Proto
+        enum names resolve lazily; the unit-test fakes return plain
+        namespaces and skip enum mapping entirely."""
+        import os
+
+        path = os.path.expanduser(str(args.get("path", "")).strip())
+        delimiter = None
+        delim_name = str(args.get("delimiter", "") or "").strip().upper()
+        if delim_name:
+            try:
+                from anki.import_export_pb2 import CsvMetadata
+
+                delimiter = CsvMetadata.Delimiter.Value(delim_name)
+            except ImportError:
+                delimiter = delim_name  # fake path
+            except ValueError:
+                raise ProposalError(
+                    f"unknown delimiter {delim_name!r}; use TAB, SPACE, COMMA, "
+                    "SEMICOLON, PIPE or COLON"
+                ) from None
+        meta = col.get_csv_metadata(path, delimiter)
+        deck_name = str(args.get("deck", "") or "").strip()
+        if deck_name:
+            try:
+                did = int(col.decks.id_for_name(deck_name))
+            except Exception:
+                did = 0
+            if not did:
+                raise ProposalError(
+                    f"deck {deck_name!r} not found - create_deck it first"
+                )
+            meta.deck_id = did
+        notetype_name = str(args.get("note_type", "") or "").strip()
+        if notetype_name:
+            model = col.models.by_name(notetype_name)
+            if model is None:
+                raise ProposalError(f"note type {notetype_name!r} not found")
+            meta.global_notetype.id = int(model["id"])
+        existing = str(args.get("existing_notes", "preserve")).strip().upper()
+        try:
+            from anki.import_export_pb2 import CsvMetadata
+
+            meta.dupe_resolution = CsvMetadata.DupeResolution.Value(existing)
+        except ImportError:
+            meta.dupe_resolution = existing  # fake path
+        except ValueError:
+            raise ProposalError(
+                f"existing_notes must be UPDATE, PRESERVE or DUPLICATE; "
+                f"got {existing!r}"
+            ) from None
+        tags = [str(t).strip() for t in (args.get("tags") or []) if str(t).strip()]
+        if tags:
+            meta.global_tags.extend(tags)
+        return meta
+
+    def submit_import_csv(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Import text/CSV through Anki's real pipeline (#11) - one review
+        card instead of N proposal round-trips. SAFE default: existing_notes
+        = preserve (Anki's own default is Update, which rewrites notes
+        matched on the first field - here that mode is opt-in and warned in
+        capitals)."""
+        import os
+
+        col = self._col()
+        raw_path = str(args.get("path", "")).strip()
+        if not raw_path:
+            raise ProposalError("import_csv needs a file path")
+        path = os.path.expanduser(raw_path)
+        if not os.path.isfile(path):
+            raise ProposalError(f"no file at {path}")
+        try:
+            meta = self._csv_metadata_for(col, args)
+        except ProposalError:
+            raise
+        except Exception as exc:
+            raise ProposalError(f"could not read the file's structure: {exc}") from None
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            data_rows = sum(
+                1 for line in handle if line.strip() and not line.startswith("#")
+            )
+        preview = list(getattr(meta, "preview", []))[:3]
+        samples = [f"≈{data_rows} data row(s) from {os.path.basename(path)}"]
+        for row in preview:
+            values = list(getattr(row, "vals", row if isinstance(row, list) else []))
+            samples.append(" · ".join(str(v) for v in values[:4])[:80])
+        existing = str(args.get("existing_notes", "preserve")).lower()
+        warnings: list[str] = []
+        if existing == "update":
+            warnings.append(
+                "UPDATE MODE: rows matching an existing note's first field "
+                "REWRITE that note - a bad column mapping can overwrite the "
+                "wrong notes en masse. The resolved card reports exactly what "
+                "was updated vs created."
+            )
+        proposal = Proposal(
+            id=self._next_id(),
+            kind="bulk",
+            op="import_csv",
+            op_args={
+                "path": path,
+                "deck": str(args.get("deck", "") or ""),
+                "note_type": str(args.get("note_type", "") or ""),
+                "existing_notes": existing,
+                "delimiter": str(args.get("delimiter", "") or ""),
+                "tags": [str(t) for t in (args.get("tags") or [])],
+            },
+            note_type=str(args.get("note_type", "") or ""),
+            deck=str(args.get("deck", "") or ""),
+            tags=[],
+            fields={},
+            rationale=str(args.get("rationale", "")),
+            count=data_rows,
+            samples=[{"text": line} for line in samples],
+            warnings=warnings,
+        )
+        return self._finish_submission(proposal, data_rows)
+
+    def _accept_import_csv(self, proposal: Proposal) -> list[int]:
+        col = self._col()
+        a = proposal.op_args
+        if not self._checkpoint("csv import", False):
+            proposal.warnings.append(
+                "backup checkpoint failed (csv import); proceeding without a "
+                "fresh backup — check disk space / permissions"
+            )
+        try:
+            meta = self._csv_metadata_for(col, a)
+        except ProposalError:
+            raise
+        except Exception as exc:
+            raise ProposalError(f"file unreadable at apply time: {exc}") from None
+        try:
+            try:
+                from anki.import_export_pb2 import ImportCsvRequest
+
+                request: Any = ImportCsvRequest(path=a["path"], metadata=meta)
+            except ImportError:
+                from types import SimpleNamespace
+
+                request = SimpleNamespace(path=a["path"], metadata=meta)
+            log = col.import_csv(request).log
+        except ProposalError:
+            raise
+        except Exception as exc:
+            raise ProposalError(f"import failed: {exc}") from None
+        created = [int(entry.id.nid) for entry in getattr(log, "new", [])]
+        updated = len(list(getattr(log, "updated", [])))
+        # Probed on 25.09: preserve-mode matches land in first_field_match,
+        # NOT duplicate (which holds exact-content dupes).
+        skipped = len(list(getattr(log, "duplicate", []))) + len(
+            list(getattr(log, "first_field_match", []))
+        )
+        conflicting = len(list(getattr(log, "conflicting", [])))
+        outcome = (
+            f"imported: {len(created)} new, {updated} updated, "
+            f"{skipped} existing note(s) left untouched"
+        )
+        if conflicting:
+            outcome += f", {conflicting} conflicting"
+        proposal.warnings = list(proposal.warnings) + [outcome]
+        if updated:
+            proposal.warnings.append(
+                f"the {updated} updated note(s) cannot be restored from the "
+                "chat ledger - the backup checkpoint is the way back"
+            )
+        self._ledger.append(
+            LedgerEntry(
+                id=proposal.id,
+                kind="bulk",
+                note_id=0,
+                label=f"csv import ({len(created)} new, {updated} updated)",
+                data={"op": "import_csv", "created": created},
+            )
+        )
+        proposal.status = ACCEPTED
+        self._after_deck_change()
+        return created
+
     def submit_manage_saved_search(self, args: dict[str, Any]) -> dict[str, Any]:
         """Saved searches (#12b): Browse-sidebar entries in collection
         config - the curricula shipping vehicle (filtered decks do not
@@ -3161,6 +3341,8 @@ class ProposalManager:
             return self._accept_clear_unused(proposal)
         if proposal.op == "store_media_asset":
             return self._accept_store_media(proposal)
+        if proposal.op == "import_csv":
+            return self._accept_import_csv(proposal)
         raise ProposalError(f"unknown bulk op {proposal.op!r}")
 
     def _accept_bulk_tags(self, proposal: Proposal) -> list[int]:
@@ -4637,6 +4819,41 @@ class ProposalManager:
                 ),
                 # One set_deck RPC per distinct prior home deck, not per card.
                 steps=len(by_deck),
+            )
+        elif entry.kind == "bulk" and entry.data.get("op") == "import_csv":
+            # Partial by design (declared on the resolved card): CREATED notes
+            # come back out; UPDATED notes stay (the backup is their way back).
+            created_ids = [int(n) for n in entry.data.get("created", [])]
+            removable: list[int] = []
+            studied = 0
+            for nid in created_ids:
+                try:
+                    note = col.get_note(nid)
+                except Exception:
+                    continue  # already gone
+                if any(getattr(card, "reps", 0) > 0 for card in note.cards()):
+                    studied += 1
+                    continue
+                removable.append(nid)
+            if studied:
+                self._push(
+                    {
+                        "type": "notice",
+                        "text": f"Import revert: {studied} imported note(s) have "
+                        "been studied and were kept; delete them in the Browser "
+                        "if intended.",
+                    }
+                )
+
+            def mutate_import() -> None:
+                if removable:
+                    col.remove_notes(removable)
+
+            self._revert_write(
+                col,
+                mutate_import,
+                invariants.Scope(note_ids=tuple(removable)),
+                steps=1 if removable else 0,
             )
         elif entry.kind == "bulk" and entry.data.get("op") == "store_media_asset":
             final = str(entry.data.get("final", ""))

@@ -915,6 +915,71 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
 
     check("GUI handoff: open Browse + saved searches (#12)", _gui_handoff_flow)
 
+    def _csv_authoring_flow() -> dict[str, Any]:
+        """#11 on real Anki: preview reads the real metadata, import runs
+        Anki's real pipeline (preserve default skips the existing note),
+        revert removes the created notes, and both exporters write real
+        files (with the filtered-deck caveat on apkg)."""
+        import importlib as _importlib
+        import tempfile
+
+        addon = _importlib.import_module(ADDON_PACKAGE)
+        from chat_with_your_cards.tools import build_registry
+
+        registry = build_registry()
+        ctx = addon._ToolCtx()
+        col = mw.col
+        tmp = Path(tempfile.mkdtemp(prefix="cwyc-csv-"))
+
+        existing_nid = _new_note("csv keep me", deck="ProbeCsv", back="old")
+        csv_path = tmp / "rows.csv"
+        csv_path.write_text("csv keep me;SHOULD NOT LAND\ncsv fresh;fresh back\n")
+
+        preview = registry.call(ctx, "preview_csv_import", {"path": str(csv_path)})
+        if preview["delimiter"] != "semicolon" or len(preview["preview_rows"]) != 2:
+            raise AssertionError(f"preview wrong: {preview}")
+
+        with _capture_pushes(proposals) as pushes:
+            result = proposals.submit_import_csv(
+                {"path": str(csv_path), "deck": "ProbeCsv", "tags": ["probe-csv"]}
+            )
+            proposals.accept({"id": result["proposal_id"]})
+        resolved = [p for p in pushes if p.get("type") == "proposal_resolved"][-1]
+        outcome = next(
+            (w for w in resolved.get("warnings", []) if "imported:" in w), ""
+        )
+        if "1 new" not in outcome or "1 existing note(s) left untouched" not in outcome:
+            raise AssertionError(f"unexpected outcome: {resolved.get('warnings')}")
+        if col.get_note(existing_nid)["Back"] == "SHOULD NOT LAND":
+            raise AssertionError("preserve mode rewrote an existing note")
+        fresh = col.find_notes('tag:"probe-csv"')
+        if len(fresh) != 1:
+            raise AssertionError(f"expected 1 imported note, got {len(fresh)}")
+
+        proposals.revert({"id": result["proposal_id"]})
+        if col.find_notes('tag:"probe-csv"'):
+            raise AssertionError("import revert did not remove the created note")
+
+        out_csv = registry.call(
+            ctx, "export_csv", {"out_path": str(tmp / "out"), "deck": "ProbeCsv"}
+        )
+        if out_csv["exported"] < 1 or not Path(out_csv["path"]).is_file():
+            raise AssertionError(f"csv export failed: {out_csv}")
+        out_apkg = registry.call(
+            ctx, "export_apkg", {"out_path": str(tmp / "pkg"), "deck": "ProbeCsv"}
+        )
+        if out_apkg["exported_cards"] < 1 or not Path(out_apkg["path"]).is_file():
+            raise AssertionError(f"apkg export failed: {out_apkg}")
+        if "filtered decks" not in out_apkg.get("caveat", ""):
+            raise AssertionError("apkg caveat missing")
+        return {
+            "outcome": outcome,
+            "exported_rows": out_csv["exported"],
+            "apkg_cards": out_apkg["exported_cards"],
+        }
+
+    check("CSV import/export through Anki's real pipeline (#11)", _csv_authoring_flow)
+
     def _change_set() -> dict[str, Any]:
         ids = [_new_note(f"cs {i}", back="orig") for i in range(3)]
         cs = proposals.open_change_set({"title": "probe sweep"})

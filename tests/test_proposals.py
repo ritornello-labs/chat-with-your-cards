@@ -526,6 +526,76 @@ class FakeCol:
     def fix_integrity(self) -> tuple[str, bool]:
         return ("Database rebuilt and optimized.", True)
 
+    # --- CSV import (#11), a deterministic mirror of Anki's pipeline ---
+
+    def get_csv_metadata(self, path: str, delimiter: Any = None) -> Any:
+        from types import SimpleNamespace
+
+        rows = [
+            line.strip().split(";")
+            for line in open(path, encoding="utf-8")
+            if line.strip() and not line.startswith("#")
+        ]
+        return SimpleNamespace(
+            delimiter=2,
+            is_html=False,
+            deck_id=1,
+            global_notetype=SimpleNamespace(id=1),
+            global_tags=[],
+            dupe_resolution=0,
+            preview=[SimpleNamespace(vals=list(r)) for r in rows[:5]],
+            WhichOneof=lambda _name: "global_notetype",
+        )
+
+    def import_csv(self, request: Any) -> Any:
+        from types import SimpleNamespace
+
+        meta = request.metadata
+        mode = str(meta.dupe_resolution).lower()  # fakes carry the name
+        existing_fronts = {
+            note._fields.get("Front", ""): nid for nid, note in self._notes.items()
+        }
+        new_entries, updated_entries, first_field = [], [], []
+        for line in open(request.path, encoding="utf-8"):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            values = line.split(";")
+            front = values[0]
+            back = values[1] if len(values) > 1 else ""
+            if front in existing_fronts:
+                if "update" in mode:
+                    stored = self._notes[existing_fronts[front]]
+                    stored._fields["Back"] = back
+                    updated_entries.append(
+                        SimpleNamespace(
+                            id=SimpleNamespace(nid=existing_fronts[front]),
+                            fields=values,
+                        )
+                    )
+                    continue
+                if "duplicate" not in mode:  # preserve: first-field match
+                    first_field.append(
+                        SimpleNamespace(id=SimpleNamespace(nid=0), fields=values)
+                    )
+                    continue
+            note = self.new_note(BASIC)
+            note["Front"], note["Back"] = front, back
+            note.tags = list(meta.global_tags)
+            self.add_note(note, int(meta.deck_id))
+            new_entries.append(
+                SimpleNamespace(id=SimpleNamespace(nid=note.id), fields=values)
+            )
+        return SimpleNamespace(
+            log=SimpleNamespace(
+                new=new_entries,
+                updated=updated_entries,
+                duplicate=[],
+                first_field_match=first_field,
+                conflicting=[],
+            )
+        )
+
     # --- collection config (#12b saved searches) ---
 
     def get_config(self, key: str, default: Any = None) -> Any:
@@ -2123,6 +2193,87 @@ class DeckPresetTests(unittest.TestCase):
             manager.submit_set_deck_description(
                 {"deck": "Default", "description": ""}
             )
+
+
+class CsvImportTests(unittest.TestCase):
+    """CSV import (#11): safe preserve default, loud update mode, created
+    rows revert (studied ones kept), honest per-outcome reporting."""
+
+    def _csv(self, content: str) -> str:
+        import os
+        import tempfile
+
+        tmp = tempfile.NamedTemporaryFile(
+            "w", suffix=".csv", delete=False, encoding="utf-8"
+        )
+        tmp.write(content)
+        tmp.close()
+        self.addCleanup(lambda: os.unlink(tmp.name))
+        return tmp.name
+
+    def test_validation(self) -> None:
+        manager, col, pushed = make_manager()
+        with self.assertRaisesRegex(ProposalError, "needs a file path"):
+            manager.submit_import_csv({})
+        with self.assertRaisesRegex(ProposalError, "no file at"):
+            manager.submit_import_csv({"path": "/no/such/file.csv"})
+        path = self._csv("a;b\n")
+        with self.assertRaisesRegex(ProposalError, "not found - create_deck"):
+            manager.submit_import_csv({"path": path, "deck": "Nope"})
+
+    def test_import_creates_and_revert_keeps_studied(self) -> None:
+        manager, col, pushed = make_manager()
+        path = self._csv("front A;back A\nfront B;back B\n")
+        result = manager.submit_import_csv({"path": path, "tags": ["imported"]})
+        proposal = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertEqual(2, proposal["count"])
+        manager.accept({"id": result["proposal_id"]})
+        resolved = pushes_of(pushed, "proposal_resolved")[-1]
+        self.assertTrue(
+            any("2 new, 0 updated" in w for w in resolved["warnings"]),
+            resolved["warnings"],
+        )
+        created = manager._ledger[-1].data["created"]
+        self.assertEqual(2, len(created))
+        self.assertIn("imported", col._notes[created[0]].tags)
+        # One imported note gets studied; revert must keep it and say so.
+        col._notes[created[0]]._cards[0].reps = 3
+        manager.revert({"id": result["proposal_id"]})
+        self.assertIn(created[0], col._notes)
+        self.assertNotIn(created[1], col._notes)
+        notices = [p["text"] for p in pushes_of(pushed, "notice")]
+        self.assertTrue(any("have been studied" in t for t in notices), notices)
+
+    def test_preserve_skips_and_update_warns_and_reports(self) -> None:
+        manager, col, pushed = make_manager()
+        _seed_notes(manager, col, pushed, n=1)  # creates note with Front "Q0?"
+        path = self._csv("Q0?;new back\nfresh;row\n")
+        # Default preserve: existing Q0? skipped as duplicate.
+        result = manager.submit_import_csv({"path": path})
+        manager.accept({"id": result["proposal_id"]})
+        resolved = pushes_of(pushed, "proposal_resolved")[-1]
+        self.assertTrue(
+            any(
+                "1 new" in w and "1 existing note(s) left untouched" in w
+                for w in resolved["warnings"]
+            ),
+            resolved["warnings"],
+        )
+        # Update mode: warned in capitals at review, reported at apply.
+        path2 = self._csv("Q0?;rewritten back\n")
+        result2 = manager.submit_import_csv(
+            {"path": path2, "existing_notes": "update"}
+        )
+        proposal2 = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertTrue(any("UPDATE MODE" in w for w in proposal2["warnings"]))
+        manager.accept({"id": result2["proposal_id"]})
+        resolved2 = pushes_of(pushed, "proposal_resolved")[-1]
+        self.assertTrue(
+            any("1 updated" in w for w in resolved2["warnings"]), resolved2["warnings"]
+        )
+        self.assertTrue(
+            any("cannot be restored" in w for w in resolved2["warnings"])
+        )
 
 
 class SavedSearchTests(unittest.TestCase):
