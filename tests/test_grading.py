@@ -107,13 +107,21 @@ class FakeBackend:
             preview = bool(deck and deck.get("dyn") and not deck.get("resched", True))
             self.col.revlog.append(card_id)
             if int(rating) == Rating.EASY and preview:
+                # Ending a preview returns the card home WITHOUT counting a
+                # review, which is why a preview card still gets exactly +1.
                 card.did = card.odid
                 card.odid = 0
                 if card.queue >= 0:
                     card.queue = 2
-            elif int(rating) == Rating.AGAIN:
+            else:
+                # Every real rating counts a review. Firing only for AGAIN was
+                # indistinguishable from correct while AGAIN was the only
+                # rating the vendored core could record (#16).
                 card.reps += 2 if self.wrong_reps else 1
-                card.queue = -1 if card_id in self.leech_ids else 1
+                if card_id in self.leech_ids:
+                    card.queue = -1
+                else:
+                    card.queue = 1 if int(rating) == Rating.AGAIN else 2
         self.col._push_undo()
 
     def restore_buried_and_suspended_cards(self, card_ids: list[int]) -> None:

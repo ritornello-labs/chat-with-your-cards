@@ -4,8 +4,8 @@
 core from:
 
 - Repository: `https://github.com/ritornello-labs/anki-addon-safe-collection-operations`
-- Commit: `7add67d6ee3a01950012480442de19f870ecc148`
-- Package version: `0.1.0`
+- Commit: `03b5286f2bfe438a284bd3285cfb13c256be6383`
+- Package version: `0.2.0`
 - License: MIT
 
 CWYC vendors the core so its native scheduler operations work without a

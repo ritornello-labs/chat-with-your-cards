@@ -266,6 +266,9 @@ export interface GradingPayload {
   availability: Record<string, unknown> | null;
   available_card_ids: number[];
   automatic_mode: string | null;
+  /** Which native rating a `fail` request records (#16). Absent on payloads
+   *  from before ratings were selectable; treat that as "again". */
+  rating?: "again" | "hard" | "good" | "easy";
 }
 
 export interface GradingEvent {

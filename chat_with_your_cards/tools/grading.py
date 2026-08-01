@@ -30,8 +30,9 @@ def register_grading_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolSpec(
             "fail_cards_now",
-            "Record native Again reviews on exact existing cards, even if they are "
-            "not due, suspended, buried, or already in a filtered deck. Never "
+            "Record native reviews on exact existing cards, even if they are "
+            "not due, suspended, buried, or already in a filtered deck. "
+            "Defaults to Again; pass `rating` for hard/good/easy. Never "
             "changes scheduling rows directly. Existing suspension/burial is "
             "preserved and shown to the user, with a separate option to make those "
             "cards available. Depending on the user's permission mode, this either "
@@ -41,9 +42,19 @@ def register_grading_tools(registry: ToolRegistry) -> None:
                 "type": "object",
                 "properties": {
                     "card_ids": card_ids,
+                    "rating": {
+                        "type": "string",
+                        "enum": ["again", "hard", "good", "easy"],
+                        "description": (
+                            "Which button to record (default again). This writes "
+                            "real review history, so it must reflect a judgement "
+                            "the user actually made or asked for - never a guess "
+                            "at how well they would have done."
+                        ),
+                    },
                     "rationale": {
                         "type": "string",
-                        "description": "Why these exact cards should receive Again.",
+                        "description": "Why these exact cards should receive this rating.",
                     },
                 },
                 "required": ["card_ids"],

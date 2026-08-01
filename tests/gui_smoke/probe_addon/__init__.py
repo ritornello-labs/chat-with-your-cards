@@ -1827,6 +1827,52 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
         if int(col.get_card(workflow_cid).reps) != workflow_before + 1:
             raise AssertionError("confirmed grading chip did not record native Again")
 
+        # Ratings beyond Again (#16), through CWYC's own confirmation path
+        # into the re-vendored core. Anki's revlog stores ease 1-4 while the
+        # Rating enum is 0-3, so this also pins that mapping.
+        rating_rows = []
+        for rating, expected_ease in (("hard", 2), ("good", 3), ("easy", 4)):
+            _, rating_cid = _review_card(f"grade {rating}")
+            reps_start = int(col.get_card(rating_cid).reps)
+            submitted = state.grading.submit_fail(
+                {"card_ids": [rating_cid], "rating": rating, "rationale": "probe"}
+            )
+            state.grading.accept({"id": submitted["grading_id"]})
+            entry = col.db.first(
+                "select ease from revlog where cid = ? order by id desc limit 1",
+                rating_cid,
+            )
+            request = state.grading._requests[submitted["grading_id"]]
+            rating_rows.append(
+                {
+                    "rating": rating,
+                    "reported": request.rating,
+                    "result_rating": (request.result or {}).get("rating"),
+                    "revlog_ease": int(entry[0]) if entry else None,
+                    "expected_ease": expected_ease,
+                    "reps_delta": int(col.get_card(rating_cid).reps) - reps_start,
+                }
+            )
+        for row in rating_rows:
+            if row["revlog_ease"] != row["expected_ease"]:
+                raise AssertionError(f"wrong ease recorded: {row}")
+            if row["reps_delta"] != 1:
+                raise AssertionError(f"rating did not count exactly one review: {row}")
+            if row["reported"] != row["rating"] or row["result_rating"] != row["rating"]:
+                raise AssertionError(f"card did not report the rating it wrote: {row}")
+
+        # A bad rating must be refused before any confirmation card appears.
+        _, bad_cid = _review_card("grade bad rating")
+        bad_reps = int(col.get_card(bad_cid).reps)
+        try:
+            state.grading.submit_fail({"card_ids": [bad_cid], "rating": "excellent"})
+            raise AssertionError("an invalid rating was accepted")
+        except Exception as exc:
+            if "excellent" not in str(exc):
+                raise AssertionError(f"unhelpful rating error: {exc}") from None
+        if int(col.get_card(bad_cid).reps) != bad_reps:
+            raise AssertionError("a refused rating still touched the card")
+
         return {
             "normal": normal_cid,
             "preview": preview_cid,
@@ -1834,6 +1880,7 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
             "rescheduling": resched_cid,
             "suspended": suspended_cid,
             "workflow": workflow_cid,
+            "ratings": rating_rows,
         }
 
     check(

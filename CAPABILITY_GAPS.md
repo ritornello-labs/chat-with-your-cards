@@ -174,4 +174,8 @@ media), and a forced-direction sync. LaTeX preamble editing is security-sensitiv
    gate landed as the proposal card itself (blast radius, full-sync notice, and
    an explicit irreversibility line) rather than a modal, and Empty Cards
    shipped in the same pass as `remove_empty_cards`.
-6. **Undo + maintenance** as the safety net under all of the above.
+6. **Undo + maintenance** as the safety net under all of the above. **Done
+   2026-08-01**, along with everything above it — this sequencing list is now
+   fully worked through. Grading gained ratings beyond Again in the same pass
+   (upstream `safe_collection_operations` 0.2.0); grading by *search* stays
+   deliberately unsupported.

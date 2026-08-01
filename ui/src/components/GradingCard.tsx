@@ -22,6 +22,13 @@ function cardMeta(card: GradingCardData["cards"][number]): string {
   return parts.join(" · ");
 }
 
+/** Which button this records (#16). Payloads from before ratings were
+ *  selectable carry no `rating`, and those were always Again. */
+function ratingLabel(data: GradingCardData): string {
+  const rating = data.rating ?? "again";
+  return rating.charAt(0).toUpperCase() + rating.slice(1);
+}
+
 function resultNotes(data: GradingCardData): string[] {
   if (data.action !== "fail" || !data.result) return [];
   const notes: string[] = [];
@@ -32,7 +39,7 @@ function resultNotes(data: GradingCardData): string[] {
     notes.push(`${preview.length} preview-filtered card${preview.length === 1 ? "" : "s"} returned home first.`);
   }
   if (Array.isArray(filtered) && filtered.length) {
-    notes.push(`${filtered.length} card${filtered.length === 1 ? "" : "s"} received Again in a rescheduling filtered deck.`);
+    notes.push(`${filtered.length} card${filtered.length === 1 ? "" : "s"} received ${ratingLabel(data)} in a rescheduling filtered deck.`);
   }
   if (Array.isArray(leeches) && leeches.length) {
     notes.push(`Anki newly suspended ${leeches.length} card${leeches.length === 1 ? "" : "s"} as leeches.`);
@@ -45,14 +52,22 @@ export function GradingCard({ data, store }: GradingCardProps) {
   const applying = data.status === "applying";
   const applied = data.status === "accepted" || data.status === "auto-accepted";
   const makeAvailable = applied && data.action === "fail" && data.available_card_ids.length > 0;
+  // "wrong" is only true of Again (#16). A Good or Easy review is still a
+  // real review, so it gets neutral wording rather than a verdict it is not.
+  const isAgain = (data.rating ?? "again") === "again";
+  const plural = data.card_ids.length === 1 ? "" : "s";
   const title =
     data.action === "fail"
-      ? `Mark ${data.card_ids.length === 1 ? "card" : "cards"} wrong`
+      ? isAgain
+        ? `Mark ${data.card_ids.length === 1 ? "card" : "cards"} wrong`
+        : `Record ${ratingLabel(data)} on ${data.card_ids.length} card${plural}`
       : "Make cards available";
   const appliedTitle =
     data.action === "fail"
-      ? `${data.card_ids.length} card${data.card_ids.length === 1 ? "" : "s"} marked wrong`
-      : `${data.card_ids.length} card${data.card_ids.length === 1 ? "" : "s"} made available`;
+      ? isAgain
+        ? `${data.card_ids.length} card${plural} marked wrong`
+        : `${data.card_ids.length} card${plural} graded ${ratingLabel(data)}`
+      : `${data.card_ids.length} card${plural} made available`;
 
   return (
     <section
@@ -64,7 +79,11 @@ export function GradingCard({ data, store }: GradingCardProps) {
         <span className="cwyc-grading-mark" aria-hidden="true">↘</span>
         <div className="cwyc-grading-title">
           <strong>{applied ? appliedTitle : title}</strong>
-          <span>{data.action === "fail" ? "Uses Anki’s Again rating" : "Review history stays unchanged"}</span>
+          <span>
+            {data.action === "fail"
+              ? `Uses Anki’s ${ratingLabel(data)} rating`
+              : "Review history stays unchanged"}
+          </span>
         </div>
         <span className="cwyc-grading-status">{STATUS_LABELS[data.status] ?? data.status}</span>
       </header>

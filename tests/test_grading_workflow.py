@@ -135,6 +135,78 @@ class GradingWorkflowTests(unittest.TestCase):
         self.assertEqual(pushes[-1]["grading"]["available_card_ids"], [101])
         self.assertIn("now read-only", pushes[-1]["grading"]["warnings"][-1])
 
+    # ---- rating selection (#16) ----
+
+    def test_rating_rides_through_to_the_native_call(self) -> None:
+        from test_grading import Rating
+
+        for rating, expected in (
+            ("hard", Rating.HARD),
+            ("good", Rating.GOOD),
+            ("easy", Rating.EASY),
+        ):
+            col = FakeCol()
+            col.add_card(FakeCard(101, 201), guid="stable-guid")
+            manager, pushes, _ = self.manager(col)
+
+            response = manager.submit_fail({"card_ids": [101], "rating": rating})
+            manager.accept({"id": response["grading_id"]})
+
+            self.assertEqual(col._backend.calls, [((101,), expected)])
+            grading = pushes[-1]["grading"]
+            self.assertEqual(grading["status"], "accepted")
+            self.assertEqual(grading["rating"], rating)
+            self.assertEqual(grading["result"]["rating"], rating)
+
+    def test_rating_defaults_to_again(self) -> None:
+        from test_grading import Rating
+
+        col = FakeCol()
+        col.add_card(FakeCard(101, 201), guid="stable-guid")
+        manager, pushes, _ = self.manager(col)
+
+        response = manager.submit_fail({"card_ids": [101]})
+        manager.accept({"id": response["grading_id"]})
+
+        self.assertEqual(col._backend.calls, [((101,), Rating.AGAIN)])
+        self.assertEqual(pushes[-1]["grading"]["rating"], "again")
+
+    def test_bad_rating_is_refused_before_a_card_is_shown(self) -> None:
+        """A rejected rating must not cost the user a confirmation click."""
+        from chat_with_your_cards.grading import GradingWorkflowError
+
+        col = FakeCol()
+        col.add_card(FakeCard(101, 201), guid="stable-guid")
+        manager, pushes, _ = self.manager(col)
+
+        with self.assertRaises(GradingWorkflowError):
+            manager.submit_fail({"card_ids": [101], "rating": "excellent"})
+        self.assertEqual(pushes, [], "no confirmation card should have been pushed")
+        self.assertEqual(col.revlog, [])
+
+    def test_warnings_name_the_rating_being_recorded(self) -> None:
+        col = FakeCol()
+        col.add_card(FakeCard(101, 201, did=3, odid=1), guid="stable-guid")
+        manager, pushes, _ = self.manager(col)
+
+        manager.submit_fail({"card_ids": [101], "rating": "good"})
+
+        warnings = " ".join(pushes[-1]["grading"]["warnings"])
+        self.assertIn("native Good", warnings)
+        self.assertNotIn("native Again", warnings)
+
+    def test_hidden_state_survives_a_non_again_rating(self) -> None:
+        col = FakeCol()
+        col.add_card(FakeCard(101, 201, queue=-1), guid="stable-guid")
+        manager, pushes, _ = self.manager(col)
+
+        response = manager.submit_fail({"card_ids": [101], "rating": "easy"})
+        manager.accept({"id": response["grading_id"]})
+
+        self.assertEqual(col.cards[101].queue, -1)
+        grading = pushes[-1]["grading"]
+        self.assertEqual(grading["available_card_ids"], [101])
+
 
 if __name__ == "__main__":
     unittest.main()

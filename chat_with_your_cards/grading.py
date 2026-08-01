@@ -24,9 +24,10 @@ from typing import Any, Callable, Iterable
 from ._vendor.safe_collection_operations import (
     EventRef,
     OperationError,
+    Rating,
     Target,
-    fail_cards_now,
     get_grading_cursor,
+    grade_cards_now,
     inspect_cards,
     make_cards_available,
 )
@@ -91,6 +92,10 @@ class GradingRequest:
     available_card_ids: tuple[int, ...] = ()
     automatic_mode: str | None = None
     event: EventRef | None = None
+    # Which native rating a `fail` request records (#16). Named `rating`
+    # rather than folded into `action` because the action is still "record a
+    # review on these exact cards" - only the button pressed differs.
+    rating: str = "again"
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -105,6 +110,7 @@ class GradingRequest:
             "availability": self.availability,
             "available_card_ids": list(self.available_card_ids),
             "automatic_mode": self.automatic_mode,
+            "rating": self.rating,
         }
 
 
@@ -189,13 +195,16 @@ class GradingManager:
         return cards, tuple(targets)
 
     @staticmethod
-    def _warnings_for_cards(cards: list[dict[str, Any]], action: str) -> list[str]:
+    def _warnings_for_cards(
+        cards: list[dict[str, Any]], action: str, rating: str = "again"
+    ) -> list[str]:
         warnings: list[str] = []
+        label = rating.capitalize()
         hidden = [card for card in cards if card.get("hidden_state")]
         if action == "fail" and hidden:
             labels = sorted({str(card["hidden_state"]) for card in hidden})
             warnings.append(
-                "The failure will be recorded, but existing "
+                "The review will be recorded, but existing "
                 + ", ".join(labels)
                 + " state will remain. You can make the cards available afterward."
             )
@@ -203,13 +212,13 @@ class GradingManager:
         if action == "fail" and preview:
             warnings.append(
                 "Preview-filtered targets will leave preview individually before "
-                "Anki records Again in their home deck."
+                f"Anki records {label} in their home deck."
             )
         filtered = [card for card in cards if card.get("rescheduling_filtered")]
         if action == "fail" and filtered:
             warnings.append(
                 "Targets already in a rescheduling filtered deck will receive "
-                "their native Again there."
+                f"their native {label} there."
             )
         return warnings
 
@@ -234,6 +243,12 @@ class GradingManager:
         if not isinstance(raw_ids, list):
             raise GradingWorkflowError("card_ids must be an array")
         card_ids = _unique_card_ids(raw_ids)
+        # Parsed here so a bad rating is refused before a confirmation card is
+        # ever shown, rather than at apply time with the user's click spent.
+        try:
+            rating = Rating.from_value(args.get("rating", "again"))
+        except OperationError as exc:
+            raise GradingWorkflowError(str(exc)) from exc
         cards, targets = self._inspect(card_ids)
         request = GradingRequest(
             id=self._next_id(),
@@ -242,7 +257,8 @@ class GradingManager:
             cards=cards,
             targets=targets,
             rationale=_plain(args.get("rationale"), 500),
-            warnings=self._warnings_for_cards(cards, "fail"),
+            warnings=self._warnings_for_cards(cards, "fail", rating.name.lower()),
+            rating=rating.name.lower(),
         )
         self._requests[request.id] = request
         automatic = self._automatic_mode(len(card_ids))
@@ -390,7 +406,9 @@ class GradingManager:
         )
         request.event = event
         try:
-            result = fail_cards_now(col, targets, event=event)
+            result = grade_cards_now(
+                col, targets, rating=request.rating, event=event
+            )
         except OperationError as exc:
             raise GradingWorkflowError(str(exc)) from exc
         payload = result.to_dict()
