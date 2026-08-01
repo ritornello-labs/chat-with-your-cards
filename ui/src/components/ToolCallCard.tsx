@@ -81,6 +81,13 @@ const TOOL_LABELS: Record<string, string> = {
   update_filtered_deck: "Proposed filtered-deck changes",
   filtered_deck_action: "Proposed a filtered-deck rebuild",
   store_media_asset: "Proposed storing a media file",
+  set_note_type_styling: "Proposed note-type CSS",
+  set_card_template: "Proposed a template change",
+  manage_note_type_fields: "Proposed a field change",
+  manage_card_templates: "Proposed a card-template change",
+  create_note_type: "Proposed a new note type",
+  change_note_type: "Proposed converting notes",
+  remove_empty_cards: "Proposed removing empty cards",
   defer_card: "Set the card aside",
   undefer_card: "Brought a card back",
 };

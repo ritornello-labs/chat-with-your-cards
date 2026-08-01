@@ -1890,6 +1890,18 @@ body {
   padding: 4px 7px;
 }
 
+/* An op the dock cannot undo (#7 note-type writes). Louder than a warning
+   because it is the one thing you cannot walk back from the card itself. */
+.cwyc-proposal-irreversible {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--cwyc-red);
+  background: var(--cwyc-red-soft);
+  border: 1px solid var(--cwyc-red-soft);
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+
 /* Permission-mode denials (#24c). Not an error banner: nothing broke, the
    mode did what it promised - so it reads as information, not failure. */
 .cwyc-denial-banner {

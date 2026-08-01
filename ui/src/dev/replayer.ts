@@ -534,6 +534,35 @@ function suspendProposalScript(): Step[] {
 }
 
 /** delete: the blast radius, by name. */
+/** #7: a note-type write. Field removal is the loudest card in the add-on -
+ *  collection-wide, not undoable, and it makes Anki silently rewrite the
+ *  templates that referenced the field. */
+function noteTypeProposalScript(): Step[] {
+  const id = nextProposalId("nt");
+  return [
+    { kind: "text", text: "The Hint field is unused and two templates reference it:\n\n" },
+    {
+      kind: "proposal",
+      proposal: baseProposal({
+        id,
+        kind: "note_type_op",
+        op: "manage_note_type_fields",
+        op_args: { note_type: "Basic", op: "remove", field: "Hint" },
+        note_type: "Basic",
+        revertible: false,
+        rationale: "Nothing renders Hint any more; it is dead weight on 412 notes.",
+        samples: [{ text: 'Remove field "Hint" from "Basic"' }],
+        warnings: [
+          "used by 412 note(s) across 6 deck(s)",
+          "37 note(s) have content in this field - it is destroyed collection-wide and CANNOT be undone from the dock (a backup is taken first)",
+          "template(s) 'Card 1', 'Reverse' reference this field: Anki SILENTLY REWRITES them to point at a different field, which can turn a conditional front unconditional and generate a card on every note (probed on 25.x). The applied card is reported after the change.",
+          "structural change: your next sync will be a full upload (Anki will ask which side wins - choose this device)",
+        ],
+      }),
+    },
+  ];
+}
+
 function deleteProposalScript(): Step[] {
   const id = nextProposalId("d");
   const labels = ["Duplicate: Cauchy sequence", "Duplicate: Compactness", "Empty note"];
@@ -930,6 +959,7 @@ function selectScript(userText: string): Step[] {
   if (text.includes("tag")) return tagEditProposalScript();
   if (text.includes("bulk") || text.includes("replace")) return bulkProposalScript();
   if (text.includes("suspend") || text.includes("flag")) return suspendProposalScript();
+  if (text.includes("note type") || text.includes("notetype") || text.includes("field")) return noteTypeProposalScript();
   if (text.includes("delete")) return deleteProposalScript();
   if (text.includes("batch")) return batchProposalScript();
   if (text.includes("collect") || text.includes("change set")) return openChangeSetScript();

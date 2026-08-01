@@ -333,6 +333,17 @@ Ordered by how quietly it hurts you.
 24. Deleting a normal deck also deletes cards **currently held in a filtered deck** whose
     `odid` points at it (`storage/deck/cards_for_deck.sql`).
 25. The Default deck (id 1) cannot be deleted; it returns (`decks/remove.rs:27-49`).
+26. **Removing a field silently REWRITES every template that referenced it**, remapping
+    the reference to a different field by ordinal. Probed on 25.x while building the
+    note-type write path (#7): a `{{#Extra}}c:{{Extra}}{{/Extra}}` front came back as a
+    bare `c:{{Front}}` — no longer conditional — and Anki then **generated a card on
+    every note** for it. Nothing in Anki's UI reports either the rewrite or the new
+    cards. When the same rewrite instead makes two fronts identical, the whole update is
+    refused with `CardTypeError` — so the outcome flips between "silent card explosion"
+    and "hard refusal" on nothing more than whether a literal happens to differ.
+    Mitigation: the proposal card names the referencing templates up front, and the
+    accept path measures the real before/after card counts and template sources and
+    reports what actually happened.
 
 ---
 
@@ -347,3 +358,10 @@ The hazards that remain need explicit human confirmation, not validation: #8 (lo
 memory on a move), #11 (queue flood), #12 (destroying scheduling), #17 (forced full sync).
 These should be surfaced *in the proposal card itself* — "this will discard FSRS memory for
 340 cards" — not buried in a mode setting.
+
+**#17 and #26 are now surfaced that way** (note-type write path, 2026-08-01): every card in
+that family leads with its blast radius in notes and decks, adds an explicit full-upload
+line when the op bumps `scm`, names the templates a field removal will rewrite, and — for
+the ops whose payload lives outside the note type dict and so cannot be restored from a
+snapshot — shows a red "Cannot be undone from here" line before the click and takes a
+*critical* checkpoint (a failed backup aborts the write).

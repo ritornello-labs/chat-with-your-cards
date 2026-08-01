@@ -46,6 +46,13 @@ const OP_LABELS: Record<string, string> = {
   assign_preset: "Assign preset",
   set_deck_description: "Deck description",
   saved_search: "Saved search",
+  set_note_type_styling: "Note-type CSS",
+  set_card_template: "Card template",
+  manage_note_type_fields: "Note-type fields",
+  manage_card_templates: "Card templates",
+  create_note_type: "New note type",
+  change_note_type: "Change note type",
+  remove_empty_cards: "Empty cards",
   import_csv: "CSV import",
 };
 
@@ -67,6 +74,9 @@ const COUNT_NOUNS: Record<string, [string, string]> = {
   set_deck_limits: ["change", "changes"],
   filtered_deck_action: ["deck", "decks"],
   import_csv: ["row", "rows"],
+  manage_card_templates: ["note", "notes"],
+  change_note_type: ["note", "notes"],
+  remove_empty_cards: ["card", "cards"],
   find_replace: ["note", "notes"],
   rename_tag: ["note", "notes"],
   // skill_update counts the OBSERVED EDITS behind the suggestion, not notes.

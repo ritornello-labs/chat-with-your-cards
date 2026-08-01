@@ -12,6 +12,7 @@ flow is unit-testable against a fake collection.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import re
@@ -70,6 +71,109 @@ DECK_LIMIT_KEYS = {
     "review_limit": "reviewLimit",
 }
 MAX_DECK_LIMIT = 100_000
+
+# ---- note-type write path (#7) ----
+#
+# The most dangerous family in the add-on: a note type is shared by every deck
+# that uses it, so every op here is collection-wide by construction. The
+# metadata below is what the review card shows BEFORE the user commits, and
+# what _kind_revertible / _accept_note_type_op read at apply time.
+#
+# `full_sync` and `card_effect` are empirical, probed against Anki 25.x in a
+# throwaway collection (2026-08-01) rather than taken from the manual:
+#   edit qfmt/afmt, edit css, rename field ....... scm untouched, 0 cards
+#   add field, reposition field .................. scm BUMPED,    0 cards
+#   add template ................................. scm BUMPED,    +1 card/note
+#                                                  (0 if its front is
+#                                                   conditional and unfilled)
+#   remove template .............................. scm BUMPED,    -1 card/note
+#   remove field ................................. scm sometimes bumped, and
+#                                                  CAN CREATE CARDS - see below
+#   clone note type .............................. scm untouched, 0 cards
+#   change note type ............................. scm BUMPED,    0 cards
+#
+# The remove-field result is the one nobody expects and the reason this family
+# reports an actual before/after card delta instead of trusting a prediction:
+# Anki REWRITES every template that referenced the removed field, remapping the
+# reference to a different field by ordinal. A `{{#Extra}}c:{{Extra}}{{/Extra}}`
+# front became a bare `c:{{Front}}` - no longer conditional - and Anki generated
+# a card per note for it. (When the rewrite instead makes two fronts identical,
+# Anki refuses the whole update with CardTypeError, which we surface verbatim.)
+NOTE_TYPE_OPS: dict[str, dict[str, Any]] = {
+    "set_note_type_styling": {
+        "label": "note-type CSS",
+        "risk": "affects every card of this note type, in every deck",
+        "revert": "restores the previous CSS",
+        "revertible": True,
+        "full_sync": False,
+        "backup": False,
+    },
+    "set_card_template": {
+        "label": "card template",
+        "risk": "changes how every card of this template renders",
+        "revert": "restores the previous front/back source",
+        "revertible": True,
+        "full_sync": False,
+        "backup": False,
+    },
+    "manage_note_type_fields": {
+        "label": "note-type fields",
+        "risk": "structural: adding or moving a field forces a full sync; "
+        "removing one destroys its content on every note",
+        "revert": "restores the previous field list (not removed content)",
+        "revertible": True,  # narrowed to False for `remove` at submit time
+        "full_sync": True,
+        "backup": True,
+    },
+    "manage_card_templates": {
+        "label": "card templates",
+        "risk": "adding a template creates a card on every note; removing one "
+        "destroys those cards and their review history",
+        "revert": "restores the previous template list (not deleted cards)",
+        "revertible": True,  # narrowed to False for `remove` at submit time
+        "full_sync": True,
+        "backup": True,
+    },
+    "create_note_type": {
+        "label": "new note type",
+        "risk": "additive - no existing note is touched",
+        "revert": "removes the new note type again",
+        "revertible": True,
+        "full_sync": False,
+        "backup": False,
+    },
+    "change_note_type": {
+        "label": "change note type",
+        "risk": "converts notes; unmapped fields and templates are dropped, "
+        "and their cards' review history goes with them",
+        "revert": "not revertible - restore from the backup",
+        "revertible": False,
+        "full_sync": True,
+        "backup": True,
+    },
+    "remove_empty_cards": {
+        "label": "empty cards",
+        "risk": "deletes cards whose front renders blank, and any note left "
+        "with no cards at all",
+        "revert": "not revertible - restore from the backup",
+        "revertible": False,
+        "full_sync": False,
+        "backup": True,
+    },
+}
+
+# Field/template sub-operations whose effects cannot be undone by restoring the
+# note type dict, because the payload they destroy lives outside it (note field
+# content; cards and their review history).
+DESTRUCTIVE_SUBOPS = {"remove"}
+
+FIELD_SUBOPS = ("add", "rename", "reposition", "remove")
+TEMPLATE_SUBOPS = ("add", "rename", "reposition", "remove")
+MAX_NOTE_TYPE_SOURCE_CHARS = 50_000
+# A front with no field reference renders identically for every note, which is
+# exactly the shape Anki rejects with CardTypeError - caught here so the error
+# names the real problem instead of an ordinal.
+_FIELD_REF_RE = re.compile(r"\{\{[^}]*\}\}")
 
 # ---- batchable operations (#27): change sets beyond note edits ----
 #
@@ -271,7 +375,7 @@ class _WriteResult:
 @dataclass
 class Proposal:
     id: str
-    kind: str  # "create" | "edit" | "bulk" | "delete" | "change_set" | "deck_op" | "skill_update" | "skill_create"
+    kind: str  # "create" | "edit" | "bulk" | "delete" | "change_set" | "deck_op" | "note_type_op" | "skill_update" | "skill_create"
     note_type: str
     deck: str
     tags: list[str]
@@ -299,6 +403,12 @@ class Proposal:
     # dir until accept (imported via col.media.add_file) or reject/supersede
     # (discarded). create and edit proposals both stage here (#24b).
     media: list[dict[str, Any]] = field(default_factory=list)
+    # Whether accepting this can be undone from the dock (#7). Set at submit
+    # time by families where the SAME tool is revertible or not depending on
+    # its arguments (rename a field vs remove one), so the review card can say
+    # so BEFORE the click rather than the ledger only after it. None = the
+    # kind-level default in _kind_revertible decides.
+    revertible: bool | None = None
     # Edit only (#24a): the note's OTHER fields, unchanged by this proposal.
     # Never written - context so the reviewer can see the rest of the note
     # (does the new value duplicate something already there?) without the
@@ -355,6 +465,10 @@ class Proposal:
             "samples": self.samples,
             "media": self.media,
             "preview_media": self.preview_media,
+            # Omitted (not null) when unknown: the UI's `revertible` is also
+            # written by proposal_resolved, and a null here would clobber a
+            # real answer with "we don't know".
+            **({"revertible": self.revertible} if self.revertible is not None else {}),
             "context_fields": [
                 {"name": name, "value": value}
                 for name, value in self.context_fields.items()
@@ -1650,6 +1764,635 @@ class ProposalManager:
         proposal.status = ACCEPTED
         self._after_deck_change()
         return created
+
+    # ---- note-type write path (#7) ----
+
+    def _note_type_by_name(self, col: Any, name: Any) -> Any:
+        """Resolve a note type by exact name, with the available names in the
+        error - the agent has no way to guess a name it got slightly wrong."""
+        clean = str(name or "").strip()
+        if not clean:
+            raise ProposalError("note_type is required")
+        model = col.models.by_name(clean)
+        if model is None:
+            names = sorted(nt.name for nt in col.models.all_names_and_ids())
+            raise ProposalError(f"note type {clean!r} not found; available: {names}")
+        return model
+
+    def _note_type_blast_radius(self, col: Any, model: Any) -> list[str]:
+        """Every op in this family is collection-wide by construction. Say how
+        wide, in notes and decks, before the user commits."""
+        try:
+            note_ids = list(col.models.nids(model["id"]))
+        except Exception:
+            note_ids = []
+        if not note_ids:
+            return ["no notes use this note type yet"]
+        decks: set[str] = set()
+        try:
+            ids_sql = "(" + ",".join(str(int(n)) for n in note_ids) + ")"
+            for did in col.db.list(
+                "select distinct coalesce(nullif(c.odid, 0), c.did) from cards c "
+                f"where c.nid in {ids_sql}"
+            ):
+                decks.add(col.decks.name(did))
+        except Exception:
+            pass
+        where = f" across {len(decks)} deck(s)" if decks else ""
+        return [f"used by {len(note_ids)} note(s){where}"]
+
+    def _note_type_op_proposal(
+        self,
+        *,
+        op: str,
+        op_args: dict[str, Any],
+        note_type: str,
+        rationale: str,
+        samples: list[str],
+        count: int = 0,
+        warnings: list[str] | None = None,
+        revertible: bool | None = None,
+    ) -> dict[str, Any]:
+        meta = NOTE_TYPE_OPS[op]
+        lines = list(warnings or [])
+        if meta["full_sync"]:
+            lines.append(
+                "structural change: your next sync will be a full upload "
+                "(Anki will ask which side wins - choose this device)"
+            )
+        can_revert = meta["revertible"] if revertible is None else revertible
+        proposal = Proposal(
+            id=self._next_id(),
+            kind="note_type_op",
+            op=op,
+            op_args=dict(op_args),
+            revertible=can_revert,
+            note_type=note_type,
+            deck="",
+            tags=[],
+            fields={},
+            rationale=rationale,
+            count=count,
+            samples=[{"text": line} for line in samples],
+            warnings=lines,
+        )
+        return self._finish_submission(proposal, 1)
+
+    @staticmethod
+    def _require_source(value: Any, label: str) -> str:
+        text = "" if value is None else str(value)
+        if len(text) > MAX_NOTE_TYPE_SOURCE_CHARS:
+            raise ProposalError(
+                f"{label} is {len(text)} chars; the cap is "
+                f"{MAX_NOTE_TYPE_SOURCE_CHARS}"
+            )
+        return text
+
+    def submit_set_note_type_styling(self, args: dict[str, Any]) -> dict[str, Any]:
+        col = self._col()
+        model = self._note_type_by_name(col, args.get("note_type"))
+        css = self._require_source(args.get("css"), "css")
+        if not css.strip():
+            raise ProposalError("css must not be empty (pass the full stylesheet)")
+        current = str(model.get("css", ""))
+        if css == current:
+            raise ProposalError("no effective change: the CSS already matches")
+        return self._note_type_op_proposal(
+            op="set_note_type_styling",
+            op_args={"note_type": model["name"], "css": css},
+            note_type=model["name"],
+            rationale=str(args.get("rationale", "")),
+            samples=[
+                f'Replace the CSS of "{model["name"]}" '
+                f"({len(current)} → {len(css)} chars)"
+            ],
+            warnings=self._note_type_blast_radius(col, model),
+        )
+
+    def submit_set_card_template(self, args: dict[str, Any]) -> dict[str, Any]:
+        col = self._col()
+        model = self._note_type_by_name(col, args.get("note_type"))
+        name = str(args.get("template", "")).strip()
+        if not name:
+            raise ProposalError("template is required (the card type's name)")
+        match = next((t for t in model["tmpls"] if t["name"] == name), None)
+        if match is None:
+            raise ProposalError(
+                f"card template {name!r} not found on {model['name']!r}; "
+                f"available: {[t['name'] for t in model['tmpls']]}"
+            )
+        qfmt = args.get("qfmt")
+        afmt = args.get("afmt")
+        if qfmt is None and afmt is None:
+            raise ProposalError("pass qfmt and/or afmt (the full new source)")
+        new_q = self._require_source(qfmt, "qfmt") if qfmt is not None else match["qfmt"]
+        new_a = self._require_source(afmt, "afmt") if afmt is not None else match["afmt"]
+        if new_q == match["qfmt"] and new_a == match["afmt"]:
+            raise ProposalError("no effective change: the template already matches")
+        if not new_q.strip():
+            raise ProposalError("the front (qfmt) must not be empty")
+        if not _FIELD_REF_RE.search(new_q):
+            raise ProposalError(
+                "the front references no field, so every note would render the "
+                "same card; include at least one {{Field}}"
+            )
+        changed = []
+        if new_q != match["qfmt"]:
+            changed.append("front")
+        if new_a != match["afmt"]:
+            changed.append("back")
+        return self._note_type_op_proposal(
+            op="set_card_template",
+            op_args={
+                "note_type": model["name"],
+                "template": name,
+                "qfmt": new_q,
+                "afmt": new_a,
+            },
+            note_type=model["name"],
+            rationale=str(args.get("rationale", "")),
+            samples=[
+                f'Rewrite the {" and ".join(changed)} of "{name}" '
+                f'on "{model["name"]}"'
+            ],
+            warnings=self._note_type_blast_radius(col, model),
+        )
+
+    def submit_manage_note_type_fields(self, args: dict[str, Any]) -> dict[str, Any]:
+        col = self._col()
+        model = self._note_type_by_name(col, args.get("note_type"))
+        sub = str(args.get("op", "")).strip().lower()
+        if sub not in FIELD_SUBOPS:
+            raise ProposalError(f"op must be one of {list(FIELD_SUBOPS)}")
+        field = str(args.get("field", "")).strip()
+        if not field:
+            raise ProposalError("field is required")
+        names = [f["name"] for f in model["flds"]]
+        warnings = self._note_type_blast_radius(col, model)
+        samples: list[str] = []
+        op_args: dict[str, Any] = {
+            "note_type": model["name"],
+            "op": sub,
+            "field": field,
+        }
+        revertible: bool | None = None
+
+        if sub == "add":
+            if field in names:
+                raise ProposalError(f"{model['name']!r} already has a field {field!r}")
+            samples.append(f'Add field "{field}" to "{model["name"]}"')
+            warnings.append("existing notes get the new field empty")
+        else:
+            if field not in names:
+                raise ProposalError(
+                    f"{model['name']!r} has no field {field!r}; available: {names}"
+                )
+            index = names.index(field)
+            if sub == "rename":
+                new_name = str(args.get("new_name", "")).strip()
+                if not new_name:
+                    raise ProposalError("rename needs new_name")
+                if new_name == field:
+                    raise ProposalError("new_name matches the current name")
+                if new_name in names:
+                    raise ProposalError(f"a field named {new_name!r} already exists")
+                op_args["new_name"] = new_name
+                samples.append(f'Rename field "{field}" → "{new_name}"')
+                warnings.append(
+                    "Anki rewrites every template reference to this field, and "
+                    "note content follows the rename"
+                )
+            elif sub == "reposition":
+                position = args.get("position")
+                if position is None:
+                    raise ProposalError("reposition needs position (0-based)")
+                try:
+                    position = int(position)
+                except (TypeError, ValueError):
+                    raise ProposalError("position must be an integer") from None
+                if not 0 <= position < len(names):
+                    raise ProposalError(
+                        f"position must be between 0 and {len(names) - 1}"
+                    )
+                if position == index:
+                    raise ProposalError("the field is already at that position")
+                op_args["position"] = position
+                samples.append(
+                    f'Move field "{field}" from position {index} to {position}'
+                )
+                if position == 0 or index == 0:
+                    warnings.append(
+                        "this changes the FIRST field, which Anki uses for "
+                        "duplicate detection and browser sorting"
+                    )
+            else:  # remove
+                if len(names) == 1:
+                    raise ProposalError("a note type must keep at least one field")
+                if index == 0:
+                    raise ProposalError(
+                        "the first field is the duplicate/sort key; reposition "
+                        "another field to the front before removing this one"
+                    )
+                filled = self._field_content_count(col, model, field)
+                op_args["filled"] = filled
+                revertible = False
+                samples.append(f'Remove field "{field}" from "{model["name"]}"')
+                if filled:
+                    warnings.append(
+                        f"{filled} note(s) have content in this field - it is "
+                        "destroyed collection-wide and CANNOT be undone from "
+                        "the dock (a backup is taken first)"
+                    )
+                else:
+                    warnings.append(
+                        "no note has content in this field, but the removal "
+                        "still cannot be undone from the dock"
+                    )
+                users = self._templates_referencing(model, field)
+                if users:
+                    warnings.append(
+                        "template(s) " + ", ".join(repr(u) for u in users) + " "
+                        "reference this field: Anki SILENTLY REWRITES them to "
+                        "point at a different field, which can turn a "
+                        "conditional front unconditional and generate a card on "
+                        "every note (probed on 25.x). The applied card is "
+                        "reported after the change."
+                    )
+
+        return self._note_type_op_proposal(
+            op="manage_note_type_fields",
+            op_args=op_args,
+            note_type=model["name"],
+            rationale=str(args.get("rationale", "")),
+            samples=samples,
+            warnings=warnings,
+            revertible=revertible,
+        )
+
+    @staticmethod
+    def _field_content_count(col: Any, model: Any, field: str) -> int:
+        """How many notes actually have something in this field - the number
+        that makes 'this destroys content' concrete instead of theoretical."""
+        names = [f["name"] for f in model["flds"]]
+        index = names.index(field)
+        filled = 0
+        try:
+            for (flds,) in col.db.all(
+                "select flds from notes where mid = ?", model["id"]
+            ):
+                parts = flds.split("\x1f")
+                if index < len(parts) and parts[index].strip():
+                    filled += 1
+        except Exception:
+            return 0
+        return filled
+
+    @staticmethod
+    def _templates_referencing(model: Any, field: str) -> list[str]:
+        """Templates whose source mentions this field, in any of Anki's three
+        reference forms: plain, conditional, negated-conditional."""
+        forms = ("{{" + field + "}}", "{{#" + field + "}}", "{{^" + field + "}}")
+        hits = []
+        for tmpl in model["tmpls"]:
+            source = str(tmpl.get("qfmt", "")) + str(tmpl.get("afmt", ""))
+            if any(form in source for form in forms):
+                hits.append(tmpl["name"])
+        return hits
+
+    def _resolve_note_selection(
+        self, col: Any, args: dict[str, Any], op: str, *, default_all_of: Any = None
+    ) -> tuple[list[int], str, list[str], dict[str, Any]]:
+        """Note-level twin of _resolve_card_selection. At most one of note_ids
+        or query; with neither, `default_all_of` means every note of that note
+        type - the overwhelmingly common intent for a conversion, and stating
+        it explicitly beats making the agent construct a `note:` search."""
+        raw_ids = args.get("note_ids") or []
+        query = str(args.get("query") or "").strip()
+        if raw_ids and query:
+            raise ProposalError(f"{op} takes at most one of note_ids or query")
+        warnings: list[str] = []
+        if raw_ids:
+            ids = list(dict.fromkeys(int(n) for n in raw_ids))
+            if len(ids) > MAX_EXPLICIT_CARD_IDS:
+                raise ProposalError(
+                    f"{len(ids)} explicit note_ids is too many "
+                    f"(max {MAX_EXPLICIT_CARD_IDS}); pass a query instead"
+                )
+            live = []
+            for nid in ids:
+                try:
+                    col.get_note(nid)
+                except Exception:
+                    continue
+                live.append(nid)
+            missing = len(ids) - len(live)
+            if missing:
+                warnings.append(f"{missing} note id(s) no longer exist and are skipped")
+            return live, f"{len(live)} selected note(s)", warnings, {"note_ids": ids}
+        if query:
+            try:
+                live = [int(n) for n in col.find_notes(query)]
+            except Exception as exc:
+                raise ProposalError(f"invalid search {query!r}: {exc}") from None
+            return live, f"search {query!r}", warnings, {"query": query}
+        if default_all_of is None:
+            raise ProposalError(f"{op} needs note_ids or query")
+        live = [int(n) for n in col.models.nids(default_all_of["id"])]
+        return (
+            live,
+            f'every note of "{default_all_of["name"]}"',
+            warnings,
+            {"all_of_note_type": default_all_of["name"]},
+        )
+
+    def submit_manage_card_templates(self, args: dict[str, Any]) -> dict[str, Any]:
+        col = self._col()
+        model = self._note_type_by_name(col, args.get("note_type"))
+        sub = str(args.get("op", "")).strip().lower()
+        if sub not in TEMPLATE_SUBOPS:
+            raise ProposalError(f"op must be one of {list(TEMPLATE_SUBOPS)}")
+        name = str(args.get("template", "")).strip()
+        if not name:
+            raise ProposalError("template is required")
+        names = [t["name"] for t in model["tmpls"]]
+        note_count = len(list(col.models.nids(model["id"])))
+        warnings = self._note_type_blast_radius(col, model)
+        samples: list[str] = []
+        op_args: dict[str, Any] = {
+            "note_type": model["name"],
+            "op": sub,
+            "template": name,
+        }
+        revertible: bool | None = None
+
+        if sub == "add":
+            if name in names:
+                raise ProposalError(f"a card template named {name!r} already exists")
+            qfmt = self._require_source(args.get("qfmt"), "qfmt")
+            afmt = self._require_source(args.get("afmt"), "afmt")
+            if not qfmt.strip() or not afmt.strip():
+                raise ProposalError("a new template needs both qfmt and afmt")
+            if not _FIELD_REF_RE.search(qfmt):
+                raise ProposalError(
+                    "the front references no field, so every note would render "
+                    "the same card; include at least one {{Field}}"
+                )
+            op_args["qfmt"] = qfmt
+            op_args["afmt"] = afmt
+            samples.append(f'Add card template "{name}" to "{model["name"]}"')
+            conditional = qfmt.lstrip().startswith("{{#") or "{{#" in qfmt
+            warnings.append(
+                f"this generates up to {note_count} new card(s) - one per note"
+                + (
+                    " (fewer if the front is conditional and the field is empty)"
+                    if conditional
+                    else ""
+                )
+            )
+        else:
+            if name not in names:
+                raise ProposalError(
+                    f"{model['name']!r} has no card template {name!r}; "
+                    f"available: {names}"
+                )
+            index = names.index(name)
+            if sub == "rename":
+                new_name = str(args.get("new_name", "")).strip()
+                if not new_name:
+                    raise ProposalError("rename needs new_name")
+                if new_name == name:
+                    raise ProposalError("new_name matches the current name")
+                if new_name in names:
+                    raise ProposalError(f"a template named {new_name!r} already exists")
+                op_args["new_name"] = new_name
+                samples.append(f'Rename card template "{name}" → "{new_name}"')
+            elif sub == "reposition":
+                position = args.get("position")
+                if position is None:
+                    raise ProposalError("reposition needs position (0-based)")
+                try:
+                    position = int(position)
+                except (TypeError, ValueError):
+                    raise ProposalError("position must be an integer") from None
+                if not 0 <= position < len(names):
+                    raise ProposalError(
+                        f"position must be between 0 and {len(names) - 1}"
+                    )
+                if position == index:
+                    raise ProposalError("the template is already at that position")
+                op_args["position"] = position
+                samples.append(
+                    f'Move card template "{name}" from {index} to {position}'
+                )
+            else:  # remove
+                if len(names) == 1:
+                    raise ProposalError(
+                        "a note type must keep at least one card template"
+                    )
+                try:
+                    doomed = int(col.models.template_use_count(model["id"], index))
+                except Exception:
+                    doomed = 0
+                op_args["cards"] = doomed
+                revertible = False
+                samples.append(
+                    f'Remove card template "{name}" from "{model["name"]}"'
+                )
+                warnings.append(
+                    f"{doomed} card(s) and their entire review history are "
+                    "deleted - this CANNOT be undone from the dock (a backup is "
+                    "taken first)"
+                )
+
+        return self._note_type_op_proposal(
+            op="manage_card_templates",
+            op_args=op_args,
+            note_type=model["name"],
+            rationale=str(args.get("rationale", "")),
+            samples=samples,
+            count=note_count,
+            warnings=warnings,
+            revertible=revertible,
+        )
+
+    def submit_create_note_type(self, args: dict[str, Any]) -> dict[str, Any]:
+        col = self._col()
+        name = str(args.get("name", "")).strip()
+        if not name:
+            raise ProposalError("create_note_type needs a name")
+        if col.models.by_name(name) is not None:
+            raise ProposalError(f"a note type named {name!r} already exists")
+        source = self._note_type_by_name(col, args.get("clone_from"))
+        return self._note_type_op_proposal(
+            op="create_note_type",
+            op_args={"name": name, "clone_from": source["name"]},
+            note_type=name,
+            rationale=str(args.get("rationale", "")),
+            samples=[
+                f'Create note type "{name}" as a copy of "{source["name"]}" '
+                f"({len(source['flds'])} field(s), {len(source['tmpls'])} "
+                "card template(s))"
+            ],
+            warnings=[
+                "the copy starts with no notes; existing notes are untouched"
+            ],
+        )
+
+    def submit_change_note_type(self, args: dict[str, Any]) -> dict[str, Any]:
+        col = self._col()
+        old = self._note_type_by_name(col, args.get("note_type"))
+        new = self._note_type_by_name(col, args.get("new_note_type"))
+        if old["id"] == new["id"]:
+            raise ProposalError("the notes already use that note type")
+        live, scope_text, warnings, selection = self._resolve_note_selection(
+            col, args, "change_note_type", default_all_of=old
+        )
+        note_ids = [
+            nid for nid in live if col.get_note(nid).note_type()["id"] == old["id"]
+        ]
+        if not note_ids:
+            raise ProposalError(f"no note in {scope_text} uses {old['name']!r}")
+        skipped = len(live) - len(note_ids)
+        if skipped:
+            warnings.append(
+                f"{skipped} selected note(s) do not use {old['name']!r} and are "
+                "left alone"
+            )
+
+        old_fields = [f["name"] for f in old["flds"]]
+        new_fields = [f["name"] for f in new["flds"]]
+        old_templates = [t["name"] for t in old["tmpls"]]
+        new_templates = [t["name"] for t in new["tmpls"]]
+
+        field_map = self._coerce_map(
+            args.get("field_map"), old_fields, new_fields, "field_map"
+        )
+        template_map = self._coerce_map(
+            args.get("template_map"), old_templates, new_templates, "template_map"
+        )
+        dropped_fields = [name for name in old_fields if name not in field_map]
+        dropped_templates = [
+            name for name in old_templates if name not in template_map
+        ]
+        samples = [
+            f'Convert {len(note_ids)} note(s) from "{old["name"]}" to '
+            f'"{new["name"]}"'
+        ]
+        samples += [f"{src} → {dst}" for src, dst in sorted(field_map.items())]
+        if dropped_fields:
+            warnings.append(
+                "field content DESTROYED (mapped nowhere): "
+                + ", ".join(dropped_fields)
+            )
+        if dropped_templates:
+            warnings.append(
+                "card(s) and their review history DESTROYED (template mapped "
+                "nowhere): " + ", ".join(dropped_templates)
+            )
+        warnings.append("this cannot be undone from the dock (a backup is taken first)")
+        return self._note_type_op_proposal(
+            op="change_note_type",
+            op_args={
+                "note_type": old["name"],
+                "new_note_type": new["name"],
+                "note_ids": note_ids,
+                "field_map": field_map,
+                "template_map": template_map,
+                "selection": selection,
+            },
+            note_type=old["name"],
+            rationale=str(args.get("rationale", "")),
+            samples=samples,
+            count=len(note_ids),
+            warnings=warnings,
+        )
+
+    @staticmethod
+    def _coerce_map(
+        raw: Any, old_names: list[str], new_names: list[str], label: str
+    ) -> dict[str, str]:
+        """`{old name: new name}`, defaulting to same-name pairs. Anything left
+        unmapped is dropped on conversion, which is why the default is
+        name-matching rather than positional: a positional default silently
+        moves content between unrelated fields."""
+        if raw is None:
+            return {name: name for name in old_names if name in new_names}
+        if not isinstance(raw, dict):
+            raise ProposalError(f"{label} must be an object of old name -> new name")
+        mapping: dict[str, str] = {}
+        used: set[str] = set()
+        for src, dst in raw.items():
+            src = str(src).strip()
+            if src not in old_names:
+                raise ProposalError(
+                    f"{label}: {src!r} is not on the source note type; "
+                    f"available: {old_names}"
+                )
+            if dst is None or not str(dst).strip():
+                continue  # explicitly dropped
+            dst = str(dst).strip()
+            if dst not in new_names:
+                raise ProposalError(
+                    f"{label}: {dst!r} is not on the target note type; "
+                    f"available: {new_names}"
+                )
+            if dst in used:
+                raise ProposalError(
+                    f"{label}: two sources both map onto {dst!r}; one would win "
+                    "silently"
+                )
+            used.add(dst)
+            mapping[src] = dst
+        return mapping
+
+    def submit_remove_empty_cards(self, args: dict[str, Any]) -> dict[str, Any]:
+        col = self._col()
+        report = col.get_empty_cards()
+        entries: list[dict[str, Any]] = [
+            {
+                "note_id": int(entry.note_id),
+                "card_ids": [int(cid) for cid in entry.card_ids],
+                "will_delete_note": bool(entry.will_delete_note),
+            }
+            for entry in report.notes
+        ]
+        if not entries:
+            raise ProposalError(
+                "no empty cards found - nothing to remove"
+            )
+        card_total = sum(len(list(e["card_ids"])) for e in entries)
+        doomed_notes = [e for e in entries if e["will_delete_note"]]
+        samples = [
+            f"{card_total} empty card(s) across {len(entries)} note(s)"
+        ]
+        for entry in entries[:10]:
+            try:
+                note = col.get_note(entry["note_id"])
+                label = _short_label(next(iter(note.values()), ""))
+            except Exception:
+                label = f"note {entry['note_id']}"
+            samples.append(
+                f"{label} - {len(list(entry['card_ids']))} card(s)"
+                + (" (the note goes too)" if entry["will_delete_note"] else "")
+            )
+        if len(entries) > 10:
+            samples.append(f"… and {len(entries) - 10} more note(s)")
+        warnings = []
+        if doomed_notes:
+            warnings.append(
+                f"{len(doomed_notes)} note(s) lose their LAST card and are "
+                "deleted outright, content and all"
+            )
+        warnings.append("this cannot be undone from the dock (a backup is taken first)")
+        return self._note_type_op_proposal(
+            op="remove_empty_cards",
+            op_args={"entries": entries},
+            note_type="",
+            rationale=str(args.get("rationale", "")),
+            samples=samples,
+            count=card_total,
+            warnings=warnings,
+        )
 
     def submit_manage_saved_search(self, args: dict[str, Any]) -> dict[str, Any]:
         """Saved searches (#12b): Browse-sidebar entries in collection
@@ -3193,6 +3936,8 @@ class ProposalManager:
                 # wrap _accept_deck_op in a transaction and add a filtered-deck
                 # corruption postcondition for create_filtered_deck/rebuild.
                 touched = self._accept_deck_op(proposal)
+            elif proposal.kind == "note_type_op":
+                touched = self._accept_note_type_op(proposal)
             elif proposal.kind == "skill_update":
                 # SAFETY: not a collection write at all - _apply_skill writes the
                 # skill markdown file on disk, so the col transaction/invariants
@@ -3615,6 +4360,10 @@ class ProposalManager:
         # is not stored anywhere, and re-running them is one chat message.
         if proposal.kind == "deck_op" and proposal.op == "filtered_deck_action":
             return False
+        # Set at submit time where the kind alone cannot answer it (#7: the
+        # same tool is revertible or not depending on its sub-op).
+        if proposal.revertible is not None:
+            return proposal.revertible
         # Safety-net ops (#8): undo's inverse is Anki's own redo; a database
         # repair and a sync have no meaningful inverse here.
         if proposal.op in ("undo_change", "check_database", "sync_now"):
@@ -4803,6 +5552,15 @@ class ProposalManager:
             entry.undone = True
             return
 
+        if entry.kind == "note_type_op":
+            # Restoring the snapshot can move card counts (re-adding a template
+            # regenerates its cards), so this is the one revert that must not
+            # assert a zero delta.
+            self._revert_note_type_op(col, entry)
+            entry.undone = True
+            self._after_deck_change()
+            return
+
         if entry.kind == "deck_op":
             # SAFETY: deck-op reverts flow through _revert_deck_op, which looks
             # decks up by name, converts backend errors to ProposalError, and
@@ -5067,6 +5825,357 @@ class ProposalManager:
         entry.undone = True
         if resync:
             self._observe({"event": "resync", "note_ids": resync})
+
+    def _accept_note_type_op(self, proposal: Proposal) -> list[int]:
+        """Apply a note-type write (#7) through the shared chokepoint.
+
+        Card counts legitimately move here (a new template generates cards, a
+        removed one destroys them, and a removed FIELD can generate them - see
+        NOTE_TYPE_OPS), so the write runs with ``lenient_cards`` and reports
+        the delta that ACTUALLY happened as an outcome on the resolved card,
+        rather than asserting a prediction that Anki is entitled to disagree
+        with. Every branch snapshots the whole note type dict first: for the
+        revertible ops that snapshot IS the undo.
+        """
+        col = self._col()
+        op = proposal.op
+        meta = NOTE_TYPE_OPS[op]
+        args = proposal.op_args
+        outcomes: list[str] = []
+
+        def apply(mutate: Callable[[Any], None], *, model_name: str = "") -> None:
+            prior = (
+                copy.deepcopy(col.models.by_name(model_name)) if model_name else None
+            )
+
+            def execute(col: Any, before: invariants.Snapshot) -> _WriteResult:
+                cards_before = int(col.db.scalar("select count() from cards"))
+                notes_before = int(col.db.scalar("select count() from notes"))
+                templates_before = (
+                    {t["name"]: (t.get("qfmt", ""), t.get("afmt", "")) for t in prior["tmpls"]}
+                    if prior
+                    else {}
+                )
+                mutate(col)
+                cards_delta = int(col.db.scalar("select count() from cards")) - cards_before
+                notes_delta = int(col.db.scalar("select count() from notes")) - notes_before
+                if cards_delta:
+                    outcomes.append(
+                        f"{abs(cards_delta)} card(s) "
+                        + ("created" if cards_delta > 0 else "deleted")
+                    )
+                if notes_delta:
+                    outcomes.append(
+                        f"{abs(notes_delta)} note(s) "
+                        + ("created" if notes_delta > 0 else "deleted")
+                    )
+                # The silent-template-rewrite check. Anki remaps field
+                # references when a field is removed, which is how a
+                # conditional front becomes unconditional (probed on 25.x);
+                # nothing in Anki's UI tells you it happened.
+                if prior:
+                    after = col.models.by_name(args.get("new_name") or model_name)
+                    if after is not None:
+                        for tmpl in after["tmpls"]:
+                            was = templates_before.get(tmpl["name"])
+                            if was is None:
+                                continue
+                            if was != (tmpl.get("qfmt", ""), tmpl.get("afmt", "")):
+                                outcomes.append(
+                                    f'Anki rewrote card template "{tmpl["name"]}" '
+                                    "to keep its field references valid"
+                                )
+                self._ledger.append(
+                    LedgerEntry(
+                        id=proposal.id,
+                        kind="note_type_op",
+                        note_id=0,
+                        label=f'{meta["label"]}: {proposal.samples[0]["text"]}'
+                        if proposal.samples
+                        else meta["label"],
+                        data={
+                            "op": op,
+                            "note_type": model_name,
+                            "prior": prior,
+                            "created": args.get("name") if op == "create_note_type" else None,
+                        },
+                    )
+                )
+                return _WriteResult(
+                    None,
+                    invariants.Expectation(changes_schema=True),
+                    invariants.Scope(),
+                )
+
+            self._apply_write(
+                execute=execute,
+                backup_reason=meta["label"] if meta["backup"] else None,
+                # An op we cannot undo must never proceed without a backup.
+                critical_backup=proposal.revertible is False,
+                lenient_cards=True,
+            )
+
+        if op == "set_note_type_styling":
+            name = args["note_type"]
+
+            def mutate(col: Any) -> None:
+                model = self._note_type_by_name(col, name)
+                model["css"] = args["css"]
+                col.models.update_dict(model)
+
+            apply(mutate, model_name=name)
+
+        elif op == "set_card_template":
+            name = args["note_type"]
+
+            def mutate(col: Any) -> None:
+                model = self._note_type_by_name(col, name)
+                tmpl = next(
+                    (t for t in model["tmpls"] if t["name"] == args["template"]), None
+                )
+                if tmpl is None:
+                    raise ProposalError(
+                        f'card template {args["template"]!r} no longer exists'
+                    )
+                tmpl["qfmt"] = args["qfmt"]
+                tmpl["afmt"] = args["afmt"]
+                col.models.update_dict(model)
+
+            apply(mutate, model_name=name)
+
+        elif op == "manage_note_type_fields":
+            name = args["note_type"]
+
+            def mutate(col: Any) -> None:
+                model = self._note_type_by_name(col, name)
+                sub = args["op"]
+                existing = {f["name"]: f for f in model["flds"]}
+                if sub == "add":
+                    if args["field"] in existing:
+                        raise ProposalError(
+                            f'a field named {args["field"]!r} already exists'
+                        )
+                    col.models.add_field(model, col.models.new_field(args["field"]))
+                else:
+                    target = existing.get(args["field"])
+                    if target is None:
+                        raise ProposalError(
+                            f'field {args["field"]!r} no longer exists'
+                        )
+                    if sub == "rename":
+                        if args["new_name"] in existing:
+                            raise ProposalError(
+                                f'a field named {args["new_name"]!r} already exists'
+                            )
+                        col.models.rename_field(model, target, args["new_name"])
+                    elif sub == "reposition":
+                        col.models.reposition_field(model, target, args["position"])
+                    else:
+                        col.models.remove_field(model, target)
+                col.models.update_dict(model)
+
+            apply(mutate, model_name=name)
+
+        elif op == "manage_card_templates":
+            name = args["note_type"]
+
+            def mutate(col: Any) -> None:
+                model = self._note_type_by_name(col, name)
+                sub = args["op"]
+                existing = {t["name"]: t for t in model["tmpls"]}
+                if sub == "add":
+                    if args["template"] in existing:
+                        raise ProposalError(
+                            f'a card template named {args["template"]!r} already exists'
+                        )
+                    tmpl = col.models.new_template(args["template"])
+                    tmpl["qfmt"] = args["qfmt"]
+                    tmpl["afmt"] = args["afmt"]
+                    col.models.add_template(model, tmpl)
+                else:
+                    target = existing.get(args["template"])
+                    if target is None:
+                        raise ProposalError(
+                            f'card template {args["template"]!r} no longer exists'
+                        )
+                    if sub == "rename":
+                        if args["new_name"] in existing:
+                            raise ProposalError(
+                                f'a template named {args["new_name"]!r} already exists'
+                            )
+                        target["name"] = args["new_name"]
+                    elif sub == "reposition":
+                        col.models.reposition_template(model, target, args["position"])
+                    else:
+                        col.models.remove_template(model, target)
+                col.models.update_dict(model)
+
+            apply(mutate, model_name=name)
+
+        elif op == "create_note_type":
+
+            def mutate(col: Any) -> None:
+                if col.models.by_name(args["name"]) is not None:
+                    raise ProposalError(
+                        f'a note type named {args["name"]!r} already exists'
+                    )
+                source = self._note_type_by_name(col, args["clone_from"])
+                clone = copy.deepcopy(source)
+                clone["id"] = 0
+                clone["name"] = args["name"]
+                col.models.add_dict(clone)
+
+            apply(mutate)
+
+        elif op == "change_note_type":
+
+            def mutate(col: Any) -> None:
+                old = self._note_type_by_name(col, args["note_type"])
+                new = self._note_type_by_name(col, args["new_note_type"])
+                request = self._change_notetype_request(
+                    col, old, new, args["field_map"], args["template_map"]
+                )
+                # Re-resolve: notes may have been converted or deleted while
+                # the card sat pending, and handing a stale id to the backend
+                # is how a conversion hits the wrong note.
+                live = [
+                    nid
+                    for nid in args["note_ids"]
+                    if self._note_uses(col, nid, old["id"])
+                ]
+                if not live:
+                    raise ProposalError(
+                        "none of these notes still use that note type"
+                    )
+                if len(live) != len(args["note_ids"]):
+                    outcomes.append(
+                        f"{len(args['note_ids']) - len(live)} note(s) had already "
+                        "changed and were skipped"
+                    )
+                request.note_ids.extend(live)
+                col.models.change_notetype_of_notes(request)
+                outcomes.append(f"{len(live)} note(s) converted")
+
+            apply(mutate)
+
+        elif op == "remove_empty_cards":
+
+            def mutate(col: Any) -> None:
+                # Recompute rather than trusting the ids captured at submit:
+                # any edit since then may have filled a field and made a
+                # previously-empty card real. Only cards that are STILL empty
+                # are deleted.
+                report = col.get_empty_cards()
+                current = {
+                    int(cid) for entry in report.notes for cid in entry.card_ids
+                }
+                proposed = {
+                    int(cid) for entry in args["entries"] for cid in entry["card_ids"]
+                }
+                doomed = sorted(current & proposed)
+                stale = len(proposed) - len(doomed)
+                if stale:
+                    outcomes.append(
+                        f"{stale} card(s) are no longer empty and were kept"
+                    )
+                if not doomed:
+                    raise ProposalError(
+                        "none of those cards are empty any more - nothing removed"
+                    )
+                col.remove_cards_and_orphaned_notes(doomed)
+
+            apply(mutate)
+
+        else:  # pragma: no cover - the table and this dispatch move together
+            raise ProposalError(f"unknown note-type op {op!r}")
+
+        proposal.status = ACCEPTED
+        if outcomes:
+            proposal.warnings = list(proposal.warnings) + [
+                "applied: " + "; ".join(outcomes)
+            ]
+        if self._checkpoint_warning:
+            proposal.warnings.append(self._checkpoint_warning)
+        self._push_ledger()
+        self._after_deck_change()
+        return []
+
+    @staticmethod
+    def _note_uses(col: Any, note_id: int, notetype_id: Any) -> bool:
+        try:
+            return col.get_note(note_id).note_type()["id"] == notetype_id
+        except Exception:
+            return False
+
+    @staticmethod
+    def _change_notetype_request(
+        col: Any,
+        old: Any,
+        new: Any,
+        field_map: dict[str, str],
+        template_map: dict[str, str],
+    ) -> Any:
+        """Turn our name->name maps into Anki's positional request.
+
+        The backend wants ``new_fields[i] = index of the OLD field that feeds
+        NEW field i`` (``-1`` = leave it empty), and the same shape for
+        templates - probed on 25.x. Names are the contract at our boundary
+        precisely because positions are not stable across note types: a
+        positional API with a name-shaped mental model is how content lands in
+        the wrong field.
+        """
+        request = col.models.change_notetype_info(
+            old_notetype_id=old["id"], new_notetype_id=new["id"]
+        ).input
+        old_fields = [f["name"] for f in old["flds"]]
+        new_fields = [f["name"] for f in new["flds"]]
+        old_templates = [t["name"] for t in old["tmpls"]]
+        new_templates = [t["name"] for t in new["tmpls"]]
+        reverse_fields = {dst: src for src, dst in field_map.items()}
+        reverse_templates = {dst: src for src, dst in template_map.items()}
+        del request.new_fields[:]
+        request.new_fields.extend(
+            old_fields.index(reverse_fields[name]) if name in reverse_fields else -1
+            for name in new_fields
+        )
+        del request.new_templates[:]
+        request.new_templates.extend(
+            old_templates.index(reverse_templates[name])
+            if name in reverse_templates
+            else -1
+            for name in new_templates
+        )
+        return request
+
+    def _revert_note_type_op(self, col: Any, entry: LedgerEntry) -> None:
+        """Undo a note-type write by restoring the snapshot taken at apply.
+
+        Only ever reached for ops _kind_revertible allows: the destructive ones
+        (field/template removal, conversion, empty-card deletion) destroy
+        payload that lives OUTSIDE the note type dict - note content, cards,
+        review history - which no snapshot of the dict could bring back. Those
+        are marked non-revertible up front and the backup is the way back.
+        """
+        op = entry.data.get("op")
+        if op == "create_note_type":
+            name = entry.data.get("created")
+            model = col.models.by_name(name) if name else None
+            if model is None:
+                raise ProposalError("that note type is already gone")
+            if list(col.models.nids(model["id"])):
+                raise ProposalError(
+                    "notes now use this note type; removing it would delete them "
+                    "- do it in Anki if that is really the intent"
+                )
+            col.models.remove(model["id"])
+            return
+        prior = entry.data.get("prior")
+        if not prior:
+            raise ProposalError("no snapshot to restore")
+        live = col.models.get(prior["id"])
+        if live is None:
+            raise ProposalError("that note type no longer exists")
+        col.models.update_dict(copy.deepcopy(prior))
 
     def _revert_deck_op(self, col: Any, entry: LedgerEntry) -> None:
         """Deck-op reverts always look decks up BY NAME, never by stored id:

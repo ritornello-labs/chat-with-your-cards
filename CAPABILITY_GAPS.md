@@ -95,7 +95,17 @@ over a selection (wildcards allowed), **delete a tag** outright, and **Clear
 Unused Tags**. Combined with the 100-result cap this makes "tag every note
 matching this search" effectively impossible today. **High.** Reversible.
 
-### 3. Note-type write path — **our biggest asymmetry**
+### 3. Note-type write path — **CLOSED 2026-08-01 (task #7)**
+
+Shipped as `set_note_type_styling`, `set_card_template`,
+`manage_note_type_fields`, `manage_card_templates`, `create_note_type`,
+`change_note_type`, and `remove_empty_cards` — all proposal-gated, with
+per-proposal revertibility and a critical backup on the destructive ones. See
+DESIGN.md §5 for the probed Anki semantics behind them (notably: removing a
+field silently rewrites the templates that referenced it, and can generate a
+card on every note). The original gap text follows.
+
+### 3. Note-type write path — **our biggest asymmetry** (historical)
 
 Since we started returning template source and CSS verbatim so the agent can
 *debug* rendering, it can diagnose a broken `<iframe>` in a template and then
@@ -160,5 +170,8 @@ media), and a forced-direction sync. LaTeX preamble editing is security-sensitiv
 4. **Scheduling writes** — Set Due Date, Forget, Reposition, with the louder
    diff described above.
 5. **Note-type write path**, gated on `confirm_schema_modification()` (DESIGN.md
-   task #33), with Empty Cards landing alongside it.
+   task #33), with Empty Cards landing alongside it. **Done 2026-08-01** — the
+   gate landed as the proposal card itself (blast radius, full-sync notice, and
+   an explicit irreversibility line) rather than a modal, and Empty Cards
+   shipped in the same pass as `remove_empty_cards`.
 6. **Undo + maintenance** as the safety net under all of the above.

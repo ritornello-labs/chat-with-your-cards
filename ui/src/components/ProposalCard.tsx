@@ -81,6 +81,7 @@ const KIND_LABELS: Record<string, string> = {
   delete: "Delete notes",
   change_set: "Change set",
   deck_op: "Deck change",
+  note_type_op: "Note type change",
   skill_update: "Skill update",
 };
 
@@ -623,7 +624,11 @@ function LegacyProposalCard({ data, store }: ProposalCardProps) {
       ? [data.note_type, data.kind === "edit" ? data.deck : null].filter(Boolean).join(" · ")
       : data.kind === "deck_op"
         ? data.deck
-        : data.title;
+        // The note type is the thing being changed AND its blast radius, so
+        // it earns the location slot (the eyebrow already says the kind).
+        : data.kind === "note_type_op"
+          ? data.note_type
+          : data.title;
 
   const previews = asPreviews(data.previews);
 
@@ -801,6 +806,11 @@ function LegacyProposalCard({ data, store }: ProposalCardProps) {
         </div>
       ) : data.rationale ? (
         <div className="cwyc-proposal-rationale">{data.rationale}</div>
+      ) : null}
+      {pending && data.revertible === false ? (
+        <div className="cwyc-proposal-irreversible" data-testid="proposal-irreversible">
+          Cannot be undone from here — a backup is taken first
+        </div>
       ) : null}
       {warnings.map((warning, i) => (
         <div className="cwyc-proposal-warning" key={i}>

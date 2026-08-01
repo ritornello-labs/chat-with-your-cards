@@ -105,6 +105,10 @@ export interface ProposalPayload {
     src: string;
     bytes?: number;
   }[];
+  /** Whether accepting this can be undone from the dock (#7). Absent when the
+   *  proposal kind's default decides; false is the card's red irreversibility
+   *  line. */
+  revertible?: boolean;
   /** Edit only (#24a): the note's OTHER fields, unchanged by this proposal.
    *  Read-only review context - the card keeps them collapsed by default so
    *  the diff stays the thing you actually see. */

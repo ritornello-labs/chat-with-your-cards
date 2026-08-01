@@ -3333,6 +3333,167 @@ def _run_checks() -> dict[str, Any]:
     check("edit proposals: media strip, collapsed context, per-field skip (#24)",
           _edit_media_context_and_skip)
 
+    def _note_type_write_path() -> dict[str, Any]:
+        """#7 against the REAL note-type backend, in a disposable profile.
+
+        The unit lane for this family (tests/test_note_types_real_anki.py) runs
+        against the real anki lib but is SKIPPED wherever the lib is missing -
+        which is every CI env we have. This is the check that always runs, and
+        it covers the two claims a library-only test cannot make: the proposal
+        card renders its irreversibility line for the destructive sub-ops, and
+        the whole path works inside a live Anki with the dock attached.
+
+        Sequence: clone a note type -> add a template (cards appear) -> edit
+        its source -> revert that edit -> remove the template (cards die, not
+        revertible) -> remove a field carrying content (the loud one).
+        """
+        models = mw.col.models
+        base = models.by_name("Basic")
+        if base is None:
+            raise AssertionError("precondition: no Basic note type")
+        for stale in ("CWYC Probe Type",):
+            existing = models.by_name(stale)
+            if existing is not None:
+                models.remove(existing["id"])
+
+        results: dict[str, Any] = {}
+
+        clone = state.proposals.submit_create_note_type(
+            {"name": "CWYC Probe Type", "clone_from": "Basic"}
+        )
+        state.proposals.accept({"id": clone["proposal_id"]})
+        probe = models.by_name("CWYC Probe Type")
+        if probe is None:
+            raise AssertionError("clone did not create the note type")
+
+        # Three notes on the clone, so template ops have something to act on.
+        note_ids = []
+        for i in range(3):
+            note = mw.col.new_note(probe)
+            note["Front"] = f"probe front {i}"
+            note["Back"] = f"probe back {i}"
+            mw.col.add_note(note, mw.col.decks.id("Default"))
+            note_ids.append(note.id)
+        cards_before = mw.col.card_count()
+
+        added = state.proposals.submit_manage_card_templates(
+            {
+                "note_type": "CWYC Probe Type",
+                "op": "add",
+                "template": "Probe Reverse",
+                "qfmt": "{{Back}}",
+                "afmt": "{{FrontSide}}<hr id=answer>{{Front}}",
+            }
+        )
+        state.proposals.accept({"id": added["proposal_id"]})
+        cards_after_add = mw.col.card_count()
+        if cards_after_add != cards_before + 3:
+            raise AssertionError(
+                f"add template made {cards_after_add - cards_before} cards, expected 3"
+            )
+        results["cards_added"] = cards_after_add - cards_before
+
+        # Source edit + revert: the reversible half, through the real backend.
+        edit = state.proposals.submit_set_card_template(
+            {
+                "note_type": "CWYC Probe Type",
+                "template": "Probe Reverse",
+                "qfmt": "{{Back}}<div class=probe>x</div>",
+            }
+        )
+        state.proposals.accept({"id": edit["proposal_id"]})
+        live = models.by_name("CWYC Probe Type")["tmpls"][1]["qfmt"]
+        if "class=probe" not in live:
+            raise AssertionError(f"template edit did not apply: {live!r}")
+        state.proposals.revert({"id": edit["proposal_id"]})
+        live = models.by_name("CWYC Probe Type")["tmpls"][1]["qfmt"]
+        if "class=probe" in live:
+            raise AssertionError(f"template revert did not restore: {live!r}")
+        results["template_edit_reverted"] = True
+
+        # The destructive one, reviewed through the real DOM: the card must
+        # carry the irreversibility line BEFORE it is accepted.
+        removal = state.proposals.submit_manage_card_templates(
+            {"note_type": "CWYC Probe Type", "op": "remove", "template": "Probe Reverse"}
+        )
+
+        def _card_flags() -> Any:
+            return _eval_js(
+                dock.web,
+                "(function() {"
+                "  var cards = document.querySelectorAll('[data-testid=proposal-card]');"
+                "  var p = cards[cards.length - 1];"
+                "  if (!p) return null;"
+                "  return {irreversible: !!p.querySelector("
+                "            '[data-testid=proposal-irreversible]'),"
+                "          kind: (p.querySelector('.cwyc-proposal-kind')||{}).textContent,"
+                "          where: (p.querySelector('.cwyc-proposal-where')||{}).textContent,"
+                "          warnings: p.querySelectorAll('.cwyc-proposal-warning').length};"
+                "})();",
+                DOM_TIMEOUT_MS,
+                "note-type proposal card flags",
+            )
+
+        _wait_until(
+            lambda: bool((_card_flags() or {}).get("irreversible")),
+            STREAM_TIMEOUT_MS,
+            "the irreversibility line on a destructive note-type card",
+        )
+        flags = _card_flags()
+        if flags.get("kind") != "Note type change":
+            raise AssertionError(f"wrong kind label: {flags}")
+        if flags.get("where") != "CWYC Probe Type":
+            raise AssertionError(f"wrong location label: {flags}")
+        results["card_flags"] = flags
+
+        state.proposals.accept({"id": removal["proposal_id"]})
+        if mw.col.card_count() != cards_before:
+            raise AssertionError(
+                f"remove template left {mw.col.card_count()} cards, expected {cards_before}"
+            )
+
+        # Field removal: content census + the silent-rewrite report.
+        field_add = state.proposals.submit_manage_note_type_fields(
+            {"note_type": "CWYC Probe Type", "op": "add", "field": "Hint"}
+        )
+        state.proposals.accept({"id": field_add["proposal_id"]})
+        note = mw.col.get_note(note_ids[0])
+        note["Hint"] = "doomed content"
+        mw.col.update_note(note)
+        removal2 = state.proposals.submit_manage_note_type_fields(
+            {"note_type": "CWYC Probe Type", "op": "remove", "field": "Hint"}
+        )
+        pending = state.proposals._proposals[removal2["proposal_id"]]
+        blurb = " ".join(pending.warnings)
+        if "1 note(s) have content in this field" not in blurb:
+            raise AssertionError(f"content census missing: {blurb}")
+        if pending.revertible is not False:
+            raise AssertionError("field removal must be marked non-revertible")
+        state.last_checkpoint = None
+        state.proposals.accept({"id": removal2["proposal_id"]})
+        if "Hint" in [f["name"] for f in models.by_name("CWYC Probe Type")["flds"]]:
+            raise AssertionError("field was not removed")
+        # A non-revertible op must checkpoint first, CRITICALLY (a failure has
+        # to abort the write). Asserting on the backup FILE count would be
+        # wrong: create_backup(force=True) legitimately declines to write a new
+        # file when nothing changed since the last one, and the add-on
+        # correctly reads that as "a good backup already exists".
+        checkpoint = state.last_checkpoint
+        if not checkpoint:
+            raise AssertionError("destructive note-type op took no checkpoint")
+        if not checkpoint.get("critical"):
+            raise AssertionError(f"checkpoint was not critical: {checkpoint}")
+        if checkpoint.get("error"):
+            raise AssertionError(f"checkpoint errored: {checkpoint}")
+        results["checkpoint"] = checkpoint
+
+        # Leave the profile as we found it.
+        models.remove(models.by_name("CWYC Probe Type")["id"])
+        return results
+
+    check("note-type write path: clone, templates, fields, revert (#7)",
+          _note_type_write_path)
+
     def _tool_approval_round_trip() -> dict[str, Any]:
         """Task #17 end-to-end against the REAL broker. The bug was that
         approvals.py blocked an MCP thread for 120s on an answer the UI could
