@@ -149,8 +149,8 @@ to say "this needs a full upload".
 - **Export** (.apkg / plain text / .colpkg) — read-only w.r.t. the collection.
 - **Saved searches** — trivial, and per a hard-won APKG lesson, saved searches are how curricula ship (`.apkg` drops filtered decks).
 - **Open Browse at a query** — hand off to the real UI instead of pasting text summaries.
-- **Preferences** (next-day-starts-at, learn-ahead, timebox, ignore-accents-in-search — the last directly changes how `search_notes` behaves, so at minimum we should *read* it).
-- **FSRS optimize / evaluate / simulate** — we can *write* `params` but cannot *compute* them.
+- ~~**Preferences**~~ — **done 2026-08-01** (#14): `get_preferences` reads everything (annotating `ignore_accents_in_search`, which changes what our own searches match) and `set_preferences` proposes an allowlisted subset. Backup retention is readable but not settable: it is the safety net the destructive proposals promise.
+- ~~**FSRS optimize / evaluate / simulate**~~ — **done 2026-08-01** (#13): four read-only compute tools on a new `long_running` lane (Anki's collection worker, not the Qt main thread). Applying a result stays `set_deck_options`.
 
 ### Probably should stay human-only
 

@@ -167,6 +167,30 @@ NOTE_TYPE_OPS: dict[str, dict[str, Any]] = {
 # content; cards and their review history).
 DESTRUCTIVE_SUBOPS = {"remove"}
 
+# Collection preferences the agent may PROPOSE changing (#14), as dotted paths
+# into Anki's Preferences protobuf, with the range each accepts.
+#
+# `backups.*` is deliberately absent from this map while being fully readable:
+# backup retention is the safety net that every destructive proposal in this
+# add-on leans on ("a backup is taken first"), and an assistant quietly
+# lowering it would weaken the guarantee it just made. Changing it stays a
+# human job in Anki's own Preferences dialog.
+PREFERENCE_PATHS: dict[str, tuple[str, Any]] = {
+    "scheduling.rollover": ("hour the next day starts at", (0, 23)),
+    "scheduling.learn_ahead_secs": ("learn-ahead window, seconds", (0, 86_400)),
+    "scheduling.new_review_mix": ("0 distribute, 1 reviews first, 2 new first", (0, 2)),
+    "scheduling.day_learn_first": ("show learning cards before reviews", bool),
+    "reviewing.time_limit_secs": ("timebox, seconds (0 = off)", (0, 86_400)),
+    "reviewing.show_remaining_due_counts": ("show due counts while reviewing", bool),
+    "reviewing.show_intervals_on_buttons": ("show next intervals on buttons", bool),
+    "reviewing.hide_audio_play_buttons": ("hide audio replay buttons", bool),
+    "reviewing.interrupt_audio_when_answering": ("cut audio when answering", bool),
+    "editing.ignore_accents_in_search": ("ignore accents in search", bool),
+    "editing.default_search_text": ("Browse's default search", str),
+    "editing.paste_strips_formatting": ("strip formatting on paste", bool),
+    "editing.adding_defaults_to_current_deck": ("Add uses the current deck", bool),
+}
+
 FIELD_SUBOPS = ("add", "rename", "reposition", "remove")
 TEMPLATE_SUBOPS = ("add", "rename", "reposition", "remove")
 MAX_NOTE_TYPE_SOURCE_CHARS = 50_000
@@ -2394,6 +2418,79 @@ class ProposalManager:
             warnings=warnings,
         )
 
+    def submit_set_preferences(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Collection-wide preferences (#14). Rides the deck_op kind, like
+        saved searches - both are collection config rather than notes."""
+        col = self._col()
+        raw = args.get("preferences")
+        if not isinstance(raw, dict) or not raw:
+            raise ProposalError(
+                "preferences must be an object of dotted path -> value, e.g. "
+                '{"scheduling.rollover": 4}'
+            )
+        prefs = col.get_preferences()
+        changes: dict[str, Any] = {}
+        priors: dict[str, Any] = {}
+        samples: list[str] = []
+        warnings: list[str] = []
+        for path, value in raw.items():
+            path = str(path)
+            if path not in PREFERENCE_PATHS:
+                if path.startswith("backups."):
+                    raise ProposalError(
+                        "backup retention is not settable from here: every "
+                        "destructive proposal in this add-on promises a backup "
+                        "first, so lowering it would weaken that guarantee. "
+                        "Change it in Anki's Preferences if you mean to."
+                    )
+                raise ProposalError(
+                    f"unknown or non-settable preference {path!r}; settable: "
+                    f"{sorted(PREFERENCE_PATHS)}"
+                )
+            label, spec = PREFERENCE_PATHS[path]
+            group, leaf = path.split(".", 1)
+            current = getattr(getattr(prefs, group), leaf)
+            if spec is bool:
+                if not isinstance(value, bool):
+                    raise ProposalError(f"{path} takes true or false, got {value!r}")
+                coerced: Any = value
+            elif spec is str:
+                coerced = str(value)
+            else:
+                low, high = spec
+                try:
+                    coerced = int(value)
+                except (TypeError, ValueError):
+                    raise ProposalError(f"{path} takes a whole number") from None
+                if not low <= coerced <= high:
+                    raise ProposalError(f"{path} must be between {low} and {high}")
+            if coerced == current:
+                continue
+            changes[path] = coerced
+            priors[path] = current
+            samples.append(f"{label}: {current!r} → {coerced!r}")
+        if not changes:
+            raise ProposalError("no effective change: those values already match")
+        if "scheduling.rollover" in changes:
+            warnings.append(
+                "changing the day-start hour shifts what counts as due today "
+                "across the whole collection"
+            )
+        if changes.get("editing.ignore_accents_in_search") is not None:
+            warnings.append(
+                "this also changes what my own searches match, so earlier "
+                "answers in this chat may no longer reproduce exactly"
+            )
+        return self._deck_op_proposal(
+            op="set_preferences",
+            op_args={"changes": changes, "priors": priors},
+            deck="",
+            rationale=str(args.get("rationale", "")),
+            samples=samples,
+            count=len(changes),
+            warnings=warnings,
+        )
+
     def submit_manage_saved_search(self, args: dict[str, Any]) -> dict[str, Any]:
         """Saved searches (#12b): Browse-sidebar entries in collection
         config - the curricula shipping vehicle (filtered decks do not
@@ -4549,6 +4646,21 @@ class ProposalManager:
                         },
                     )
                 )
+            elif proposal.op == "set_preferences":
+                prefs = col.get_preferences()
+                for path, value in a["changes"].items():
+                    group, leaf = path.split(".", 1)
+                    setattr(getattr(prefs, group), leaf, value)
+                col.set_preferences(prefs)
+                self._ledger.append(
+                    LedgerEntry(
+                        id=proposal.id,
+                        kind="deck_op",
+                        note_id=0,
+                        label=f"{len(a['changes'])} preference change(s)",
+                        data={"op": "set_preferences", "priors": a["priors"]},
+                    )
+                )
             elif proposal.op == "saved_search":
                 saved = dict(col.get_config("savedFilters", {}) or {})
                 name = a["name"]
@@ -6213,6 +6325,12 @@ class ProposalManager:
                     node, leaf = self._resolve_option(conf, path)
                     node[leaf] = prior
                 col.decks.update_config(conf)
+            elif op == "set_preferences":
+                prefs = col.get_preferences()
+                for path, prior in entry.data["priors"].items():
+                    group, leaf = path.split(".", 1)
+                    setattr(getattr(prefs, group), leaf, prior)
+                col.set_preferences(prefs)
             elif op == "saved_search":
                 saved = dict(col.get_config("savedFilters", {}) or {})
                 prior = entry.data.get("prior")

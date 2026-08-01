@@ -88,6 +88,12 @@ const TOOL_LABELS: Record<string, string> = {
   create_note_type: "Proposed a new note type",
   change_note_type: "Proposed converting notes",
   remove_empty_cards: "Proposed removing empty cards",
+  fsrs_optimize: "Optimized FSRS parameters",
+  fsrs_evaluate: "Measured FSRS accuracy",
+  fsrs_simulate: "Simulated your future workload",
+  fsrs_optimal_retention: "Computed optimal retention",
+  get_preferences: "Read your Anki preferences",
+  set_preferences: "Proposed preference changes",
   defer_card: "Set the card aside",
   undefer_card: "Brought a card back",
 };

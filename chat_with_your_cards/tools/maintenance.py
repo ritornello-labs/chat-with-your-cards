@@ -110,7 +110,87 @@ def sync_now(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     return ctx.proposals.submit_sync_now(args)
 
 
+def get_preferences(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    """Collection-wide preferences (#14), annotated.
+
+    `ignore_accents_in_search` is the one that matters to me directly: it
+    changes what my OWN searches match, so a search that found nothing may
+    just be this setting.
+    """
+    prefs = ctx.col.get_preferences()
+
+    def group(message: Any) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for field in message.DESCRIPTOR.fields:
+            value = getattr(message, field.name)
+            out[field.name] = value if not hasattr(value, "DESCRIPTOR") else group(value)
+        return out
+
+    scheduling = group(prefs.scheduling)
+    editing = group(prefs.editing)
+    return {
+        "scheduling": scheduling,
+        "reviewing": group(prefs.reviewing),
+        "editing": editing,
+        "backups": group(prefs.backups),
+        "notes": [
+            f"the day rolls over at {scheduling.get('rollover')}:00 - "
+            "'due today' is measured from there, not midnight",
+            (
+                "accents are IGNORED in search, so 'cafe' matches 'café'"
+                if editing.get("ignore_accents_in_search")
+                else "accents are SIGNIFICANT in search, so 'cafe' does NOT "
+                "match 'café' - worth remembering when a search finds nothing"
+            ),
+            "backup retention is readable here but not settable by me: it is "
+            "the safety net the destructive proposals rely on",
+        ],
+    }
+
+
+def set_preferences(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    return ctx.proposals.submit_set_preferences(args)
+
+
 def register_maintenance_tools(registry: ToolRegistry) -> None:
+    registry.register(
+        ToolSpec(
+            "get_preferences",
+            "Read Anki's collection-wide preferences: day-rollover hour, "
+            "learn-ahead window, timebox, review display, editing options, and "
+            "backup retention. Check `ignore_accents_in_search` when a search "
+            "surprises you - it changes what search_notes matches.",
+            {"type": "object", "properties": {}},
+            get_preferences,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            "set_preferences",
+            "Propose changes to collection preferences, as dotted paths "
+            "(e.g. {\"scheduling.rollover\": 4, \"reviewing.time_limit_secs\": 0}). "
+            "Collection-wide and reviewed by the user like any other change. "
+            "Backup retention is deliberately not settable here.",
+            {
+                "type": "object",
+                "properties": {
+                    "preferences": {
+                        "type": "object",
+                        "description": "Dotted path -> new value. Call "
+                        "get_preferences first to see the current values and "
+                        "the exact path names.",
+                    },
+                    "rationale": {
+                        "type": "string",
+                        "description": "One sentence: why this helps",
+                    },
+                },
+                "required": ["preferences"],
+            },
+            set_preferences,
+            writes=True,
+        )
+    )
     registry.register(
         ToolSpec(
             "get_undo_status",

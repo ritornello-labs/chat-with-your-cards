@@ -109,6 +109,11 @@ SKILL_REVIEW_PROMPT = (
 
 USER_FILES = Path(__file__).resolve().parent / "user_files"
 
+# Ceiling for a `long_running` tool (#13). FSRS optimization is minutes on a
+# large collection, and the agent must be told to narrow its search rather
+# than left waiting forever on a call that will never come back.
+LONG_TOOL_TIMEOUT_S = 900.0
+
 
 @dataclass
 class AddonState:
@@ -897,6 +902,49 @@ def _ensure_mcp() -> tuple[str, str]:
                     raise PermissionError(f"the user declined this {name} call")
             box: dict[str, Any] = {}
             done = threading.Event()
+
+            if spec is not None and spec.long_running:
+                # Seconds-to-minutes of compute (FSRS optimization, #13). The
+                # main thread would freeze Anki and blow the 15s wait below,
+                # and a thread of our own must never touch mw.col (SAFETY.md
+                # hazard 19). QueryOp runs it on Anki's own single collection
+                # worker with a progress dialog the user can see.
+                def start_long() -> None:
+                    from aqt.operations import QueryOp
+
+                    if mw.col is None:
+                        box["error"] = RuntimeError("collection is not open")
+                        done.set()
+                        return
+
+                    def work(_col: Any) -> Any:
+                        return registry.call(ctx, name, args)
+
+                    def succeeded(value: Any) -> None:
+                        box["result"] = value
+                        done.set()
+
+                    def failed(exc: Exception) -> None:
+                        box["error"] = exc
+                        done.set()
+
+                    (
+                        QueryOp(parent=mw, op=work, success=succeeded)
+                        .failure(failed)
+                        .with_progress(spec.progress_label)
+                        .run_in_background()
+                    )
+
+                mw.taskman.run_on_main(start_long)
+                if not done.wait(timeout=LONG_TOOL_TIMEOUT_S):
+                    raise TimeoutError(
+                        f"{name} did not finish within "
+                        f"{int(LONG_TOOL_TIMEOUT_S)}s; narrow it with a `search` "
+                        "so it has less review history to chew through"
+                    )
+                if "error" in box:
+                    raise box["error"]
+                return box["result"]
 
             def run() -> None:
                 try:

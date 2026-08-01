@@ -54,6 +54,15 @@ class ToolSpec:
     # takes `fields` as an alias for `field_changes`). Anything here is exempt
     # from the unknown-argument check; everything else must be in the schema.
     extra_args: frozenset[str] = frozenset()
+    # Runs on Anki's COLLECTION worker behind a progress dialog instead of the
+    # Qt main thread (#13). FSRS optimization is seconds-to-minutes of pure
+    # compute; on the main thread it freezes Anki and blows execute_tool's 15s
+    # marshalling timeout, and moving it off Anki's single collection thread
+    # entirely is forbidden (SAFETY.md hazard 19: a stray thread touching
+    # mw.col poisons the backend mutex). QueryOp is exactly that worker.
+    long_running: bool = False
+    # Shown in the progress dialog while a long_running tool computes.
+    progress_label: str = "Working…"
 
 
 class ToolRegistry:

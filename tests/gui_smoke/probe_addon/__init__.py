@@ -3506,6 +3506,82 @@ def _run_checks() -> dict[str, Any]:
     check("note-type write path: clone, templates, fields, revert (#7)",
           _note_type_write_path)
 
+    def _fsrs_and_preferences() -> dict[str, Any]:
+        """#13/#14 inside a live Anki.
+
+        The claim only a real run can make: FSRS tools are marked
+        `long_running`, which routes them through Anki's COLLECTION worker via
+        QueryOp instead of the Qt main thread. On the main thread they freeze
+        Anki and blow execute_tool's 15s marshalling timeout; on a thread of
+        our own they would poison the backend mutex (SAFETY.md hazard 19).
+        Also checks the panic guard actually holds against the real backend -
+        an under-specified simulate request must never reach Rust.
+        """
+        from chat_with_your_cards.tools import build_registry
+        from chat_with_your_cards.tools.fsrs import fsrs_simulate
+
+        registry = build_registry()
+        specs = {spec.name: spec for spec in registry.specs(include_trusted=True)}
+        fsrs_names = [n for n in specs if n.startswith("fsrs_")]
+        if len(fsrs_names) != 4:
+            raise AssertionError(f"expected 4 fsrs tools, got {fsrs_names}")
+        for name in fsrs_names:
+            if not specs[name].long_running:
+                raise AssertionError(f"{name} would run on the Qt main thread")
+            if specs[name].writes:
+                raise AssertionError(f"{name} must be read-only")
+
+        class _Ctx:
+            col = mw.col
+            config: dict[str, Any] = {}
+
+            def push_ui(self, payload: dict[str, Any]) -> None:
+                pass
+
+        ctx = _Ctx()
+        # The panic guard, against the real backend: no params anywhere means
+        # we must refuse in Python. If this ever reaches Rust it does not fail
+        # the check - it kills the collection for the rest of the run.
+        try:
+            fsrs_simulate(ctx, {})
+            raise AssertionError("empty simulate request was not refused")
+        except ValueError as exc:
+            if "no FSRS parameters available" not in str(exc):
+                raise AssertionError(f"wrong refusal: {exc}") from None
+
+        # A fully-populated request must come back with a real projection.
+        projection = fsrs_simulate(
+            ctx, {"params": [0.4] * 19, "days_to_simulate": 14, "new_limit": 5}
+        )
+        if projection["days_simulated"] != 14:
+            raise AssertionError(f"bad projection: {projection}")
+
+        # Preferences: read, propose a change, apply, revert - real protobuf.
+        from chat_with_your_cards.tools.maintenance import get_preferences
+
+        prefs = get_preferences(ctx, {})
+        if "rollover" not in prefs["scheduling"]:
+            raise AssertionError(f"preferences read is malformed: {prefs}")
+        before = mw.col.get_preferences().scheduling.learn_ahead_secs
+        result = state.proposals.submit_set_preferences(
+            {"preferences": {"scheduling.learn_ahead_secs": before + 60}}
+        )
+        state.proposals.accept({"id": result["proposal_id"]})
+        if mw.col.get_preferences().scheduling.learn_ahead_secs != before + 60:
+            raise AssertionError("preference change did not apply")
+        state.proposals.revert({"id": result["proposal_id"]})
+        if mw.col.get_preferences().scheduling.learn_ahead_secs != before:
+            raise AssertionError("preference revert did not restore")
+        return {
+            "fsrs_tools": sorted(fsrs_names),
+            "projection_days": projection["days_simulated"],
+            "rollover": prefs["scheduling"]["rollover"],
+            "preference_reverted": True,
+        }
+
+    check("FSRS compute off the main thread + preferences round-trip (#13/#14)",
+          _fsrs_and_preferences)
+
     def _tool_approval_round_trip() -> dict[str, Any]:
         """Task #17 end-to-end against the REAL broker. The bug was that
         approvals.py blocked an MCP thread for 120s on an answer the UI could

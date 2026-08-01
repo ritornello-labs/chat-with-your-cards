@@ -692,6 +692,7 @@ def build_registry() -> ToolRegistry:
         registry.register(spec)
     from .decks import register_deck_tools
     from .documents import register_document_tools
+    from .fsrs import register_fsrs_tools
     from .grading import register_grading_tools
     from .learning import register_learning_tools
     from .media import register_media_tools
@@ -716,5 +717,6 @@ def build_registry() -> ToolRegistry:
     register_maintenance_tools(registry)
     register_gui_tools(registry)
     register_note_type_tools(registry)
+    register_fsrs_tools(registry)
     register_authoring_tools(registry)
     return registry
