@@ -88,6 +88,22 @@ def set_deck_limits(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     return ctx.proposals.submit_set_deck_limits(args)
 
 
+def delete_deck(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    return ctx.proposals.submit_delete_deck(args)
+
+
+def manage_options_preset(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    return ctx.proposals.submit_manage_preset(args)
+
+
+def assign_options_preset(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    return ctx.proposals.submit_assign_preset(args)
+
+
+def set_deck_description(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    return ctx.proposals.submit_set_deck_description(args)
+
+
 def create_deck(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     return ctx.proposals.submit_create_deck(args)
 
@@ -207,6 +223,97 @@ def register_deck_tools(registry: ToolRegistry) -> None:
                 "required": ["deck", "options"],
             },
             set_deck_options,
+            writes=True,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            "delete_deck",
+            "Delete a deck. A NORMAL deck's cards (and subdecks) die with "
+            "it - that case always requires explicit user confirmation, "
+            "takes a critical backup first, and is not revertible from the "
+            "chat. Deleting a FILTERED deck is mild: its cards return home "
+            "with scheduling intact.",
+            {
+                "type": "object",
+                "properties": {
+                    "deck": {"type": "string", "description": "Full deck path"},
+                    "rationale": {"type": "string"},
+                },
+                "required": ["deck"],
+            },
+            delete_deck,
+            writes=True,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            "manage_options_preset",
+            "Options-preset lifecycle: create (Anki defaults), clone an "
+            "existing preset, rename, or delete. Deleting drops its decks "
+            "to the Default preset and FORCES a one-way sync (check "
+            "get_sync_status first); revert recreates the preset and "
+            "reassigns. Clone + assign_options_preset is the right fix "
+            "when set_deck_options warns about a shared preset.",
+            {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["create", "clone", "rename", "delete"],
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "New preset name (create/clone/rename)",
+                    },
+                    "preset": {
+                        "type": "string",
+                        "description": "Existing preset (clone source, or "
+                        "the rename/delete target)",
+                    },
+                    "rationale": {"type": "string"},
+                },
+                "required": ["action"],
+            },
+            manage_options_preset,
+            writes=True,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            "assign_options_preset",
+            "Point a deck at an options preset; include_subdecks is Anki's "
+            "'Save to All Subdecks'. Revertible (restores each deck's prior "
+            "preset).",
+            {
+                "type": "object",
+                "properties": {
+                    "deck": {"type": "string"},
+                    "preset": {"type": "string"},
+                    "include_subdecks": {"type": "boolean", "default": False},
+                    "rationale": {"type": "string"},
+                },
+                "required": ["deck", "preset"],
+            },
+            assign_options_preset,
+            writes=True,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            "set_deck_description",
+            "Set (or clear with an empty string) a deck's description - the "
+            "text shown on its overview screen. HTML allowed. Revertible.",
+            {
+                "type": "object",
+                "properties": {
+                    "deck": {"type": "string"},
+                    "description": {"type": "string"},
+                    "rationale": {"type": "string"},
+                },
+                "required": ["deck", "description"],
+            },
+            set_deck_description,
             writes=True,
         )
     )

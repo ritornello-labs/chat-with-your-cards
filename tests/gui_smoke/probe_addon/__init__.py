@@ -814,6 +814,57 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
 
     check("safety net: inspected undo/check-db/sync/backup (#8)", _safety_net_flow)
 
+    def _deck_preset_flow() -> dict[str, Any]:
+        """#9 on real Anki: preset clone/assign/delete round-trip against the
+        real DeckManager (delete drops decks to Default; revert recreates
+        AND reassigns), deck description persists, and deleting a
+        card-carrying deck stays pending and then really deletes."""
+        col = mw.col
+        nid = _new_note("preset probe", deck="ProbePreset")
+        clone = proposals.submit_manage_preset(
+            {"action": "clone", "preset": "Default", "name": "Probe Focused"}
+        )
+        proposals.accept({"id": clone["proposal_id"]})
+        assign = proposals.submit_assign_preset(
+            {"deck": "ProbePreset", "preset": "Probe Focused"}
+        )
+        proposals.accept({"id": assign["proposal_id"]})
+        conf = col.decks.config_dict_for_deck_id(col.decks.id_for_name("ProbePreset"))
+        if conf.get("name") != "Probe Focused":
+            raise AssertionError(f"assign did not take: {conf.get('name')}")
+
+        deleted = proposals.submit_manage_preset(
+            {"action": "delete", "preset": "Probe Focused"}
+        )
+        proposals.accept({"id": deleted["proposal_id"]})
+        conf = col.decks.config_dict_for_deck_id(col.decks.id_for_name("ProbePreset"))
+        if conf.get("name") != "Default":
+            raise AssertionError("delete did not drop the deck to Default")
+        proposals.revert({"id": deleted["proposal_id"]})
+        conf = col.decks.config_dict_for_deck_id(col.decks.id_for_name("ProbePreset"))
+        if conf.get("name") != "Probe Focused":
+            raise AssertionError("preset-delete revert did not recreate+reassign")
+
+        desc = proposals.submit_set_deck_description(
+            {"deck": "ProbePreset", "description": "probe description"}
+        )
+        proposals.accept({"id": desc["proposal_id"]})
+        deck = col.decks.get(col.decks.id_for_name("ProbePreset"))
+        if deck.get("desc") != "probe description":
+            raise AssertionError("description did not persist")
+
+        removal = proposals.submit_delete_deck({"deck": "ProbePreset"})
+        if removal["status"] != "pending_user_review":
+            raise AssertionError("card-carrying deck delete auto-applied")
+        proposals.accept({"id": removal["proposal_id"]})
+        if col.decks.id_for_name("ProbePreset"):
+            raise AssertionError("deck still exists after delete")
+        if _note_exists(nid):
+            raise AssertionError("deck delete left its note behind")
+        return {"preset_roundtrip": True}
+
+    check("deck & preset management round-trip (#9)", _deck_preset_flow)
+
     def _change_set() -> dict[str, Any]:
         ids = [_new_note(f"cs {i}", back="orig") for i in range(3)]
         cs = proposals.open_change_set({"title": "probe sweep"})

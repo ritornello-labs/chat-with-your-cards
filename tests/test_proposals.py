@@ -197,6 +197,38 @@ class FakeDecks:
 
         self._configs[conf["id"]] = copy.deepcopy(conf)
 
+    # --- preset lifecycle (#9b), mirroring DeckManager ---
+
+    def all_config(self) -> list[dict[str, Any]]:
+        import copy
+
+        return [copy.deepcopy(c) for c in self._configs.values()]
+
+    def add_config(
+        self, name: str, clone_from: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        import copy
+
+        conf = copy.deepcopy(clone_from) if clone_from else {
+            "new": {"perDay": 20, "delays": [1.0, 10.0]},
+            "rev": {"perDay": 200, "maxIvl": 36500},
+        }
+        conf["id"] = max(self._configs) + 1
+        conf["name"] = name
+        self._configs[conf["id"]] = conf
+        return copy.deepcopy(conf)
+
+    def remove_config(self, conf_id: int) -> None:
+        # Mirror the backend: decks using it fall back to Default.
+        self._configs.pop(int(conf_id), None)
+        for deck in self._decks.values():
+            if int(deck.get("conf", 1)) == int(conf_id):
+                deck["conf"] = 1
+
+    def set_config_id_for_deck_dict(self, deck: dict[str, Any], conf_id: int) -> None:
+        self._decks[deck["id"]]["conf"] = int(conf_id)
+        deck["conf"] = int(conf_id)
+
     def new_filtered(self, name: str) -> int:
         return self._add(name, dyn=True)
 
@@ -1942,6 +1974,138 @@ class CardStateTests(unittest.TestCase):
         self.assertIn("Clear the flag", proposal["samples"][0]["text"])
         manager.accept({"id": result["proposal_id"]})
         self.assertIn("clear the flag on 3 card(s)", manager._ledger[-1].label)
+
+
+class DeckPresetTests(unittest.TestCase):
+    """Deck & preset management (#9): destructive delete always confirmed,
+    preset lifecycle with recreate-on-revert, assignment, description."""
+
+    def test_delete_deck_with_cards_never_auto_applies(self) -> None:
+        checkpoints: list = []
+        manager, col, pushed = make_manager(
+            {"permission_mode": "trusted-writes"}, checkpoints=checkpoints
+        )
+        _seed_notes(manager, col, pushed)
+        result = manager.submit_delete_deck({"deck": "Default"})
+        # Trusted mode would auto-apply anything else; a card-carrying deck
+        # delete must stay pending.
+        self.assertEqual("pending_user_review", result["status"])
+        proposal = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertTrue(any("DELETES 3 CARD" in w for w in proposal["warnings"]))
+        manager.accept({"id": result["proposal_id"]})
+        self.assertIn(("delete deck", True), checkpoints)  # critical backup
+        self.assertNotIn("Default", [d["name"] for d in col.decks.all()])
+        self.assertFalse(pushes_of(pushed, "proposal_resolved")[-1]["revertible"])
+
+    def test_delete_filtered_deck_is_mild(self) -> None:
+        manager, col, pushed = make_manager()
+        _seed_notes(manager, col, pushed)
+        manager.accept(
+            {
+                "id": manager.submit_create_filtered_deck(
+                    {"name": "Cram", "terms": [{"search": 'deck:"Default"', "limit": 5}]}
+                )["proposal_id"]
+            }
+        )
+        cram = col.decks.id_for_name("Cram")
+        self.assertTrue(any(c.did == cram for c in col._cards.values()))
+        result = manager.submit_delete_deck({"deck": "Cram"})
+        manager.accept({"id": result["proposal_id"]})
+        default = col.decks.id_for_name("Default")
+        self.assertTrue(all(c.did == default for c in col._cards.values()))
+
+    def test_preset_lifecycle_clone_rename_delete_and_revert(self) -> None:
+        manager, col, pushed = make_manager()
+        clone = manager.submit_manage_preset(
+            {"action": "clone", "preset": "Default", "name": "Focused"}
+        )
+        manager.accept({"id": clone["proposal_id"]})
+        self.assertIn("Focused", [c["name"] for c in col.decks.all_config()])
+
+        rename = manager.submit_manage_preset(
+            {"action": "rename", "preset": "Focused", "name": "Sharp"}
+        )
+        manager.accept({"id": rename["proposal_id"]})
+        self.assertIn("Sharp", [c["name"] for c in col.decks.all_config()])
+        manager.revert({"id": rename["proposal_id"]})
+        self.assertIn("Focused", [c["name"] for c in col.decks.all_config()])
+
+        assign = manager.submit_assign_preset(
+            {"deck": "Default", "preset": "Focused"}
+        )
+        manager.accept({"id": assign["proposal_id"]})
+        focused_id = next(
+            c["id"] for c in col.decks.all_config() if c["name"] == "Focused"
+        )
+        self.assertEqual(
+            focused_id, col.decks.get(col.decks.id_for_name("Default"))["conf"]
+        )
+
+        delete = manager.submit_manage_preset({"action": "delete", "preset": "Focused"})
+        proposal = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertTrue(any("one-way sync" in w for w in proposal["warnings"]))
+        manager.accept({"id": delete["proposal_id"]})
+        self.assertNotIn("Focused", [c["name"] for c in col.decks.all_config()])
+        self.assertEqual(1, col.decks.get(col.decks.id_for_name("Default"))["conf"])
+        # Revert recreates the preset with the same values and reassigns.
+        manager.revert({"id": delete["proposal_id"]})
+        restored = next(
+            (c for c in col.decks.all_config() if c["name"] == "Focused"), None
+        )
+        self.assertIsNotNone(restored)
+        self.assertEqual(
+            restored["id"], col.decks.get(col.decks.id_for_name("Default"))["conf"]
+        )
+
+    def test_default_preset_cannot_be_deleted(self) -> None:
+        manager, col, pushed = make_manager()
+        with self.assertRaisesRegex(ProposalError, "cannot be deleted"):
+            manager.submit_manage_preset({"action": "delete", "preset": "Default"})
+
+    def test_assign_with_subdecks_and_revert(self) -> None:
+        manager, col, pushed = make_manager()
+        col.decks._add("Focus")
+        col.decks._add("Focus::Child")
+        manager.accept(
+            {
+                "id": manager.submit_manage_preset(
+                    {"action": "create", "name": "Custom"}
+                )["proposal_id"]
+            }
+        )
+        custom_id = next(
+            c["id"] for c in col.decks.all_config() if c["name"] == "Custom"
+        )
+        assign = manager.submit_assign_preset(
+            {"deck": "Focus", "preset": "Custom", "include_subdecks": True}
+        )
+        manager.accept({"id": assign["proposal_id"]})
+        for name in ("Focus", "Focus::Child"):
+            self.assertEqual(
+                custom_id, col.decks.get(col.decks.id_for_name(name))["conf"]
+            )
+        manager.revert({"id": assign["proposal_id"]})
+        for name in ("Focus", "Focus::Child"):
+            self.assertEqual(1, col.decks.get(col.decks.id_for_name(name))["conf"])
+
+    def test_description_set_and_revert(self) -> None:
+        manager, col, pushed = make_manager()
+        result = manager.submit_set_deck_description(
+            {"deck": "Default", "description": "<b>Focus deck</b>"}
+        )
+        manager.accept({"id": result["proposal_id"]})
+        self.assertEqual(
+            "<b>Focus deck</b>",
+            col.decks.get(col.decks.id_for_name("Default"))["desc"],
+        )
+        manager.revert({"id": result["proposal_id"]})
+        self.assertEqual(
+            "", col.decks.get(col.decks.id_for_name("Default")).get("desc", "")
+        )
+        with self.assertRaisesRegex(ProposalError, "already reads"):
+            manager.submit_set_deck_description(
+                {"deck": "Default", "description": ""}
+            )
 
 
 class SafetyNetTests(unittest.TestCase):

@@ -1282,6 +1282,174 @@ class ProposalManager:
         proposal.status = ACCEPTED
         return []
 
+    def submit_delete_deck(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Delete a deck (#9a). Destructive for a normal deck - its cards
+        die with it - so that case is ALWAYS user-confirmed (even under
+        trusted-writes) with a critical backup at apply; a filtered deck is
+        the mild case (cards return home)."""
+        col = self._col()
+        name = str(args.get("deck", "")).strip()
+        did, deck = self._deck_by_name(col, name)
+        filtered = bool(deck.get("dyn"))
+        subdecks = [n for n in self._deck_names(col) if n.startswith(name + "::")]
+        escaped = name.replace('"', '\\"')
+        cards = len(list(col.find_cards(f'deck:"{escaped}"')))
+        warnings: list[str] = []
+        if filtered:
+            samples = [
+                f'Delete filtered deck "{name}" - its {cards} card(s) return '
+                "to their home decks with scheduling intact"
+            ]
+        else:
+            samples = [f'Delete deck "{name}"']
+            if subdecks:
+                samples.append(f"{len(subdecks)} subdeck(s) are deleted with it")
+            if cards:
+                warnings.append(
+                    f"THIS DELETES {cards} CARD(S) and their notes' review "
+                    "history with it - not revertible from the chat; a backup "
+                    "checkpoint is written first (File > Switch Profile "
+                    "restores it)"
+                )
+        proposal = Proposal(
+            id=self._next_id(),
+            kind="deck_op",
+            op="delete_deck",
+            op_args={"deck": name, "filtered": filtered, "cards": cards},
+            note_type="",
+            deck=name,
+            tags=[],
+            fields={},
+            rationale=str(args.get("rationale", "")),
+            count=cards,
+            samples=[{"text": line} for line in samples],
+            warnings=warnings,
+        )
+        if not filtered and cards:
+            # Destructive: never auto-applies, mirroring delete_notes.
+            self._proposals[proposal.id] = proposal
+            self._push({"type": "proposal", "proposal": proposal.to_payload()})
+            return {
+                "status": "pending_user_review",
+                "proposal_id": proposal.id,
+                "affected": cards,
+                "note": "Deleting a deck with cards always requires explicit "
+                "user confirmation.",
+            }
+        return self._finish_submission(proposal, 1)
+
+    def submit_manage_preset(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Options-preset lifecycle (#9b): create / clone / rename / delete."""
+        col = self._col()
+        action = str(args.get("action", "")).strip()
+        if action not in ("create", "clone", "rename", "delete"):
+            raise ProposalError("action must be create, clone, rename, or delete")
+        configs = {str(c.get("name", "")): c for c in col.decks.all_config()}
+        name = str(args.get("name", "")).strip()
+        preset = str(args.get("preset", "")).strip()
+        warnings: list[str] = []
+        if action in ("create", "clone"):
+            if not name:
+                raise ProposalError(f"{action} needs the new preset's `name`")
+            if name in configs:
+                raise ProposalError(f"a preset named {name!r} already exists")
+            if action == "clone":
+                if preset not in configs:
+                    raise ProposalError(
+                        f"no preset named {preset!r} to clone; presets: "
+                        + ", ".join(sorted(configs))
+                    )
+                samples = [f'Clone preset "{preset}" as "{name}"']
+            else:
+                samples = [f'Create preset "{name}" (Anki defaults)']
+            op_args = {"action": action, "name": name, "clone_from": preset}
+        elif action == "rename":
+            if preset not in configs:
+                raise ProposalError(f"no preset named {preset!r}")
+            if not name:
+                raise ProposalError("rename needs `name` (the new name)")
+            if name in configs:
+                raise ProposalError(f"a preset named {name!r} already exists")
+            samples = [f'Rename preset "{preset}" → "{name}"']
+            op_args = {"action": action, "preset": preset, "name": name}
+        else:  # delete
+            if preset not in configs:
+                raise ProposalError(f"no preset named {preset!r}")
+            if int(configs[preset].get("id", 0)) == 1:
+                raise ProposalError("the Default preset cannot be deleted")
+            using = self._decks_sharing_config(col, configs[preset].get("id"))
+            samples = [f'Delete preset "{preset}"']
+            warnings.append(
+                f"{using} deck(s) using it fall back to the Default preset; "
+                "deleting a preset forces a one-way sync (check "
+                "get_sync_status first). Revert recreates the preset with "
+                "the same values and reassigns those decks, but the forced "
+                "sync stands."
+            )
+            op_args = {"action": action, "preset": preset}
+        return self._deck_op_proposal(
+            op="manage_preset",
+            op_args=op_args,
+            deck="",
+            rationale=str(args.get("rationale", "")),
+            samples=samples,
+            warnings=warnings,
+        )
+
+    def submit_assign_preset(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Assign an options preset to a deck (#9b) - with include_subdecks,
+        Anki's "Save to All Subdecks". THE correct fix when set_deck_options
+        warns about a shared preset: clone, then assign the clone here."""
+        col = self._col()
+        deck_name = str(args.get("deck", "")).strip()
+        preset = str(args.get("preset", "")).strip()
+        _did, deck = self._deck_by_name(col, deck_name)
+        if deck.get("dyn"):
+            raise ProposalError("filtered decks have no options preset")
+        configs = {str(c.get("name", "")): c for c in col.decks.all_config()}
+        if preset not in configs:
+            raise ProposalError(
+                f"no preset named {preset!r}; presets: " + ", ".join(sorted(configs))
+            )
+        include_subdecks = bool(args.get("include_subdecks", False))
+        names = [deck_name]
+        if include_subdecks:
+            for n in self._deck_names(col):
+                if n.startswith(deck_name + "::"):
+                    _d, child = self._deck_by_name(col, n)
+                    if not child.get("dyn"):
+                        names.append(n)
+        samples = [
+            f'Assign preset "{preset}" to "{deck_name}"'
+            + (f" and {len(names) - 1} subdeck(s)" if len(names) > 1 else "")
+        ]
+        return self._deck_op_proposal(
+            op="assign_preset",
+            op_args={"decks": names, "preset": preset},
+            deck=deck_name,
+            rationale=str(args.get("rationale", "")),
+            samples=samples,
+            count=len(names),
+        )
+
+    def submit_set_deck_description(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Deck description (#9c) - shown on the deck's congrats/overview."""
+        col = self._col()
+        deck_name = str(args.get("deck", "")).strip()
+        _did, deck = self._deck_by_name(col, deck_name)
+        description = str(args.get("description", ""))
+        old = str(deck.get("desc", ""))
+        if description == old:
+            raise ProposalError("the description already reads exactly that")
+        preview = " ".join(description.split())[:80] or "(cleared)"
+        return self._deck_op_proposal(
+            op="set_deck_description",
+            op_args={"deck": deck_name, "description": description},
+            deck=deck_name,
+            rationale=str(args.get("rationale", "")),
+            samples=[f'Description for "{deck_name}": {preview}'],
+        )
+
     def submit_undo_change(self, args: dict[str, Any]) -> dict[str, Any]:
         """Undo Anki's queue head (#8) - INSPECTED, never blind.
 
@@ -1885,7 +2053,9 @@ class ProposalManager:
         if shared > 1:
             warnings.append(
                 f'options preset "{conf.get("name", "")}" is shared by '
-                f"{shared} decks - changes affect all of them"
+                f"{shared} decks - changes affect all of them. To change "
+                "just this deck: manage_options_preset action=clone, then "
+                "assign_options_preset."
             )
         return self._deck_op_proposal(
             op="set_deck_options",
@@ -3207,6 +3377,9 @@ class ProposalManager:
         # repair and a sync have no meaningful inverse here.
         if proposal.op in ("undo_change", "check_database", "sync_now"):
             return False
+        # Deleting a deck deletes its cards (#9a); the backup is the way back.
+        if proposal.op == "delete_deck":
+            return False
         # Registry-only cleanup: a tag reappears the moment a note uses it.
         if proposal.op == "clear_unused_tags":
             return False
@@ -3382,6 +3555,153 @@ class ProposalManager:
                             "op": "update_filtered_deck",
                             "deck": a["deck"],
                             "priors": priors,
+                        },
+                    )
+                )
+            elif proposal.op == "delete_deck":
+                did, deck = self._deck_by_name(col, a["deck"])
+                destructive = not a.get("filtered") and int(a.get("cards", 0)) > 0
+                if destructive and not self._checkpoint("delete deck", True):
+                    raise ProposalError(
+                        "backup failed; deck not deleted — check disk space / "
+                        "permissions"
+                    )
+                col.decks.remove([did])
+                proposal.warnings = list(proposal.warnings) + [
+                    (
+                        f'removed filtered deck "{a["deck"]}"; its cards are '
+                        "back in their home decks"
+                        if a.get("filtered")
+                        else f'removed deck "{a["deck"]}" and {a.get("cards", 0)} '
+                        "card(s)"
+                    )
+                ]
+                # No ledger entry: not revertible (backup is the way back).
+            elif proposal.op == "manage_preset":
+                action = a["action"]
+                configs = {
+                    str(c.get("name", "")): c for c in col.decks.all_config()
+                }
+                if action in ("create", "clone"):
+                    if a["name"] in configs:
+                        raise ProposalError(f"a preset named {a['name']!r} exists now")
+                    clone_from = (
+                        configs.get(a.get("clone_from", "")) if action == "clone" else None
+                    )
+                    if action == "clone" and clone_from is None:
+                        raise ProposalError(
+                            f"preset {a.get('clone_from')!r} is gone; cannot clone"
+                        )
+                    conf = col.decks.add_config(a["name"], clone_from=clone_from)
+                    self._ledger.append(
+                        LedgerEntry(
+                            id=proposal.id,
+                            kind="deck_op",
+                            note_id=0,
+                            label=f'{action} preset "{a["name"]}"',
+                            data={
+                                "op": "manage_preset",
+                                "action": action,
+                                "conf_id": int(conf["id"]),
+                                "name": a["name"],
+                            },
+                        )
+                    )
+                elif action == "rename":
+                    conf = configs.get(a["preset"])
+                    if conf is None:
+                        raise ProposalError(f"preset {a['preset']!r} is gone")
+                    conf["name"] = a["name"]
+                    col.decks.update_config(conf)
+                    self._ledger.append(
+                        LedgerEntry(
+                            id=proposal.id,
+                            kind="deck_op",
+                            note_id=0,
+                            label=f'rename preset "{a["preset"]}" → "{a["name"]}"',
+                            data={
+                                "op": "manage_preset",
+                                "action": "rename",
+                                "old": a["preset"],
+                                "new": a["name"],
+                            },
+                        )
+                    )
+                else:  # delete
+                    conf = configs.get(a["preset"])
+                    if conf is None:
+                        raise ProposalError(f"preset {a['preset']!r} is already gone")
+                    conf_id = int(conf["id"])
+                    using = [
+                        d["name"]
+                        for d in col.decks.all()
+                        if int(d.get("conf", 1)) == conf_id and not d.get("dyn")
+                    ]
+                    import copy as _copy
+
+                    snapshot = _copy.deepcopy(conf)
+                    col.decks.remove_config(conf_id)
+                    self._ledger.append(
+                        LedgerEntry(
+                            id=proposal.id,
+                            kind="deck_op",
+                            note_id=0,
+                            label=f'delete preset "{a["preset"]}"',
+                            data={
+                                "op": "manage_preset",
+                                "action": "delete",
+                                "config": snapshot,
+                                "decks": using,
+                            },
+                        )
+                    )
+                    proposal.warnings = list(proposal.warnings) + [
+                        f"{len(using)} deck(s) now use the Default preset"
+                    ]
+            elif proposal.op == "assign_preset":
+                configs = {
+                    str(c.get("name", "")): c for c in col.decks.all_config()
+                }
+                conf = configs.get(a["preset"])
+                if conf is None:
+                    raise ProposalError(f"preset {a['preset']!r} is gone")
+                assign_priors: dict[str, int] = {}
+                for deck_name in a["decks"]:
+                    try:
+                        _did, deck = self._deck_by_name(col, deck_name)
+                    except ProposalError:
+                        continue
+                    if deck.get("dyn"):
+                        continue
+                    assign_priors[deck_name] = int(deck.get("conf", 1))
+                    col.decks.set_config_id_for_deck_dict(deck, conf["id"])
+                if not assign_priors:
+                    raise ProposalError("none of those decks exist anymore")
+                self._ledger.append(
+                    LedgerEntry(
+                        id=proposal.id,
+                        kind="deck_op",
+                        note_id=0,
+                        label=f'assign preset "{a["preset"]}" '
+                        f"({len(assign_priors)} deck(s))",
+                        data={"op": "assign_preset", "priors": assign_priors},
+                    )
+                )
+            elif proposal.op == "set_deck_description":
+                did, deck = self._deck_by_name(col, a["deck"])
+                prior_desc = str(deck.get("desc", ""))
+                deck["desc"] = str(a["description"])
+                col.decks.save(deck)
+                self._ledger.append(
+                    LedgerEntry(
+                        id=proposal.id,
+                        kind="deck_op",
+                        note_id=0,
+                        label=f'description for "{a["deck"]}"',
+                        data={
+                            "op": "set_deck_description",
+                            "deck": a["deck"],
+                            "prior": prior_desc,
                         },
                     )
                 )
@@ -4468,6 +4788,63 @@ class ProposalManager:
                     node, leaf = self._resolve_option(conf, path)
                     node[leaf] = prior
                 col.decks.update_config(conf)
+            elif op == "manage_preset":
+                action = entry.data["action"]
+                if action in ("create", "clone"):
+                    conf_id = int(entry.data["conf_id"])
+                    used_by = [
+                        d["name"]
+                        for d in col.decks.all()
+                        if int(d.get("conf", 1)) == conf_id
+                    ]
+                    if used_by:
+                        raise ProposalError(
+                            f"preset {entry.data['name']!r} is now used by "
+                            f"{len(used_by)} deck(s); reassign them first"
+                        )
+                    col.decks.remove_config(conf_id)
+                elif action == "rename":
+                    configs = {
+                        str(c.get("name", "")): c for c in col.decks.all_config()
+                    }
+                    conf = configs.get(entry.data["new"])
+                    if conf is None:
+                        raise ProposalError(
+                            f"preset {entry.data['new']!r} is gone; nothing to rename"
+                        )
+                    conf["name"] = entry.data["old"]
+                    col.decks.update_config(conf)
+                else:  # delete: recreate with the same values, reassign decks
+                    configs = {
+                        str(c.get("name", "")): c for c in col.decks.all_config()
+                    }
+                    if entry.data["config"]["name"] in configs:
+                        raise ProposalError(
+                            f"a preset named {entry.data['config']['name']!r} "
+                            "exists again; nothing restored"
+                        )
+                    conf = col.decks.add_config(
+                        entry.data["config"]["name"],
+                        clone_from=entry.data["config"],
+                    )
+                    for deck_name in entry.data.get("decks", []):
+                        try:
+                            _did, deck = self._deck_by_name(col, deck_name)
+                        except ProposalError:
+                            continue
+                        col.decks.set_config_id_for_deck_dict(deck, conf["id"])
+            elif op == "assign_preset":
+                for deck_name, prior_conf in entry.data.get("priors", {}).items():
+                    try:
+                        _did, deck = self._deck_by_name(col, deck_name)
+                    except ProposalError:
+                        continue
+                    deck["conf"] = int(prior_conf)
+                    col.decks.save(deck)
+            elif op == "set_deck_description":
+                _did, deck = self._deck_by_name(col, entry.data["deck"])
+                deck["desc"] = str(entry.data.get("prior", ""))
+                col.decks.save(deck)
             elif op == "set_deck_limits":
                 for name, prior in entry.data["priors"].items():
                     try:

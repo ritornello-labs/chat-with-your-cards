@@ -41,6 +41,10 @@ const OP_LABELS: Record<string, string> = {
   undo_change: "Undo",
   check_database: "Check Database",
   sync_now: "Sync",
+  delete_deck: "Delete deck",
+  manage_preset: "Options preset",
+  assign_preset: "Assign preset",
+  set_deck_description: "Deck description",
 };
 
 /** What `count` counts - "400 item(s)" says less than nothing. Keyed by op,
