@@ -81,3 +81,39 @@ Five error species, with pipeline consequences:
 6. *(Bonus)* **Cross-lingual canonicalization works everywhere**: all
    seven models map Portuguese notes ("sistema PRICE", "equação
    característica") to English canonical names unprompted.
+
+### §11 adjudicated re-score (2026-07-31) + grading process rule
+
+Benchmark assets (harness, fixed sample, per-model results, alias tables)
+now live in the **private `anki-graph-bench` repo** — collection note text
+never enters this repo, which may go public. Run log there is authoritative.
+
+**Process rule (standing):** mechanical soft-match scoring is not quotable.
+Every benchmark run ends with a manual adjudication pass — a reviewer reads
+all recurring unmatched pred↔gold pairs and classifies each as alias
+(merge), distinct (ignore), or trap (document) — and only post-adjudication
+numbers count. The adjudication is cumulative and doubles as the seed of
+the production alias table.
+
+Run 2 (7 models, regenerated sample) after adjudication: 53 alias groups,
+normalizer fixes (accents/apostrophes/stem repairs), 5 degenerate notes
+excluded:
+
+| Model | soft F1 | soft P | soft R | Δ vs raw | cost |
+|---|---:|---:|---:|---:|---:|
+| Haiku 4.5 | .739 | .825 | .698 | +.031 | $0.12 |
+| GPT-5.6 Sol | .772 | .779 | .791 | +.042 | $0.90 |
+| GPT-5.6 Terra | .787 | .784 | .815 | +.054 | $0.14 |
+| Sonnet 5 | .808 | .864 | .776 | +.032 | $0.41 |
+| Kimi K3 | .832 | .862 | .825 | +.037 | $0.81 |
+| Opus 4.8 | .844 | .908 | .812 | +.030 | $0.73 |
+
+- The dialect tax was real and uneven: cross-family models gained most
+  (Terra +.054, Kimi +.037) — the family-bias correction §11 predicted.
+- **Terra strictly dominates Haiku** (equal price, +.048 F1, +.117 recall):
+  new budget-tier pick. **Sol is poor value** (Opus price, sub-Sonnet
+  quality, most over-generated names). Kimi nearly closes on Opus (.832 vs
+  .844) but stays slightly dominated and dropped a batch in both runs.
+- Run-to-run stability on the shared four models: ±.02 soft F1.
+- Decision unchanged: Fable 5 for Phase B; the remaining ~.16 gap at Opus
+  includes an unquantified concept-boundary-underdetermination floor.
