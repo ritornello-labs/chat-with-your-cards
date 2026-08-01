@@ -37,3 +37,47 @@ batch **again** — two-for-two on flaky batches, a real operational mark.
 **Decision unchanged:** Fable 5 for Phase B backfill + incremental. Updated
 secondary picks: Terra replaces Haiku as the budget/pre-pass option; Kimi K3
 loses on reliability (2/2 runs with dropped batches) despite decent quality.
+
+### §11 qualitative post-mortem (2026-07-31): reading the divergent judgments
+
+Manual review of the most divergent notes (lowest mean F1 across all six
+models vs gold, Haiku-blank cases, and OpenAI-low/Anthropic-high cases).
+Five error species, with pipeline consequences:
+
+1. **The degenerate-note underclass.** 5/300 notes have <60 chars of
+   stripped text — 4 of them because the real content is an `<img>` (LaTeX
+   screenshots) the HTML stripper deletes. On these, models split by
+   *policy*, not ability: Haiku/Terra/Opus/Sol blank ~60%, **Fable blanks
+   0%** — it salvages ("equação característica" recovered from a mangled
+   fragment; a header-only note correctly tagged "de morgan's laws").
+   → *Pipeline:* media-only/short notes get routed to a review lane, not
+   scored as extractions; production text extraction must at least detect
+   image-borne content (and `content_hash` must include media refs, else
+   image edits are invisible to the sweep).
+2. **Synonym tax / family dialects — the family bias made concrete.**
+   Terra/Sol say "mean square convergence"; Anthropic models say
+   "convergence in quadratic mean". Both are canonical textbook names;
+   word-Jaccard soft-match fails the pair; Terra/Sol eat a false penalty.
+   → The benchmark *underestimates* cross-family models; fair scoring would
+   re-score after alias normalization. Anthropic-vs-OpenAI gaps shrink;
+   within-family orderings unaffected.
+3. **Concept-boundary underdetermination.** The Chiswell-Hodges unique-
+   readability note yields five *defensible* framings across models
+   ("unique readability" / "structural induction" / "induction on formulas"
+   / "formula parsing"). The gold is a choice, not a truth — some of the
+   .18 gap between Opus and gold is irreducible naming freedom, not error.
+4. **Inference vs hallucination frontier.** On a truncated linear-algebra
+   fragment, Kimi extracted "rank-nullity theorem" — correct for the full
+   note, but inferred from "dim V" + context. Impressive and slightly
+   scary; the Phase D judge (which sees full note text) is the check.
+   Fable's `presupposes` are the most *curricular* ("cash flow diagram"
+   presupposes "time value of money") — exactly the seed quality Phase D
+   wants.
+5. **Haiku's true signature.** Beyond 3% outright blanks on normal notes
+   (other models: 0–1%), when Haiku does answer it invents *descriptive
+   phrases* instead of canonical names ("price system interest
+   calculation", "financial english terminology"). The differentiator
+   across the ladder is naming instinct, not comprehension.
+6. *(Bonus)* **Cross-lingual canonicalization works everywhere**: all
+   seven models map Portuguese notes ("sistema PRICE", "equação
+   característica") to English canonical names unprompted.
