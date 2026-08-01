@@ -3169,6 +3169,170 @@ def _run_checks() -> dict[str, Any]:
     check("proposal media: existing [sound:] ref -> preview strip (task #25)",
           _existing_media_preview)
 
+    def _edit_media_context_and_skip() -> dict[str, Any]:
+        """#24 end-to-end on the EDIT card, which the create-only media path
+        and the all-fields accept never covered. Two phases, because the two
+        halves need opposite note shapes:
+
+        Phase 1 - change ONE field of a two-field note, so the other rides
+        along as collapsed context (a), and attach audio to prove an edit
+        stages, renders its own player strip, and imports on accept (b). The
+        shared InteractionCard's strip is create-only; this is our own.
+
+        Phase 2 - change BOTH fields, Skip one with a typed reason, accept
+        (d): the skipped field must still hold its original value in the real
+        collection afterwards.
+        """
+        import tempfile
+
+        tone_path = os.path.join(tempfile.gettempdir(), "cwyc-probe-tone.wav")
+        if not os.path.exists(tone_path):
+            raise AssertionError("precondition: probe tone fixture missing")
+
+        def _card_state() -> Any:
+            return _eval_js(
+                dock.web,
+                "(function() {"
+                "  var cards = document.querySelectorAll('[data-testid=proposal-card]');"
+                "  var p = cards[cards.length - 1];"
+                "  if (!p) return null;"
+                "  var a = p.querySelector('.cwyc-audio-strip audio');"
+                "  var ctx = p.querySelector('[data-testid=proposal-context-fields]');"
+                "  return {audio: a ? 1 : 0, duration: a ? (a.duration || 0) : 0,"
+                "          context: ctx ? (ctx.open ? 'open' : 'collapsed') : 'absent',"
+                "          context_summary: ctx ? ctx.querySelector('summary').textContent : '',"
+                "          skips: p.querySelectorAll('.cwyc-field-skip').length};"
+                "})();",
+                DOM_TIMEOUT_MS,
+                "edit card media/context state",
+            )
+
+        def _click(selector: str, description: str) -> None:
+            _eval_js(
+                dock.web,
+                "(function() {"
+                "  var cards = document.querySelectorAll('[data-testid=proposal-card]');"
+                "  cards[cards.length - 1].querySelector('" + selector + "').click();"
+                "  return true; })();",
+                DOM_TIMEOUT_MS,
+                description,
+            )
+
+        # ---- phase 1: media on an edit + the untouched field as context ----
+        media_nid = _new_note("edit-media front", back="edit-media back")
+        result = state.proposals.submit_edit(
+            {
+                "note_id": media_nid,
+                "field_changes": {
+                    "Front": "edit-media front v2 [sound:cwyc-probe-tone.wav]"
+                },
+                "rationale": "gui-smoke edit media + context",
+                "media": [{"path": tone_path, "filename": "cwyc-probe-tone.wav"}],
+            }
+        )
+        if result.get("status") != "pending_user_review":
+            raise AssertionError(f"edit proposal did not stage: {result}")
+        pid = result["proposal_id"]
+
+        def _media_ready() -> bool:
+            state_ = _card_state()
+            return bool(
+                state_
+                and state_.get("audio")
+                and state_.get("duration", 0) > 0
+                and state_.get("context") != "absent"
+            )
+
+        _wait_until(_media_ready, STREAM_TIMEOUT_MS, "edit card with decodable audio + context")
+        card = _card_state()
+        if card.get("context") != "collapsed":
+            raise AssertionError(f"context fields should start collapsed: {card}")
+        if "1 unchanged field" not in card.get("context_summary", ""):
+            raise AssertionError(f"context summary wrong: {card}")
+        if card.get("skips") != 1:
+            raise AssertionError(f"expected one skip control (one changed field): {card}")
+        _click("[data-testid=proposal-approve]", "edit-media approve click")
+
+        def _media_applied() -> bool:
+            return "v2" in mw.col.get_note(media_nid)["Front"]
+
+        _wait_until(_media_applied, STREAM_TIMEOUT_MS, "edit to apply to the real note")
+        media_note = mw.col.get_note(media_nid)
+        if "[sound:cwyc-probe-tone.wav]" not in media_note["Front"]:
+            raise AssertionError(f"edit media marker missing: {media_note['Front']}")
+        from chat_with_your_cards import USER_FILES as _uf
+
+        if (_uf / "staging" / pid).exists():
+            raise AssertionError("edit staging dir not freed after import")
+
+        # ---- phase 2: per-field skip with a reason ----
+        skip_nid = _new_note("skip-probe front", back="skip-probe back")
+        skip_result = state.proposals.submit_edit(
+            {
+                "note_id": skip_nid,
+                "field_changes": {
+                    "Front": "skip-probe front v2",
+                    "Back": "skip-probe back v2",
+                },
+                "rationale": "gui-smoke per-field skip",
+            }
+        )
+        if skip_result.get("status") != "pending_user_review":
+            raise AssertionError(f"skip proposal did not stage: {skip_result}")
+
+        def _two_skips() -> bool:
+            state_ = _card_state()
+            return bool(state_ and state_.get("skips") == 2)
+
+        _wait_until(_two_skips, STREAM_TIMEOUT_MS, "a skip control per changed field")
+        _click("[data-testid=field-skip-Back]", "skip Back click")
+
+        def _comment_present() -> bool:
+            return bool(
+                _eval_js(
+                    dock.web,
+                    "(function() {"
+                    "  var cards = document.querySelectorAll('[data-testid=proposal-card]');"
+                    "  return !!cards[cards.length - 1]"
+                    "    .querySelector('[data-testid=field-comment-Back]'); })();",
+                    DOM_TIMEOUT_MS,
+                    "skip comment box",
+                )
+            )
+
+        _wait_until(_comment_present, DOM_TIMEOUT_MS, "comment box on the skipped field")
+        _eval_js(
+            dock.web,
+            "(function() {"
+            "  var cards = document.querySelectorAll('[data-testid=proposal-card]');"
+            "  var p = cards[cards.length - 1];"
+            "  var box = p.querySelector('[data-testid=field-comment-Back]');"
+            "  var setter = Object.getOwnPropertyDescriptor("
+            "    window.HTMLInputElement.prototype, 'value').set;"
+            "  setter.call(box, 'the old back was fine');"
+            "  box.dispatchEvent(new Event('input', {bubbles: true}));"
+            "  p.querySelector('[data-testid=proposal-approve]').click();"
+            "  return true; })();",
+            DOM_TIMEOUT_MS,
+            "comment + approve click",
+        )
+
+        def _skip_applied() -> bool:
+            return "v2" in mw.col.get_note(skip_nid)["Front"]
+
+        _wait_until(_skip_applied, STREAM_TIMEOUT_MS, "partial edit to apply")
+        skip_note = mw.col.get_note(skip_nid)
+        if skip_note["Back"] != "skip-probe back":
+            raise AssertionError(f"skipped field was written anyway: {skip_note['Back']!r}")
+        return {
+            "context_summary": card.get("context_summary"),
+            "media_front": media_note["Front"],
+            "skipped_back": skip_note["Back"],
+        }
+
+    check("edit proposals: media strip, collapsed context, per-field skip (#24)",
+          _edit_media_context_and_skip)
+
     def _tool_approval_round_trip() -> dict[str, Any]:
         """Task #17 end-to-end against the REAL broker. The bug was that
         approvals.py blocked an MCP thread for 120s on an answer the UI could

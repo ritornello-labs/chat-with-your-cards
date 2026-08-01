@@ -3,6 +3,7 @@ import { useThreadRuntime } from "@assistant-ui/react";
 import { InteractionCard, wordDiff } from "@elvis-labs/interaction-ui-react";
 import "@elvis-labs/interaction-ui-react/styles.css";
 import type { ChatStore, ProposalCardData } from "../store";
+import type { ProposalFieldPayload } from "../events";
 import { useChatState } from "../ChatRuntimeProvider";
 import { createProposalInteraction } from "../interactionAdapter";
 import { ComboBox } from "./ComboBox";
@@ -182,6 +183,64 @@ function StagedVisualStrip({ media }: { media: unknown }) {
         </figure>
       ))}
     </div>
+  );
+}
+
+/** Staged + already-in-collection audio, as the legacy card's player strip
+ *  (#24b). The shared InteractionCard draws this itself from schema-1.1
+ *  MediaAttachments, but that route is create-only; edit proposals render
+ *  here, and since they can now carry audio they need their own strip. */
+function AudioStrip({ media, previewMedia }: { media: unknown; previewMedia: unknown }) {
+  const clips = [
+    ...(Array.isArray(media) ? media : []),
+    ...(Array.isArray(previewMedia) ? previewMedia : []),
+  ].filter(
+    (item): item is { kind: string; src: string; name?: string } =>
+      !!item &&
+      typeof item === "object" &&
+      (item as { kind?: unknown }).kind === "audio" &&
+      typeof (item as { src?: unknown }).src === "string" &&
+      (item as { src: string }).src.startsWith("data:")
+  );
+  if (!clips.length) return null;
+  return (
+    <div className="cwyc-audio-strip" data-testid="proposal-audio">
+      {clips.map((clip, i) => (
+        <div className="cwyc-audio-item" key={i}>
+          <audio src={clip.src} controls preload="metadata" />
+          <span className="cwyc-audio-name">{clip.name}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** The note's other fields, unchanged by this edit (#24a). Collapsed by
+ *  default: the diff is what you are reviewing, but "does this duplicate
+ *  something already on the note?" is unanswerable without them. */
+function ContextFields({ fields }: { fields: unknown }) {
+  if (!Array.isArray(fields) || !fields.length) return null;
+  const entries = fields.filter(
+    (item): item is { name: string; value: string } =>
+      !!item && typeof item === "object" && typeof (item as { name?: unknown }).name === "string"
+  );
+  if (!entries.length) return null;
+  return (
+    <details className="cwyc-field-collapse" data-testid="proposal-context-fields">
+      <summary>
+        {entries.length} unchanged field{entries.length === 1 ? "" : "s"}
+      </summary>
+      <div className="cwyc-proposal-fields">
+        {entries.map((entry) => (
+          <div className="cwyc-field cwyc-field-context" key={entry.name}>
+            <div className="cwyc-field-name">{entry.name}</div>
+            <div className="cwyc-field-value">
+              <div className="cwyc-field-new">{entry.value || <em>empty</em>}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </details>
   );
 }
 
@@ -577,6 +636,47 @@ function LegacyProposalCard({ data, store }: ProposalCardProps) {
     setExcludedItems(new Set());
   }
   const batchReview = data.kind === "change_set" && pending;
+
+  // Per-field reject with a comment (#24d): per-field ACCEPT has been in the
+  // protocol since M2 (`accepted_fields`) but the card always sent every
+  // field, so "apply the Front fix, leave Back alone" was unreachable. A
+  // skipped field is excluded from the write AND its reason is recorded, so
+  // the learning store knows why rather than just that.
+  const [declined, setDeclined] = useState<Set<string>>(new Set());
+  const [comments, setComments] = useState<Record<string, string>>({});
+  const declineSeed = useRef(data.id);
+  if (declineSeed.current !== data.id) {
+    declineSeed.current = data.id;
+    setDeclined(new Set());
+    setComments({});
+  }
+  const declinable = data.kind === "edit" && pending;
+  const toggleDecline = (name: string) =>
+    setDeclined((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  // Every field skipped and no tag change left = the write would be empty,
+  // and Python rejects it ("nothing selected to apply"). Say so on the button
+  // instead of letting the click bounce off the backend.
+  const nothingLeft =
+    declinable &&
+    fields.length > 0 &&
+    fields.every((f) => declined.has(f.name)) &&
+    !(data.add_tags ?? []).length &&
+    !(data.remove_tags ?? []).length;
+  const runAccept = () =>
+    store.acceptProposal(
+      data.id,
+      values,
+      data.kind,
+      batchReview ? excludedItems : undefined,
+      declinable ? declined : undefined,
+      declinable ? comments : undefined
+    );
+
   const toggleItem = (index: number) =>
     setExcludedItems((prev) => {
       const next = new Set(prev);
@@ -586,15 +686,97 @@ function LegacyProposalCard({ data, store }: ProposalCardProps) {
     });
 
   useProposalActionKeys(data.id, pending, {
-    accept: () =>
-      store.acceptProposal(
-        data.id,
-        values,
-        data.kind,
-        batchReview ? excludedItems : undefined
-      ),
+    accept: () => {
+      if (!nothingLeft) runAccept();
+    },
     reject: () => store.rejectProposal(data.id),
   });
+
+  // Partitioned on the PROPOSED value, not the live draft, so a field does
+  // not hop between sections while you type into it.
+  const [filledFields, emptyFields] = useMemo(() => {
+    const filled = fields.filter((f) => f.new.trim() !== "");
+    const empty = fields.filter((f) => f.new.trim() === "");
+    // Collapsing a lone empty field costs a click and saves one line - not
+    // worth it; below the threshold everything stays inline.
+    return empty.length > 1 ? [filled, empty] : [fields, []];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.id, fields.length]);
+
+  const renderField = (field: ProposalFieldPayload) => {
+    const skipped = declined.has(field.name);
+    return (
+      <div className={"cwyc-field" + (skipped ? " cwyc-field-declined" : "")} key={field.name}>
+        <div className="cwyc-field-name">
+          <span>{field.name}</span>
+          {declinable ? (
+            <button
+              type="button"
+              className="cwyc-field-skip"
+              aria-pressed={skipped}
+              onClick={() => toggleDecline(field.name)}
+              title={skipped ? "Apply this field after all" : "Leave this field as it is"}
+              data-testid={`field-skip-${field.name}`}
+            >
+              {skipped ? "Skipped" : "Skip"}
+            </button>
+          ) : null}
+        </div>
+        {editing ? (
+          // Vim keys reach the field editor too, not just the composer:
+          // this is where the real text work happens (#31). Same
+          // onChange either way, so the 400ms live-preview debounce
+          // fires identically.
+          vimMode ? (
+            <VimTextArea
+              value={values[field.name] ?? field.new}
+              onChange={(text) => setValues((prev) => ({ ...prev, [field.name]: text }))}
+              disabled={!pending || skipped}
+              testid={`field-input-vim-${field.name}`}
+            />
+          ) : (
+            <textarea
+              className="cwyc-field-input"
+              value={values[field.name] ?? field.new}
+              onChange={(e) => setValues((prev) => ({ ...prev, [field.name]: e.target.value }))}
+              disabled={!pending || skipped}
+              rows={3}
+            />
+          )
+        ) : (
+          <div className="cwyc-field-value">
+            {data.kind === "edit" && field.old ? (
+              // Word-level diff, same marks the shared renderer uses on
+              // create cards: a one-word typo fix must not read as a
+              // whole-field rewrite (dogfood 2026-07-23).
+              <div className="cwyc-field-new eui-field-diff">
+                {wordDiff(field.old, values[field.name] ?? field.new).map((part, i) => {
+                  if (part.op === "eq") return <span key={i}>{part.text}</span>;
+                  const Tag = part.op === "del" ? "del" : "ins";
+                  return (
+                    <Tag key={i} className={`eui-diff-${part.op}`}>
+                      {part.text}
+                    </Tag>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="cwyc-field-new">{values[field.name] ?? field.new}</div>
+            )}
+          </div>
+        )}
+        {skipped ? (
+          <input
+            className="cwyc-field-comment"
+            value={comments[field.name] ?? ""}
+            onChange={(e) => setComments((prev) => ({ ...prev, [field.name]: e.target.value }))}
+            placeholder="Why? (optional - the assistant learns from this)"
+            data-testid={`field-comment-${field.name}`}
+          />
+        ) : null}
+      </div>
+    );
+  };
 
   return (
     <div
@@ -633,6 +815,10 @@ function LegacyProposalCard({ data, store }: ProposalCardProps) {
         />
       ) : null}
       <StagedVisualStrip media={(data as { media?: unknown }).media} />
+      <AudioStrip
+        media={(data as { media?: unknown }).media}
+        previewMedia={(data as { preview_media?: unknown }).preview_media}
+      />
 
       {!editableFields ? (
         <ProposalBody
@@ -641,58 +827,23 @@ function LegacyProposalCard({ data, store }: ProposalCardProps) {
           onToggleItem={batchReview ? toggleItem : undefined}
         />
       ) : fields.length > 0 ? (
-        <div className="cwyc-proposal-fields">
-          {fields.map((field) => (
-            <div className="cwyc-field" key={field.name}>
-              <div className="cwyc-field-name">{field.name}</div>
-              {editing ? (
-                // Vim keys reach the field editor too, not just the composer:
-                // this is where the real text work happens (#31). Same
-                // onChange either way, so the 400ms live-preview debounce
-                // fires identically.
-                vimMode ? (
-                  <VimTextArea
-                    value={values[field.name] ?? field.new}
-                    onChange={(text) =>
-                      setValues((prev) => ({ ...prev, [field.name]: text }))
-                    }
-                    disabled={!pending}
-                    testid={`field-input-vim-${field.name}`}
-                  />
-                ) : (
-                  <textarea
-                    className="cwyc-field-input"
-                    value={values[field.name] ?? field.new}
-                    onChange={(e) => setValues((prev) => ({ ...prev, [field.name]: e.target.value }))}
-                    disabled={!pending}
-                    rows={3}
-                  />
-                )
-              ) : (
-                <div className="cwyc-field-value">
-                  {data.kind === "edit" && field.old ? (
-                    // Word-level diff, same marks the shared renderer uses on
-                    // create cards: a one-word typo fix must not read as a
-                    // whole-field rewrite (dogfood 2026-07-23).
-                    <div className="cwyc-field-new eui-field-diff">
-                      {wordDiff(field.old, values[field.name] ?? field.new).map((part, i) => {
-                        if (part.op === "eq") return <span key={i}>{part.text}</span>;
-                        const Tag = part.op === "del" ? "del" : "ins";
-                        return (
-                          <Tag key={i} className={`eui-diff-${part.op}`}>
-                            {part.text}
-                          </Tag>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="cwyc-field-new">{values[field.name] ?? field.new}</div>
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
+        <>
+          <div className="cwyc-proposal-fields">{filledFields.map(renderField)}</div>
+          {/* Unchanged/untouched fields collapsed (#24a): a 12-field note type
+              with 3 values filled used to render nine empty boxes around the
+              content actually under review. Still editable once opened. */}
+          {emptyFields.length > 0 ? (
+            <details className="cwyc-field-collapse" data-testid="proposal-empty-fields">
+              <summary>
+                {emptyFields.length} empty field{emptyFields.length === 1 ? "" : "s"}
+              </summary>
+              <div className="cwyc-proposal-fields">{emptyFields.map(renderField)}</div>
+            </details>
+          ) : null}
+        </>
+      ) : null}
+      {data.kind === "edit" ? (
+        <ContextFields fields={(data as { context_fields?: unknown }).context_fields} />
       ) : null}
 
       {/* A tag-only edit changes no field and no preview, so without this the
@@ -743,14 +894,9 @@ function LegacyProposalCard({ data, store }: ProposalCardProps) {
           <button
             type="button"
             className="cwyc-btn-accept cwyc-primary"
-            onClick={() =>
-              store.acceptProposal(
-                data.id,
-                values,
-                data.kind,
-                batchReview ? excludedItems : undefined
-              )
-            }
+            onClick={runAccept}
+            disabled={nothingLeft}
+            title={nothingLeft ? "Every field is skipped - nothing would be applied" : undefined}
             data-testid="proposal-approve"
           >
             {data.kind === "delete" ? "Delete" : data.kind === "deck_op" ? "Apply" : "Accept"}

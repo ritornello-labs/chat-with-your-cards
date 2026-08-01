@@ -523,6 +523,42 @@ class ParseStreamLineTest(unittest.TestCase):
         self.assertIsNone(usage.context_window)
         self.assertIsNone(usage.fast_mode_state)
 
+    def test_permission_denials_surface_before_done(self) -> None:
+        # #24c: a blocked call still ends the turn `success`, so without this
+        # the reply reads as the assistant declining rather than the mode.
+        from chat_with_your_cards.backends import PermissionDenied
+
+        events = parse_stream_line(
+            {
+                "type": "result",
+                "subtype": "success",
+                "permission_denials": [
+                    {
+                        "tool_name": "Bash",
+                        "tool_use_id": "tu1",
+                        "tool_input": {"command": "rm -rf /"},
+                    },
+                    {"no_tool_name": True},
+                ],
+            },
+            self.state,
+        )
+        self.assertEqual(2, len(events))
+        denied = events[0]
+        assert isinstance(denied, PermissionDenied)
+        # The malformed entry is skipped, not allowed to break the turn.
+        self.assertEqual(1, len(denied.denials))
+        self.assertEqual("Bash", denied.denials[0]["tool"])
+        self.assertIn("rm -rf /", denied.denials[0]["detail"])
+        self.assertIsInstance(events[1], Done)
+
+    def test_no_permission_denials_key_emits_nothing_extra(self) -> None:
+        events = parse_stream_line(
+            {"type": "result", "subtype": "success", "permission_denials": []},
+            self.state,
+        )
+        self.assertEqual([Done()], events)
+
     def test_result_error_emits_error_then_done(self) -> None:
         events = parse_stream_line(
             {

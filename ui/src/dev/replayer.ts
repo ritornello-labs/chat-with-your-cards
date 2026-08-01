@@ -40,7 +40,9 @@ type Step =
       /** Seconds until the prompt stops being answerable; omit for "never". */
       expiresInS?: number;
     }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string }
+  /** Any raw event dict, for paths with no dedicated step kind. */
+  | { kind: "raw"; event: Record<string, unknown> };
 
 const DEMO_CSS =
   ".card{font-family:-apple-system,sans-serif;font-size:18px;text-align:center;color:#111;background:#fff;padding:12px}";
@@ -186,6 +188,8 @@ function compile(steps: readonly Step[]): Array<[number, ChatEvent]> {
             : { expires_at_ms: Date.now() + step.expiresInS * 1000 }),
         },
       ]);
+    } else if (step.kind === "raw") {
+      timeline.push([delay(), step.event as never]);
     } else if (step.kind === "error") {
       timeline.push([delay(), { type: "error", message: step.message }]);
       endedWithError = true;
@@ -360,7 +364,34 @@ function editProposalScript(): Step[] {
           before: { question: "Define the limit of f at a.", answer: oldBack, css: DEMO_CSS },
           after: { question: "Define the limit of f at a.", answer: newBack, css: DEMO_CSS },
         },
+        // #24a: the note's untouched fields, for the collapsed context block.
+        context_fields: [
+          { name: "Front", value: "Define the limit of f at a." },
+          { name: "Source", value: "Rudin, Principles of Mathematical Analysis, 4.1" },
+          { name: "Notes", value: "" },
+        ],
+        // #24b: edits can carry media now - staged plus already-in-collection.
+        media: [
+          {
+            id: "m-edit-1",
+            kind: "audio",
+            name: "epsilon-delta-read.wav",
+            mime: "audio/wav",
+            bytes: 2444,
+            src: demoWavDataUri(),
+          },
+        ],
       }),
+    },
+    {
+      kind: "raw",
+      event: {
+        // #24c: a blocked tool call, as the permission banner renders it.
+        type: "permission_denied",
+        denials: [
+          { tool: "Bash", detail: '{"command":"open -a Anki"}' },
+        ],
+      },
     },
   ];
 }

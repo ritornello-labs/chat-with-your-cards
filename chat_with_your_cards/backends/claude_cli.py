@@ -27,6 +27,7 @@ from .base import (
     Done,
     ErrorEvent,
     EventCallback,
+    PermissionDenied,
     TextDelta,
     ThinkingDelta,
     ToolCallFinished,
@@ -131,6 +132,29 @@ def _compact(value: Any, limit: int) -> str:
     text = json.dumps(value, ensure_ascii=False) if not isinstance(value, str) else value
     text = " ".join(text.split())
     return text[: limit - 1] + "…" if len(text) > limit else text
+
+
+def _permission_denials(obj: dict[str, Any]) -> list[dict[str, str]]:
+    """Normalize the `result` message's `permission_denials` array (#24c).
+
+    Entries look like `{"tool_name": ..., "tool_use_id": ..., "tool_input":
+    {...}}` (CLI 2.1.208). Only the pieces the banner shows are kept, and a
+    malformed entry is skipped rather than allowed to break the turn's `Done`.
+    """
+    raw = obj.get("permission_denials")
+    if not isinstance(raw, list):
+        return []
+    denials: list[dict[str, str]] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        tool = str(entry.get("tool_name") or entry.get("tool") or "").strip()
+        if not tool:
+            continue
+        denials.append(
+            {"tool": tool, "detail": _compact(entry.get("tool_input") or {}, 200)}
+        )
+    return denials
 
 
 @dataclass
@@ -323,6 +347,9 @@ def parse_stream_line(obj: dict[str, Any], state: ParserState) -> list[ChatEvent
                     fast_mode_state=str(fast_state) if fast_state else None,
                 )
             )
+        denials = _permission_denials(obj)
+        if denials:
+            result_events.append(PermissionDenied(denials=tuple(denials)))
         # A user-requested stop ends the turn with an error result
         # (error_during_execution); consume the flag and treat it as a clean
         # stop, not a failure, so Stop doesn't paint a red error banner.

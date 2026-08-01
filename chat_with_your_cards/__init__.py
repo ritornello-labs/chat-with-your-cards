@@ -1392,6 +1392,7 @@ def _learning_observe(event: dict[str, Any]) -> None:
                 fields_before=event.get("fields_before"),
                 fields_after=event.get("fields_after"),
                 declined_fields=event.get("declined_fields"),
+                declined_field_comments=event.get("declined_field_comments"),
             )
             if recorded:
                 _push_learning_state()

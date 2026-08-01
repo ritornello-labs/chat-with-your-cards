@@ -11,7 +11,7 @@ import type { ChatStore, GradingCardData, ProposalCardData } from "./store";
 import { ProposalCard } from "./components/ProposalCard";
 import { ToolCallCard } from "./components/ToolCallCard";
 import { ReasoningBlock } from "./components/ReasoningBlock";
-import { ErrorBanner } from "./components/ErrorBanner";
+import { DenialBanner, ErrorBanner } from "./components/ErrorBanner";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { TextPart } from "./components/TextPart";
 import { AttachButton, ModeChip, ModelPicker, PinsButton, ToolsChip } from "./components/ComposerControls";
@@ -83,6 +83,7 @@ function AssistantMessage({ store }: { store: ChatStore }) {
             </ErrorBoundary>
           ),
           error: ErrorBanner,
+          denial: DenialBanner,
           // Ask-each-read: a blocked tool call is waiting on this (approvals.py).
           tool_approval: (props: { data?: unknown }) => (
             <ToolApprovalChip

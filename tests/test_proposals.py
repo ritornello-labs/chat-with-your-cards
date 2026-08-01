@@ -874,6 +874,44 @@ class MediaProposalTests(unittest.TestCase):
         nid = pushes_of(pushed, "proposal_resolved")[-1]["note_id"]
         self.assertIn('<img src="map-2.png">', col.get_note(nid)["Front"])
 
+    def test_edit_can_attach_media_and_import_rewrites_the_written_value(self) -> None:
+        # #24b: media used to be create-only. An edit stages, previews, and on
+        # accept imports through the same path - and because an edit writes
+        # the REVIEWER's values (not proposal.fields), the rename rewrite has
+        # to land on those.
+        manager, col, pushed = make_manager(media_staging=self.staging)
+        create = manager.submit_create(dict(CREATE_ARGS))
+        manager.accept({"id": create["proposal_id"]})
+        note_id = next(iter(col._notes))
+        col.media.rename_map["nihao.mp3"] = "nihao-2.mp3"
+        result = manager.submit_edit(
+            {
+                "note_id": note_id,
+                "field_changes": {"Front": "你好 [sound:nihao.mp3]"},
+                "media": [{"path": str(self._audio())}],
+            }
+        )
+        proposal = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertEqual("nihao.mp3", proposal["media"][0]["name"])
+        self.assertTrue(proposal["media"][0]["src"].startswith("data:audio/mpeg;base64,"))
+        manager.accept({"id": result["proposal_id"], "fields": {"Front": "你好 [sound:nihao.mp3]"}})
+        self.assertIn("[sound:nihao-2.mp3]", col.get_note(note_id)["Front"])
+
+    def test_edit_media_unreferenced_warns(self) -> None:
+        manager, col, _ = make_manager(media_staging=self.staging)
+        create = manager.submit_create(dict(CREATE_ARGS))
+        manager.accept({"id": create["proposal_id"]})
+        note_id = next(iter(col._notes))
+        manager.submit_edit(
+            {
+                "note_id": note_id,
+                "field_changes": {"Front": "no marker here"},
+                "media": [{"path": str(self._audio())}],
+            }
+        )
+        proposal = manager._proposals[[p for p in manager._proposals][-1]]
+        self.assertTrue([w for w in proposal.warnings if "not referenced" in w])
+
     def test_store_media_asset_flow(self) -> None:
         # #10: non-note assets (fonts, shared images) via one confirmation;
         # revert moves the imported file to Anki's media trash.
@@ -1240,6 +1278,22 @@ class EditFlowTests(unittest.TestCase):
         with self.assertRaises(ProposalError) as ctx:
             manager.submit_edit({"note_id": nid, "field_changes": {"Front": "Q?"}})
         self.assertIn("match the note", str(ctx.exception))
+
+    def test_context_fields_carry_the_untouched_rest_of_the_note(self) -> None:
+        # #24a: the diff still shows only what changes, but the card needs the
+        # rest of the note to answer "does this duplicate something already
+        # there?" - collapsed, and never part of the write.
+        manager, col, pushed = make_manager()
+        nid = self._created_note(manager, col, pushed)
+        manager.submit_edit({"note_id": nid, "field_changes": {"Front": "New Q?"}})
+        payload = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertEqual(["Front"], [f["name"] for f in payload["fields"]])
+        self.assertEqual(
+            [{"name": "Back", "value": "A."}], payload["context_fields"]
+        )
+        # A create carries none - every field is already on the card.
+        manager.submit_create(dict(CREATE_ARGS))
+        self.assertEqual([], pushes_of(pushed, "proposal")[-1]["proposal"]["context_fields"])
 
     # ---- argument handling (dogfood 2026-07-23) ----
 
@@ -3018,6 +3072,32 @@ class LearningObserveTests(unittest.TestCase):
         reviewed = [e for e in observes if e["event"] == "reviewed"][-1]
         self.assertEqual("edit", reviewed["proposal_kind"])
         self.assertEqual(["Back"], reviewed["declined_fields"])
+
+    def test_declined_field_comments_ride_the_reviewed_event(self) -> None:
+        # #24d: "why" is the whole value of a per-field skip - a bare
+        # declined_fields list teaches the learning store nothing.
+        observes: list[dict[str, Any]] = []
+        manager, col, _ = make_manager(observes=observes)
+        create = manager.submit_create(dict(CREATE_ARGS))
+        manager.accept({"id": create["proposal_id"]})
+        note_id = next(iter(col._notes))
+        edit = manager.submit_edit(
+            {"note_id": note_id, "field_changes": {"Front": "New Q?", "Back": "New A."}}
+        )
+        manager.accept(
+            {
+                "id": edit["proposal_id"],
+                "accepted_fields": ["Front"],
+                "field_comments": {"Back": "the old answer was fine"},
+            }
+        )
+        reviewed = [e for e in observes if e["event"] == "reviewed"][-1]
+        self.assertEqual(["Back"], reviewed["declined_fields"])
+        self.assertEqual(
+            {"Back": "the old answer was fine"}, reviewed["declined_field_comments"]
+        )
+        # And the skipped field really was left alone.
+        self.assertEqual("A.", col.get_note(note_id)["Back"])
 
     def test_revert_emits_resync_not_applied(self) -> None:
         observes: list[dict[str, Any]] = []

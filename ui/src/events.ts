@@ -105,6 +105,10 @@ export interface ProposalPayload {
     src: string;
     bytes?: number;
   }[];
+  /** Edit only (#24a): the note's OTHER fields, unchanged by this proposal.
+   *  Read-only review context - the card keeps them collapsed by default so
+   *  the diff stays the thing you actually see. */
+  context_fields?: { name: string; value: string }[];
   items: unknown[];
   open: boolean;
 }

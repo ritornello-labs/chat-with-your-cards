@@ -247,6 +247,34 @@ def register_proposal_tools(registry: ToolRegistry) -> None:
                         "description": "If this revises an earlier unaccepted proposal, "
                         "pass its proposal_id so the old card is set aside.",
                     },
+                    "media": {
+                        "type": "array",
+                        "description": "Media files to attach to this edit (adding "
+                        "TTS audio or a diagram to an existing note): staged now, "
+                        "previewed on the review card, imported into the media "
+                        "folder only when the user accepts. Put the reference in "
+                        "the new field value - [sound:filename] for audio/video, "
+                        "<img src=\"filename\"> for images - or it is flagged as "
+                        "unreferenced. Audio mp3/wav/ogg/opus/m4a/flac, images "
+                        "png/jpg/jpeg/gif/webp/svg/avif, video mp4/webm; max 4 "
+                        "files.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "path": {
+                                    "type": "string",
+                                    "description": "Absolute local path to the media file",
+                                },
+                                "filename": {
+                                    "type": "string",
+                                    "description": "Name to import as (defaults to the "
+                                    "file's basename); use this exact name in the "
+                                    "reference marker",
+                                },
+                            },
+                            "required": ["path"],
+                        },
+                    },
                 },
                 "required": ["note_id"],
             },

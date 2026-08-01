@@ -1776,6 +1776,155 @@ body {
   color: var(--cwyc-text-dim);
 }
 
+/* Staged + collection audio on the legacy (edit) proposal card (#24b).
+   The shared InteractionCard draws its own player strip; this is the same
+   idea for the route that renders edits. */
+.cwyc-audio-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0;
+}
+
+.cwyc-audio-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cwyc-audio-item audio {
+  height: 28px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cwyc-audio-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--cwyc-text-dim);
+}
+
+/* Collapsed field groups on proposal cards (#24a): empty fields on a create,
+   the note's untouched fields on an edit. Quiet by default - the point is
+   that they stay out of the way of the diff. */
+.cwyc-field-collapse {
+  margin: 4px 0 0;
+}
+
+.cwyc-field-collapse > summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--cwyc-text-dim);
+  padding: 2px 0;
+  user-select: none;
+}
+
+.cwyc-field-collapse > summary:hover {
+  color: var(--cwyc-fg);
+}
+
+.cwyc-field-collapse .cwyc-proposal-fields {
+  margin-top: 6px;
+}
+
+.cwyc-field-context .cwyc-field-value {
+  opacity: 0.75;
+}
+
+/* Per-field reject with a comment (#24d). A skipped row stays legible - you
+   are still reviewing it - but reads as set aside. */
+.cwyc-field-name {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* The app-wide button reset (#cwyc-root button) is id-specific, so this rule
+   has to be too or the chip renders as bare text. */
+#cwyc-root .cwyc-field-skip {
+  flex: 0 0 auto;
+  border: 1px solid var(--cwyc-border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--cwyc-text-dim);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  cursor: pointer;
+}
+
+#cwyc-root .cwyc-field-skip:hover {
+  color: var(--cwyc-fg);
+  border-color: var(--cwyc-fg-subtle);
+}
+
+#cwyc-root .cwyc-field-skip[aria-pressed="true"] {
+  color: var(--cwyc-red);
+  border-color: var(--cwyc-red-soft);
+  background: var(--cwyc-red-soft);
+}
+
+.cwyc-field-declined .cwyc-field-value,
+.cwyc-field-declined .cwyc-field-input {
+  opacity: 0.5;
+  text-decoration-line: line-through;
+  text-decoration-color: var(--cwyc-red);
+}
+
+#cwyc-root .cwyc-field-comment {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--cwyc-border-subtle);
+  border-radius: 6px;
+  background: var(--cwyc-bg);
+  color: var(--cwyc-fg);
+  font-family: inherit;
+  font-size: 11.5px;
+  padding: 4px 7px;
+}
+
+/* Permission-mode denials (#24c). Not an error banner: nothing broke, the
+   mode did what it promised - so it reads as information, not failure. */
+.cwyc-denial-banner {
+  font-size: 12px;
+  color: var(--cwyc-fg);
+  background: var(--cwyc-warn-soft);
+  border: 1px solid var(--cwyc-border);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
+.cwyc-denial-head {
+  font-weight: 600;
+}
+
+.cwyc-denial-list {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cwyc-denial-list code {
+  font-family: var(--cwyc-mono);
+  font-size: 11px;
+}
+
+.cwyc-denial-detail {
+  margin-left: 6px;
+  color: var(--cwyc-text-dim);
+  font-size: 11px;
+  word-break: break-word;
+}
+
 /* Permission ladder + per-class matrix (#26). The rail marks the
    restrictive -> permissive ordering; the matrix names the operation
    classes whose carve-outs are hardcoded in Python. */

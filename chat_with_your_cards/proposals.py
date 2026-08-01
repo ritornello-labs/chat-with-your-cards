@@ -193,6 +193,7 @@ _EDIT_ARGS = {
     "add_tags",
     "remove_tags",
     "rationale",
+    "media",
     "supersedes",
 }
 _CREATE_ARGS = {
@@ -296,8 +297,13 @@ class Proposal:
     # {id, kind, name, mime, bytes, src} where src is a self-contained data:
     # URI for the review card's playable preview. Files live in the staging
     # dir until accept (imported via col.media.add_file) or reject/supersede
-    # (discarded). create-kind only for now.
+    # (discarded). create and edit proposals both stage here (#24b).
     media: list[dict[str, Any]] = field(default_factory=list)
+    # Edit only (#24a): the note's OTHER fields, unchanged by this proposal.
+    # Never written - context so the reviewer can see the rest of the note
+    # (does the new value duplicate something already there?) without the
+    # diff itself growing. The card keeps them collapsed by default.
+    context_fields: dict[str, str] = field(default_factory=dict)
     # Preview-only audio: [sound:...] markers in `fields` that resolve to media
     # ALREADY in the collection, rendered as playable data: URIs so the review
     # card can replay them (same player strip as `media`). Distinct from
@@ -349,6 +355,10 @@ class Proposal:
             "samples": self.samples,
             "media": self.media,
             "preview_media": self.preview_media,
+            "context_fields": [
+                {"name": name, "value": value}
+                for name, value in self.context_fields.items()
+            ],
             "items": [
                 (
                     {
@@ -833,8 +843,19 @@ class ProposalManager:
             base_fields={name: current[name] for name in changes},
             add_tags=add_tags,
             remove_tags=remove_tags,
+            context_fields={
+                name: value for name, value in current.items() if name not in changes
+            },
         )
+        media_items = list(args.get("media") or [])
+        if media_items:
+            self._stage_media(proposal, media_items)
         proposal.previews = self._render_edit_preview(col, note_id, changes)
+        # Same player strip create proposals get (#24b): staged attachments
+        # plus any [sound:...] the NEW values point at that already lives in
+        # collection.media. Scanned over the changed values only - the whole
+        # note's audio would drown the diff being reviewed.
+        self._attach_preview_media(col, proposal)
         self._proposals[proposal.id] = proposal
         self._push({"type": "proposal", "proposal": proposal.to_payload()})
         self._maybe_supersede(args.get("supersedes"))
@@ -4357,6 +4378,15 @@ class ProposalManager:
         apply_fields = {n: final_fields[n] for n in names if n in final_fields}
         if not apply_fields and not proposal.add_tags and not proposal.remove_tags:
             raise ProposalError("nothing selected to apply")
+        # Media before the write, exactly like create: the [sound:] markers
+        # must already point at their final collection names (#24b). The
+        # rewrite has to land on the REVIEWER's values too - final_fields is
+        # what an edit writes, not proposal.fields.
+        renames = self._import_staged_media(self._col(), proposal)
+        if renames:
+            from .media_staging import rewrite_media_markers
+
+            apply_fields = rewrite_media_markers(apply_fields, renames)
         assert proposal.note_id is not None
         note_id = int(proposal.note_id)
         contract_precheck = self._precheck_edit(proposal)
@@ -4442,6 +4472,12 @@ class ProposalManager:
                 "fields_before": dict(proposal.fields),
                 "fields_after": dict(apply_fields),
                 "declined_fields": [n for n in proposal.fields if n not in apply_fields],
+                # Per-field reject-with-comment (#24d): the reason the user
+                # typed on the skipped row, so the learning record says WHY.
+                "declined_field_comments": {
+                    str(name): str(text)
+                    for name, text in (msg.get("field_comments") or {}).items()
+                },
             }
         )
 
@@ -5378,15 +5414,17 @@ class ProposalManager:
                 }
             )
 
-    def _import_staged_media(self, col: Any, proposal: Proposal) -> None:
+    def _import_staged_media(self, col: Any, proposal: Proposal) -> dict[str, str]:
         """On accept: import staged files through col.media.add_file (Anki's
         own API - it de-duplicates and renames on content collision) and
         rewrite [sound:] markers to the final names. Idempotent: entries that
-        already carry final_name (a re-add after undo) are skipped."""
+        already carry final_name (a re-add after undo) are skipped. Returns
+        the applied renames so an edit can rewrite the reviewer's own field
+        values too (proposal.fields is not what an edit writes - #24b)."""
         from .media_staging import rewrite_media_markers
 
         if not proposal.media or self._media is None:
-            return
+            return {}
         renames: dict[str, str] = {}
         for entry in proposal.media:
             if entry.get("final_name"):
@@ -5395,7 +5433,7 @@ class ProposalManager:
             if not staged_path.is_file():
                 proposal.warnings.append(
                     f"staged media {entry['name']!r} is gone (cleaned up?); "
-                    "the note was created without importing it"
+                    "the note was saved without importing it"
                 )
                 continue
             final = str(col.media.add_file(str(staged_path)))
@@ -5410,6 +5448,7 @@ class ProposalManager:
                 + ", ".join(f"{old} -> {new}" for old, new in renames.items())
             )
         self._media.discard(proposal.id)
+        return renames
 
     def _apply_create(self, col: Any, model: Any, proposal: Proposal) -> int:
         # Media first: markers must point at their FINAL collection names

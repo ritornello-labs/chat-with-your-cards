@@ -103,6 +103,21 @@ class ErrorEvent:
     message: str
 
 
+@dataclass(frozen=True)
+class PermissionDenied:
+    """Tool calls the agent's permission layer refused during this turn.
+
+    Under the non-sandbox tiers (`auto` in particular) a safety classifier can
+    block a call, and the turn still ends `subtype: "success"` - the model just
+    works around it in prose. Without this event the block is invisible: the
+    reply reads as the assistant choosing not to act, when in fact the mode we
+    put it in stopped it. The `result` message's `permission_denials` array is
+    the signal (shape verified against CLI 2.1.208 by forcing a block).
+    """
+
+    denials: tuple[dict[str, str], ...]
+
+
 ChatEvent = Union[
     TextDelta,
     ThinkingDelta,
@@ -112,6 +127,7 @@ ChatEvent = Union[
     UsageUpdate,
     Done,
     ErrorEvent,
+    PermissionDenied,
 ]
 
 EventCallback = Callable[[ChatEvent], None]
@@ -159,6 +175,11 @@ def event_to_dict(event: ChatEvent) -> dict[str, Any]:
         return {"type": "done"}
     if isinstance(event, ErrorEvent):
         return {"type": "error", "message": event.message}
+    if isinstance(event, PermissionDenied):
+        return {
+            "type": "permission_denied",
+            "denials": [dict(entry) for entry in event.denials],
+        }
     raise TypeError(f"unknown chat event: {event!r}")
 
 

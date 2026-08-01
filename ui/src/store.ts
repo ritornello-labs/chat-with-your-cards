@@ -132,6 +132,13 @@ interface ErrorDataPart {
   readonly data: { message: string };
 }
 
+/** Tool calls the agent's permission layer blocked this turn (#24c). */
+interface DenialDataPart {
+  readonly type: "data";
+  readonly name: "denial";
+  readonly data: { denials: { tool: string; detail: string }[] };
+}
+
 interface ImageDataPart {
   readonly type: "data";
   readonly name: "image";
@@ -181,6 +188,7 @@ type AssistantPart =
   | ProposalDataPart
   | GradingDataPart
   | ErrorDataPart
+  | DenialDataPart
   | ImageDataPart
   | WidgetDataPart
   | WidgetOfferDataPart
@@ -555,11 +563,22 @@ export class ChatStore {
     id: string,
     fields: Record<string, string>,
     kind: string,
-    excludedItems?: ReadonlySet<number>
+    excludedItems?: ReadonlySet<number>,
+    declinedFields?: ReadonlySet<string>,
+    fieldComments?: Record<string, string>
   ): void {
     const cmd: BridgeCommand = { type: "proposal_accept", id, fields };
     if (kind === "edit") {
-      cmd.accepted_fields = Object.keys(fields);
+      // Per-field reject (#24d): the fields the user did NOT skip. Python
+      // treats accepted_fields as the allow-list, so omitting one leaves the
+      // note's current value alone.
+      cmd.accepted_fields = Object.keys(fields).filter((name) => !declinedFields?.has(name));
+      const comments = Object.fromEntries(
+        Object.entries(fieldComments ?? {}).filter(
+          ([name, text]) => declinedFields?.has(name) && text.trim()
+        )
+      );
+      if (Object.keys(comments).length) cmd.field_comments = comments;
     }
     // Per-item reject for batches (#27): indices the user unchecked.
     if (excludedItems && excludedItems.size) {
@@ -1082,6 +1101,17 @@ export class ChatStore {
         this.finishTurn({ type: "incomplete", reason: "error" });
         this.flushPendingAutoSend();
         break;
+      // A blocked tool call ends the turn `success` - the model just works
+      // around it in prose, so without this the reply reads as the assistant
+      // declining rather than the permission mode stopping it (#24c).
+      case "permission_denied": {
+        const denials = ((event as { denials?: unknown }).denials ?? []) as {
+          tool: string;
+          detail: string;
+        }[];
+        if (denials.length) this.appendDenial(denials);
+        break;
+      }
       case "reset":
         this.pendingAutoSend = null; // never leak a queued nudge into a new chat
         this.reset();
@@ -1710,6 +1740,12 @@ export class ChatStore {
   private appendError(message: string): void {
     const current = this.ensureCurrentAssistant();
     const part: ErrorDataPart = { type: "data", name: "error", data: { message } };
+    this.updateMessage(current.id, (msg) => ({ ...msg, content: [...msg.content, part] }));
+  }
+
+  private appendDenial(denials: { tool: string; detail: string }[]): void {
+    const current = this.ensureCurrentAssistant();
+    const part: DenialDataPart = { type: "data", name: "denial", data: { denials } };
     this.updateMessage(current.id, (msg) => ({ ...msg, content: [...msg.content, part] }));
   }
 

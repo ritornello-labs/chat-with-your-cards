@@ -160,6 +160,7 @@ class LearningStore:
         fields_before: dict[str, str] | None = None,
         fields_after: dict[str, str] | None = None,
         declined_fields: list[str] | None = None,
+        declined_field_comments: dict[str, str] | None = None,
     ) -> bool:
         """Diff what the agent proposed against what the user accepted;
         returns True if anything material was recorded."""
@@ -188,6 +189,15 @@ class LearningStore:
             obs["deck_before"], obs["deck_after"] = deck_before, deck_after
         if declined:
             obs["declined_fields"] = declined
+            # Why the user skipped it (#24d). A bare "declined Back" teaches
+            # nothing; "Back - too wordy" is the whole point of the record.
+            comments = {
+                name: text.strip()
+                for name, text in (declined_field_comments or {}).items()
+                if name in declined and str(text).strip()
+            }
+            if comments:
+                obs["declined_field_comments"] = comments
         self._record(obs)
         return True
 

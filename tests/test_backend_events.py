@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from chat_with_your_cards.backends import (  # noqa: E402
     Done,
     ErrorEvent,
+    PermissionDenied,
     TextDelta,
     ThinkingDelta,
     ToolCallFinished,
@@ -103,6 +104,19 @@ class EventToDictTest(unittest.TestCase):
         self.assertEqual(
             {"type": "error", "message": "backend exploded"},
             event_to_dict(ErrorEvent("backend exploded")),
+        )
+
+    def test_permission_denied(self) -> None:
+        self.assertEqual(
+            {
+                "type": "permission_denied",
+                "denials": [{"tool": "Bash", "detail": '{"command":"rm -rf /"}'}],
+            },
+            event_to_dict(
+                PermissionDenied(
+                    denials=({"tool": "Bash", "detail": '{"command":"rm -rf /"}'},)
+                )
+            ),
         )
 
     def test_all_events_json_serializable(self) -> None:
