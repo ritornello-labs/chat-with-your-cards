@@ -982,6 +982,13 @@ export function installDevReplayer(): void {
           fast: false,
           tools: "sandbox",
         });
+        // Chrome parity (#23): context chip + learning nudge.
+        window.chatUI?.dispatch({
+          type: "context",
+          label: "card in Math::Analysis",
+          kind: "card",
+        });
+        window.chatUI?.dispatch({ type: "learning", pending: 12, nudge: true });
         window.chatUI?.dispatch({
           type: "ui_config",
           suggested_questions: true,
@@ -1092,6 +1099,13 @@ export function installDevReplayer(): void {
             },
           ],
         });
+        break;
+      case "start_skill_review":
+        window.chatUI?.dispatch({
+          type: "notice",
+          text: "Desktop Anki starts the skill-review chat here.",
+        });
+        window.chatUI?.dispatch({ type: "learning", pending: 0, nudge: false });
         break;
       case "run_doctor":
         window.setTimeout(() => {

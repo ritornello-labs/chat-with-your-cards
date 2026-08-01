@@ -1,6 +1,11 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { KeyboardEvent } from "react";
-import { ComposerPrimitive, MessagePrimitive, ThreadPrimitive } from "@assistant-ui/react";
+import {
+  ComposerPrimitive,
+  MessagePrimitive,
+  ThreadPrimitive,
+  useComposerRuntime,
+} from "@assistant-ui/react";
 import { useChatState } from "./ChatRuntimeProvider";
 import type { ChatStore, GradingCardData, ProposalCardData } from "./store";
 import { ProposalCard } from "./components/ProposalCard";
@@ -112,8 +117,114 @@ function AssistantMessage({ store }: { store: ChatStore }) {
   );
 }
 
+/** Suggested-question ghost text (#23b): rotating, context-aware
+ *  placeholders with Tab-to-accept - the classic UI's affordance, ported. */
+const CARD_QUESTIONS = [
+  "Why is this the answer?",
+  "Give me a mnemonic for this",
+  "Is this card well-formed?",
+  "Set this card aside for today",
+  "What else should I know about this?",
+];
+const COLLECTION_QUESTIONS = [
+  "What's due today across my decks?",
+  "What's my true retention this month?",
+  "Find duplicates in my collection",
+  "Suspend my leeches for now",
+  "Spread my backlog over the next week",
+];
+const SUGGESTION_ROTATE_MS = 7000;
+
+/** The bulk accept/reject bar (#23c): shows when several proposals await. */
+function BulkProposalBar({ store }: { store: ChatStore }) {
+  const { ui } = useChatState(store);
+  const count = ui.pendingProposals.length;
+  if (count < 2) return null;
+  return (
+    <div className="cwyc-bulk-bar" data-testid="bulk-bar" role="toolbar">
+      <span className="cwyc-bulk-count">{count} proposals pending</span>
+      <button
+        type="button"
+        className="cwyc-bulk-btn"
+        data-testid="bulk-reject"
+        onClick={() => store.rejectAllPending()}
+      >
+        Reject all
+      </button>
+      <button
+        type="button"
+        className="cwyc-bulk-btn cwyc-bulk-accept"
+        data-testid="bulk-accept"
+        onClick={() => store.acceptAllPending()}
+      >
+        Accept all
+      </button>
+    </div>
+  );
+}
+
+/** What the assistant will see (#23a) + the learning nudge (#23d): both are
+ *  context-category chrome, so they live with Pins and Attach. */
+function ContextChip({ store }: { store: ChatStore }) {
+  const { ui } = useChatState(store);
+  if (!ui.context) return null;
+  return (
+    <span
+      className="cwyc-chip cwyc-chip-static"
+      title="What the assistant will see with your next message"
+      data-testid="context-chip"
+    >
+      <svg viewBox="0 0 14 14" width="11" height="11" aria-hidden="true" fill="none">
+        <circle cx="7" cy="7" r="2.2" fill="currentColor" />
+        <path
+          d="M1.2 7C2.8 4 4.8 2.5 7 2.5S11.2 4 12.8 7C11.2 10 9.2 11.5 7 11.5S2.8 10 1.2 7Z"
+          stroke="currentColor"
+          strokeWidth="1.2"
+        />
+      </svg>
+      {ui.context.label}
+    </span>
+  );
+}
+
+function LearningNudgeChip({ store }: { store: ChatStore }) {
+  const { ui } = useChatState(store);
+  if (!ui.learning?.nudge) return null;
+  return (
+    <button
+      type="button"
+      className="cwyc-chip cwyc-chip-on"
+      title="You've edited AI-written cards since the last review - distill the pattern into the authoring skill"
+      data-testid="learning-nudge"
+      onClick={() => store.startSkillReview()}
+    >
+      ✎ Review {ui.learning.pending} edit{ui.learning.pending === 1 ? "" : "s"}
+    </button>
+  );
+}
+
 function Composer({ store }: { store: ChatStore }) {
   const { isRunning, ui } = useChatState(store);
+  const composer = useComposerRuntime();
+
+  // Rotating suggestion for the placeholder (#23b). Pool follows the live
+  // context; rotation is time-based and cheap (one state tick).
+  const pool = ui.context?.kind === "card" ? CARD_QUESTIONS : COLLECTION_QUESTIONS;
+  const [suggestionIndex, setSuggestionIndex] = useState(0);
+  useEffect(() => {
+    if (!ui.suggestedQuestions) return;
+    const timer = window.setInterval(
+      () => setSuggestionIndex((i) => i + 1),
+      SUGGESTION_ROTATE_MS
+    );
+    return () => window.clearInterval(timer);
+  }, [ui.suggestedQuestions]);
+  const suggestion = ui.suggestedQuestions
+    ? pool[suggestionIndex % pool.length]
+    : null;
+  const placeholder = suggestion
+    ? `${suggestion}  (Tab to accept)`
+    : "Ask about this card…";
 
   // Make the tooltips true: Esc stops generation while streaming; Shift+Tab
   // cycles permission modes (both classic-UI behaviors, DESIGN.md section 9).
@@ -124,6 +235,15 @@ function Composer({ store }: { store: ChatStore }) {
     } else if (e.key === "Tab" && e.shiftKey) {
       e.preventDefault();
       store.cyclePermissionMode();
+    } else if (
+      e.key === "Tab" &&
+      suggestion &&
+      e.currentTarget.value.trim() === ""
+    ) {
+      // Tab-to-accept the ghost suggestion (#23b) - only on an empty
+      // composer, so Tab keeps its focus-move meaning while typing.
+      e.preventDefault();
+      composer.setText(suggestion);
     }
   };
 
@@ -158,13 +278,14 @@ function Composer({ store }: { store: ChatStore }) {
       {/* What this chat changed, and the way back. Above the composer because
           it is about the session, not any one message (task #18). */}
       <LedgerStrip store={store} />
+      <BulkProposalBar store={store} />
       <DeferredUndoChip store={store} />
       {ui.settings?.vimMode ? (
         <VimComposer store={store} />
       ) : (
         <ComposerPrimitive.Input
           className="cwyc-composer-input"
-          placeholder="Ask about this card…"
+          placeholder={placeholder}
           rows={1}
           data-testid="composer-input"
           onKeyDown={onKeyDown}
@@ -176,9 +297,11 @@ function Composer({ store }: { store: ChatStore }) {
             the attachment control (task #15) has a home next to it rather
             than being wedged among the mode chips. */}
         <div className="cwyc-composer-context">
+          <ContextChip store={store} />
           <PinsButton store={store} />
           <AttachButton store={store} />
           <SetAsideChip store={store} />
+          <LearningNudgeChip store={store} />
         </div>
         <div className="cwyc-composer-left">
           <ModeChip store={store} />

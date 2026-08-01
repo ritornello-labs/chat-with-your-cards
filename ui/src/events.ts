@@ -196,6 +196,20 @@ export interface SetAsideEntryPayload {
   back: string;
 }
 
+/** What the assistant will see with the next message (#23a). */
+export interface ContextEvent {
+  type: "context";
+  label: string;
+  kind?: string;
+}
+
+/** Learning nudge state (#23d): pending edit-observation count. */
+export interface LearningEvent {
+  type: "learning";
+  pending: number;
+  nudge: boolean;
+}
+
 /** The full set-aside list (task #33): pushed on ready, on get_deferred, and
  *  after every deferral mutation, so the tray and its badge never go stale. */
 export interface DeferredListEvent {
@@ -431,6 +445,8 @@ export type KnownChatEvent =
   | ReviewStateEvent
   | CardDeferredEvent
   | DeferredListEvent
+  | ContextEvent
+  | LearningEvent
   | AttachmentsEvent
   | LedgerEvent
   | GradingEvent

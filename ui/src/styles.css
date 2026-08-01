@@ -1664,6 +1664,49 @@ body {
   color: var(--cwyc-text-dim);
 }
 
+/* Chrome parity (#23): context chip, bulk bar, learning nudge. */
+.cwyc-chip-static {
+  cursor: default;
+  color: var(--cwyc-text-dim);
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cwyc-bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  margin-bottom: 6px;
+  border: 1px solid var(--cwyc-border);
+  border-radius: 9px;
+  background: var(--cwyc-bg-raised, var(--cwyc-bg));
+  font-size: 12px;
+}
+
+.cwyc-bulk-count {
+  flex: 1 1 auto;
+  color: var(--cwyc-text-dim);
+}
+
+.cwyc-bulk-btn {
+  border: 1px solid var(--cwyc-border);
+  border-radius: 7px;
+  background: none;
+  color: inherit;
+  font-size: 12px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.cwyc-bulk-accept {
+  background: var(--cwyc-accent);
+  border-color: var(--cwyc-accent);
+  color: var(--cwyc-on-accent, #fff);
+}
+
 /* Composer attachment list (#15a). */
 .cwyc-panel-attachments {
   min-width: 260px;
@@ -2813,12 +2856,13 @@ body {
      Only the chips wrap, inside their own groups. */
   flex-wrap: nowrap;
 }
-/* Context group (pins today, attachments next). Never shrinks and never
-   wraps: it is one or two controls, and it anchors the left edge so the mode
-   chips reflow around it. The extra margin is the category break - a divider
-   RULE would have to wrap along with the chips, which it cannot do sanely. */
+/* Context group - grown to five chips (#23: context, pins, attach,
+   set-aside, learning nudge), so it now SHRINKS and wraps like the other
+   groups instead of shoving the row off the edge. The extra margin is the
+   category break - a divider RULE would have to wrap along with the chips,
+   which it cannot do sanely. */
 .cwyc-composer-context {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   margin-right: 4px;
 }
 .cwyc-composer-context,

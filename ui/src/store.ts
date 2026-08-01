@@ -378,6 +378,15 @@ export interface UiState {
     kind: string;
     size: number;
   }[];
+  /** What the assistant will actually see with the next message (#23a):
+   *  the current card, or the collection-overview default. */
+  readonly context: { label: string; kind: string } | null;
+  /** Suggested-question ghost text enabled (#23b, ui_config). */
+  readonly suggestedQuestions: boolean;
+  /** Pending (not open) proposal ids, for the bulk bar (#23c). */
+  readonly pendingProposals: readonly string[];
+  /** Learning nudge state (#23d): pending observation count + nudge flag. */
+  readonly learning: { pending: number; nudge: boolean } | null;
 }
 
 /** The permission ladder, most restrictive first (#26). Hints describe
@@ -422,6 +431,10 @@ const DEFAULT_UI_STATE: UiState = {
   setAside: [],
   setAsideCount: 0,
   attachments: [],
+  context: null,
+  suggestedQuestions: true,
+  pendingProposals: [],
+  learning: null,
 };
 
 export interface ChatState {
@@ -606,6 +619,25 @@ export class ChatStore {
    *  that crosses the bridge, since clipboard content has no path. */
   attachPasted(name: string, mime: string, dataUrl: string): void {
     postCommand({ type: "attach_pasted", name, mime, data: dataUrl });
+  }
+
+  /** Bulk bar (#23c): resolve every pending proposal with one decision.
+   *  Bare accepts - Python falls back to each proposal's own values. */
+  acceptAllPending(): void {
+    for (const id of this.ui.pendingProposals) {
+      postCommand({ type: "proposal_accept", id });
+    }
+  }
+
+  rejectAllPending(): void {
+    for (const id of this.ui.pendingProposals) {
+      postCommand({ type: "proposal_reject", id });
+    }
+  }
+
+  /** Learning nudge (#23d): kick off the skill-review chat. */
+  startSkillReview(): void {
+    postCommand({ type: "start_skill_review" });
   }
 
   rejectProposal(id: string): void {
@@ -897,12 +929,43 @@ export class ChatStore {
       case "tool_call_finished":
         this.finishToolCall(event as ToolCallFinishedEvent);
         break;
-      case "proposal":
-        this.upsertProposal((event as ProposalEvent).proposal);
+      case "proposal": {
+        const payload = (event as ProposalEvent).proposal;
+        this.upsertProposal(payload);
+        // Bulk bar (#23c): track pending, review-ready proposals.
+        const pending = payload.status === "pending" && !payload.open;
+        const listed = this.ui.pendingProposals.includes(payload.id);
+        if (pending && !listed) {
+          this.ui = {
+            ...this.ui,
+            pendingProposals: [...this.ui.pendingProposals, payload.id],
+          };
+          this.emit();
+        } else if (!pending && listed) {
+          this.ui = {
+            ...this.ui,
+            pendingProposals: this.ui.pendingProposals.filter(
+              (id) => id !== payload.id
+            ),
+          };
+          this.emit();
+        }
         break;
-      case "proposal_resolved":
-        this.resolveProposal(event as ProposalResolvedEvent);
+      }
+      case "proposal_resolved": {
+        const resolved = event as ProposalResolvedEvent;
+        this.resolveProposal(resolved);
+        if (this.ui.pendingProposals.includes(resolved.id)) {
+          this.ui = {
+            ...this.ui,
+            pendingProposals: this.ui.pendingProposals.filter(
+              (id) => id !== resolved.id
+            ),
+          };
+          this.emit();
+        }
         break;
+      }
       case "proposal_error":
         this.errorProposal(event as ProposalErrorEvent);
         break;
@@ -1052,9 +1115,36 @@ export class ChatStore {
         break;
       }
       case "ui_config": {
-        const cfg = event as { open_in_claude_target?: string };
+        const cfg = event as {
+          open_in_claude_target?: string;
+          suggested_questions?: boolean;
+        };
         const target = cfg.open_in_claude_target === "desktop" ? "desktop" : "terminal";
-        this.ui = { ...this.ui, openTarget: target };
+        this.ui = {
+          ...this.ui,
+          openTarget: target,
+          suggestedQuestions: cfg.suggested_questions !== false,
+        };
+        this.emit();
+        break;
+      }
+      case "context": {
+        const ctx = event as { label?: string; kind?: string };
+        this.ui = {
+          ...this.ui,
+          context: ctx.label
+            ? { label: String(ctx.label), kind: String(ctx.kind ?? "") }
+            : null,
+        };
+        this.emit();
+        break;
+      }
+      case "learning": {
+        const learn = event as { pending?: number; nudge?: boolean };
+        this.ui = {
+          ...this.ui,
+          learning: { pending: Number(learn.pending ?? 0), nudge: !!learn.nudge },
+        };
         this.emit();
         break;
       }
