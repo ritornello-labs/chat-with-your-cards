@@ -38,6 +38,9 @@ const OP_LABELS: Record<string, string> = {
   set_due_date: "Set due date",
   forget_cards: "Forget cards",
   reposition_new_cards: "Reposition new cards",
+  undo_change: "Undo",
+  check_database: "Check Database",
+  sync_now: "Sync",
 };
 
 /** What `count` counts - "400 item(s)" says less than nothing. Keyed by op,

@@ -423,6 +423,7 @@ class ProposalManager:
         apply_skill_create: Callable[["Proposal"], list[str]] | None = None,
         list_skill_names: Callable[[], set[str]] | None = None,
         media_staging: Any | None = None,
+        sync_now: Any | None = None,
     ) -> None:
         self._get_col = get_col
         # Quiet mode (#27): while a batch applies its items through their
@@ -483,6 +484,9 @@ class ProposalManager:
         # None (tests that don't care / minimal setups) disables the media
         # arg on propose_note with a clear error instead of silent drops.
         self._media = media_staging
+        # Starts Anki's own sync flow (#8); injected by the add-on glue so
+        # this module stays aqt-free. None = sync tool unavailable.
+        self._sync_now = sync_now
         if self._media is not None:
             # Clear staging dirs abandoned by crashes/never-resolved
             # proposals; bounded work at startup, best-effort.
@@ -1277,6 +1281,64 @@ class ProposalManager:
             self._media.discard(proposal.id)
         proposal.status = ACCEPTED
         return []
+
+    def submit_undo_change(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Undo Anki's queue head (#8) - INSPECTED, never blind.
+
+        After any intervening GUI action the head may not be ours (it could
+        be the user's own review answer), so the card names exactly what
+        would be undone, and apply re-inspects: a moved queue is a clean
+        error, never a misfire.
+        """
+        col = self._col()
+        try:
+            status = col.undo_status()
+        except Exception as exc:
+            raise ProposalError(f"undo status unavailable: {exc}") from None
+        label = str(getattr(status, "undo", "") or "")
+        if not label:
+            raise ProposalError("there is nothing to undo right now")
+        return self._deck_op_proposal(
+            op="undo_change",
+            op_args={"expected": label, "step": int(getattr(status, "last_step", 0))},
+            deck="",
+            rationale=str(args.get("rationale", "")),
+            samples=[f'Undo "{label}" (the current head of Anki\'s undo queue)'],
+            warnings=[
+                "this may be the user's own most recent action - the label "
+                "above is exactly what will be undone"
+            ],
+        )
+
+    def submit_check_database(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Anki's Check Database (#8): integrity check + rebuild."""
+        return self._deck_op_proposal(
+            op="check_database",
+            op_args={},
+            deck="",
+            rationale=str(args.get("rationale", "")),
+            samples=["Run Anki's full database integrity check"],
+            warnings=[
+                "the collection is unresponsive while it runs (seconds to "
+                "minutes on large collections); a backup checkpoint is taken "
+                "first; not revertible - it is a repair"
+            ],
+        )
+
+    def submit_sync_now(self, args: dict[str, Any]) -> dict[str, Any]:
+        if self._sync_now is None:
+            raise ProposalError("sync is not available in this session")
+        return self._deck_op_proposal(
+            op="sync_now",
+            op_args={},
+            deck="",
+            rationale=str(args.get("rationale", "")),
+            samples=["Start an AnkiWeb sync (Anki's own sync window takes over)"],
+            warnings=[
+                "not revertible from here; if a full one-way sync is needed, "
+                "Anki will ask for the direction itself"
+            ],
+        )
 
     def submit_card_state(self, args: dict[str, Any]) -> dict[str, Any]:
         """Card-state ops (#3): suspend/unsuspend, bury/unbury, flags.
@@ -3141,6 +3203,10 @@ class ProposalManager:
         # is not stored anywhere, and re-running them is one chat message.
         if proposal.kind == "deck_op" and proposal.op == "filtered_deck_action":
             return False
+        # Safety-net ops (#8): undo's inverse is Anki's own redo; a database
+        # repair and a sync have no meaningful inverse here.
+        if proposal.op in ("undo_change", "check_database", "sync_now"):
+            return False
         # Registry-only cleanup: a tag reappears the moment a note uses it.
         if proposal.op == "clear_unused_tags":
             return False
@@ -3319,6 +3385,48 @@ class ProposalManager:
                         },
                     )
                 )
+            elif proposal.op == "undo_change":
+                # Re-inspect (#8): the queue may have moved since review, and
+                # firing blind could undo the user's own latest action.
+                status = col.undo_status()
+                current = str(getattr(status, "undo", "") or "")
+                expected = str(a.get("expected", ""))
+                if not current:
+                    raise ProposalError("there is nothing to undo anymore")
+                if current != expected or int(
+                    getattr(status, "last_step", 0)
+                ) != int(a.get("step", 0)):
+                    raise ProposalError(
+                        f"the undo queue moved since review: it would now undo "
+                        f"{current!r} instead of {expected!r} - ask again for a "
+                        "fresh card"
+                    )
+                col.undo()
+                proposal.warnings = [
+                    f'undid "{expected}"; Anki\'s redo (Edit menu) can bring '
+                    "it back while nothing else changes the queue"
+                ]
+                # No ledger entry: the inverse IS Anki's redo.
+            elif proposal.op == "check_database":
+                if not self._checkpoint("check database", False):
+                    proposal.warnings.append(
+                        "backup checkpoint failed before Check Database — "
+                        "check disk space / permissions"
+                    )
+                report, ok = col.fix_integrity()
+                summary = " ".join(str(report).split())
+                proposal.warnings = list(proposal.warnings) + [
+                    ("integrity OK: " if ok else "PROBLEMS FOUND: ")
+                    + (summary[:400] or "(no report)")
+                ]
+                # No ledger entry: a repair has no meaningful inverse.
+            elif proposal.op == "sync_now":
+                if self._sync_now is None:
+                    raise ProposalError("sync is not available in this session")
+                self._sync_now()
+                proposal.warnings = [
+                    "sync started - Anki's own sync window takes over from here"
+                ]
             elif proposal.op == "filtered_deck_action":
                 # One card may carry many decks (#27 quick win). Per-deck
                 # outcomes surface as warnings so a batch never reads as one

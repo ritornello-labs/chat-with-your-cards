@@ -711,6 +711,7 @@ def _setup() -> None:
         apply_skill_create=_apply_new_skill,
         list_skill_names=_agent_skill_names,
         media_staging=_build_media_staging(),
+        sync_now=lambda: mw.onSync(),
     )
     state.grading = GradingManager(
         get_col=lambda: mw.col,

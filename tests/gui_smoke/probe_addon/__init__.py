@@ -758,6 +758,62 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
 
     check("attachment transports: drop/paste/PDF + inline image send (#15)", _attachment_transports_flow)
 
+    def _safety_net_flow() -> dict[str, Any]:
+        """#8 on real Anki: the undo card names the real queue head and the
+        stale guard refuses a moved queue; a fresh undo really removes the
+        note; check_database reports; sync status answers honestly when
+        logged out; create_backup_now writes a real backup."""
+        addon = importlib.import_module(ADDON_PACKAGE)
+        from chat_with_your_cards.tools import build_registry
+
+        registry = build_registry()
+        ctx = addon._ToolCtx()
+
+        _new_note("undo me", deck="ProbeSafety")
+        status = registry.call(ctx, "get_undo_status", {})
+        if status["undo"] != "Add Note":
+            raise AssertionError(f"unexpected undo head: {status}")
+
+        stale = proposals.submit_undo_change({})
+        nid2 = _new_note("moved the queue", deck="ProbeSafety")  # head moves
+        with _capture_pushes(proposals) as pushes:
+            proposals.accept({"id": stale["proposal_id"]})
+        errors = [p for p in pushes if p.get("type") == "proposal_error"]
+        if not errors or "queue moved" not in errors[0]["message"]:
+            raise AssertionError(f"stale-undo guard did not fire: {errors}")
+        if not _note_exists(nid2):
+            raise AssertionError("stale undo fired anyway and removed the note")
+
+        fresh = proposals.submit_undo_change({})
+        proposals.accept({"id": fresh["proposal_id"]})
+        if _note_exists(nid2):
+            raise AssertionError("undo did not remove the just-added note")
+
+        with _capture_pushes(proposals) as pushes:
+            checked = proposals.submit_check_database({})
+            proposals.accept({"id": checked["proposal_id"]})
+        resolved = [p for p in pushes if p.get("type") == "proposal_resolved"][-1]
+        if not any("integrity" in w.lower() for w in resolved.get("warnings", [])):
+            raise AssertionError(f"no integrity report: {resolved.get('warnings')}")
+
+        sync = registry.call(ctx, "get_sync_status", {})
+        if "logged_in" not in sync or "pending_changes" not in sync:
+            raise AssertionError(f"sync status malformed: {sync}")
+
+        backup = registry.call(ctx, "create_backup_now", {})
+        if not backup.get("created"):
+            raise AssertionError(f"backup not created: {backup}")
+        backups = list(Path(mw.pm.backupFolder()).glob("*.colpkg"))
+        if not backups:
+            raise AssertionError("no backup file on disk")
+        return {
+            "undo_head": status["undo"],
+            "sync_logged_in": sync.get("logged_in"),
+            "backups": len(backups),
+        }
+
+    check("safety net: inspected undo/check-db/sync/backup (#8)", _safety_net_flow)
+
     def _change_set() -> dict[str, Any]:
         ids = [_new_note(f"cs {i}", back="orig") for i in range(3)]
         cs = proposals.open_change_set({"title": "probe sweep"})

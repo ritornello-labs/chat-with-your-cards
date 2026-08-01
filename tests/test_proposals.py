@@ -479,6 +479,21 @@ class FakeCol:
     def undo(self) -> None:
         self.undo_calls += 1
 
+    # --- safety net (#8) ---
+
+    _undo_label = "Add Note"
+    _undo_step = 7
+
+    def undo_status(self) -> Any:
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            undo=self._undo_label, redo="", last_step=self._undo_step
+        )
+
+    def fix_integrity(self) -> tuple[str, bool]:
+        return ("Database rebuilt and optimized.", True)
+
     # --- transaction rollback support (see FakeDB.transact) ---
 
     def _snapshot_state(self) -> Any:
@@ -616,6 +631,7 @@ def make_manager(
     apply_skill_create=None,
     list_skill_names=None,
     media_staging=None,
+    sync_now=None,
 ):
     col = FakeCol()
     pushed: list[dict[str, Any]] = []
@@ -636,6 +652,7 @@ def make_manager(
         apply_skill_create=apply_skill_create,
         list_skill_names=list_skill_names,
         media_staging=media_staging,
+        sync_now=sync_now,
     )
     return manager, col, pushed
 
@@ -1925,6 +1942,66 @@ class CardStateTests(unittest.TestCase):
         self.assertIn("Clear the flag", proposal["samples"][0]["text"])
         manager.accept({"id": result["proposal_id"]})
         self.assertIn("clear the flag on 3 card(s)", manager._ledger[-1].label)
+
+
+class SafetyNetTests(unittest.TestCase):
+    """Undo / Check Database / sync (#8): inspected undo with a stale-queue
+    guard, integrity report on the card, injected sync callable."""
+
+    def test_undo_names_head_and_applies(self) -> None:
+        checkpoints: list = []
+        manager, col, pushed = make_manager(checkpoints=checkpoints)
+        result = manager.submit_undo_change({})
+        proposal = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertIn('Undo "Add Note"', proposal["samples"][0]["text"])
+        self.assertTrue(
+            any("user's own most recent action" in w for w in proposal["warnings"])
+        )
+        manager.accept({"id": result["proposal_id"]})
+        self.assertEqual(1, col.undo_calls)
+        resolved = pushes_of(pushed, "proposal_resolved")[-1]
+        self.assertFalse(resolved["revertible"])
+        self.assertTrue(any("undid" in w for w in resolved["warnings"]))
+
+    def test_undo_refuses_a_moved_queue(self) -> None:
+        manager, col, pushed = make_manager()
+        result = manager.submit_undo_change({})
+        col._undo_label = "Answer Card"  # the user reviewed in between
+        manager.accept({"id": result["proposal_id"]})
+        self.assertEqual(0, col.undo_calls)
+        errors = pushes_of(pushed, "proposal_error")
+        self.assertTrue(any("queue moved" in e["message"] for e in errors), errors)
+
+    def test_undo_with_empty_queue_is_a_clean_submit_error(self) -> None:
+        manager, col, pushed = make_manager()
+        col._undo_label = ""
+        with self.assertRaisesRegex(ProposalError, "nothing to undo"):
+            manager.submit_undo_change({})
+
+    def test_check_database_reports_and_checkpoints(self) -> None:
+        checkpoints: list = []
+        manager, col, pushed = make_manager(checkpoints=checkpoints)
+        result = manager.submit_check_database({})
+        manager.accept({"id": result["proposal_id"]})
+        resolved = pushes_of(pushed, "proposal_resolved")[-1]
+        self.assertTrue(
+            any("integrity OK: Database rebuilt" in w for w in resolved["warnings"]),
+            resolved["warnings"],
+        )
+        self.assertIn(("check database", False), checkpoints)
+        self.assertFalse(resolved["revertible"])
+
+    def test_sync_now_requires_and_calls_the_injected_starter(self) -> None:
+        manager, col, pushed = make_manager()
+        with self.assertRaisesRegex(ProposalError, "not available"):
+            manager.submit_sync_now({})
+        calls: list = []
+        manager, col, pushed = make_manager(sync_now=lambda: calls.append(1))
+        result = manager.submit_sync_now({})
+        manager.accept({"id": result["proposal_id"]})
+        self.assertEqual([1], calls)
+        resolved = pushes_of(pushed, "proposal_resolved")[-1]
+        self.assertTrue(any("sync started" in w for w in resolved["warnings"]))
 
 
 class BatchChangeSetTests(unittest.TestCase):
