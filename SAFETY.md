@@ -359,6 +359,23 @@ memory on a move), #11 (queue flood), #12 (destroying scheduling), #17 (forced f
 These should be surfaced *in the proposal card itself* — "this will discard FSRS memory for
 340 cards" — not buried in a mode setting.
 
+**Deck ops and re-applied edits joined the sandwich (2026-08-01).** Two paths
+carried a documented exemption from rule 1 and no longer do. `readd` on an
+*edit* re-applied an undone change inline, guarded only by a broad
+`try/except`: it now runs through `_apply_write`, so a half-applied re-add
+rolls back instead of persisting and can no longer leave a ledger entry
+describing a write that did not land. Deck ops ran with no transaction and
+took their backup *mid-operation*; `_accept_deck_op_guarded` now checkpoints
+before the transaction opens, runs the body inside it, and truncates the
+ledger on failure so a rolled-back deck op leaves no phantom revertible entry.
+Two ops are deliberately exempt and named as such (`_UNTRANSACTIONAL_DECK_OPS`):
+`check_database` repairs the database on its own terms, and `sync_now` hands
+control to Anki's sync window — an outer write transaction around either would
+be meaningless. Deck ops are still not routed through `_apply_write` itself:
+its postconditions assert collection-wide note/card deltas, and deck ops
+legitimately move and destroy cards, so an expectation per op would mostly say
+"anything may happen" — a check in name only.
+
 **#17 and #26 are now surfaced that way** (note-type write path, 2026-08-01): every card in
 that family leads with its blast radius in notes and decks, adds an explicit full-upload
 line when the op bumps `scm`, names the templates a field removal will rewrite, and — for

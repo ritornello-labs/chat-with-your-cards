@@ -3702,6 +3702,105 @@ class SafetyWiringTests(unittest.TestCase):
         self.assertEqual(1, col.undo_calls)
 
 
+class DeckOpGuardTests(unittest.TestCase):
+    """Deck ops get the same safety sandwich as content writes.
+
+    They used to run inline: no transaction, and the backup was taken
+    mid-operation. A failure partway through could leave a ledger entry
+    describing a write that had been abandoned - one the user could then click
+    "undo" on.
+    """
+
+    def test_failed_deck_op_leaves_no_phantom_ledger_entry(self) -> None:
+        manager, col, pushed = make_manager()
+        create = manager.submit_create_deck({"name": "Guarded"})
+        manager.accept({"id": create["proposal_id"]})
+        entries_before = len(manager._ledger)
+
+        # Rename onto a name that gets taken between submit and accept: the
+        # op raises after its branch has begun.
+        rename = manager.submit_rename_deck({"deck": "Guarded", "new_name": "Taken"})
+        col.decks.id("Taken")
+        manager.accept({"id": rename["proposal_id"]})
+
+        errors = [p for p in pushed if p["type"] == "proposal_error"]
+        self.assertTrue(errors, "the collision should have been reported")
+        self.assertEqual(
+            entries_before,
+            len(manager._ledger),
+            "a failed deck op must not leave a revertible ledger entry",
+        )
+
+    def test_delete_deck_backup_is_critical_and_aborts_on_failure(self) -> None:
+        checkpoints: list[tuple[str, bool]] = []
+        manager, col, pushed = make_manager(
+            checkpoints=checkpoints, checkpoint_ok=False
+        )
+        _seed_notes(manager, col, pushed)
+        cards_before = len(col._cards)
+        result = manager.submit_delete_deck({"deck": "Default"})
+        manager.accept({"id": result["proposal_id"]})
+
+        self.assertIn(
+            ("delete deck", True),
+            checkpoints,
+            "a card-bearing deck must take a CRITICAL checkpoint",
+        )
+        errors = [p for p in pushed if p["type"] == "proposal_error"]
+        self.assertTrue(errors, "a failed critical backup must be reported")
+        self.assertIn("backup failed", errors[-1]["message"])
+        self.assertIn("Default", [d["name"] for d in col.decks.all()])
+        self.assertEqual(cards_before, len(col._cards))
+
+    def test_empty_deck_delete_needs_no_backup(self) -> None:
+        checkpoints: list[tuple[str, bool]] = []
+        manager, col, pushed = make_manager(checkpoints=checkpoints)
+        manager.accept(
+            {"id": manager.submit_create_deck({"name": "EmptyDeck"})["proposal_id"]}
+        )
+        result = manager.submit_delete_deck({"deck": "EmptyDeck"})
+        manager.accept({"id": result["proposal_id"]})
+        self.assertEqual(
+            [], [c for c in checkpoints if c[0] == "delete deck"],
+            "an empty deck is not destructive; no backup needed",
+        )
+        self.assertNotIn("EmptyDeck", [d["name"] for d in col.decks.all()])
+
+    def test_deck_options_checkpoint_is_non_critical_and_only_warns(self) -> None:
+        checkpoints: list[tuple[str, bool]] = []
+        manager, col, pushed = make_manager(
+            checkpoints=checkpoints, checkpoint_ok=False
+        )
+        result = manager.submit_set_deck_options(
+            {"deck": "Default", "options": {"new.perDay": 5}}
+        )
+        manager.accept({"id": result["proposal_id"]})
+
+        self.assertIn(("deck options", False), checkpoints)
+        resolved = pushes_of(pushed, "proposal_resolved")[-1]
+        self.assertEqual("accepted", resolved["status"])
+        self.assertTrue(
+            [w for w in resolved["warnings"] if "backup checkpoint failed" in w],
+            resolved["warnings"],
+        )
+
+    def test_untransactional_ops_are_named_and_still_run(self) -> None:
+        """fix_integrity and sync manage their own atomicity; wrapping them in
+        an outer write transaction would be meaningless."""
+        self.assertEqual(
+            {"check_database", "sync_now"},
+            set(ProposalManager._UNTRANSACTIONAL_DECK_OPS),
+        )
+        checkpoints: list[tuple[str, bool]] = []
+        manager, col, pushed = make_manager(checkpoints=checkpoints)
+        result = manager.submit_check_database({})
+        manager.accept({"id": result["proposal_id"]})
+        self.assertIn(("check database", False), checkpoints)
+        self.assertEqual(
+            "accepted", pushes_of(pushed, "proposal_resolved")[-1]["status"]
+        )
+
+
 class UndoDiscardTests(unittest.TestCase):
     """SAFETY.md's "Known wart on the rollback path": a postcondition that
     rejects a write AFTER the backend already applied it leaves a dangling

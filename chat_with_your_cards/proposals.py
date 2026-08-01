@@ -4026,13 +4026,7 @@ class ProposalManager:
             elif proposal.kind == "change_set":
                 touched = self._accept_change_set(proposal)
             elif proposal.kind == "deck_op":
-                # SAFETY: not yet unified through _apply_write. Deck ops change
-                # no note/card counts (create/rename/options/filtered rebuild),
-                # already convert backend errors to ProposalError, resolve decks
-                # by name, and refresh the deck browser. What remains to unify:
-                # wrap _accept_deck_op in a transaction and add a filtered-deck
-                # corruption postcondition for create_filtered_deck/rebuild.
-                touched = self._accept_deck_op(proposal)
+                touched = self._accept_deck_op_guarded(proposal)
             elif proposal.kind == "note_type_op":
                 touched = self._accept_note_type_op(proposal)
             elif proposal.kind == "skill_update":
@@ -4495,6 +4489,81 @@ class ProposalManager:
             )
         return [note]
 
+    # Deck ops that CANNOT run inside our transaction, and why. Both are
+    # whole-collection operations that manage their own atomicity: fix_integrity
+    # rebuilds and repairs the database (it sets schema-modified itself), and a
+    # sync hands control to Anki's own sync window. Wrapping either in an outer
+    # write transaction would be, at best, meaningless.
+    _UNTRANSACTIONAL_DECK_OPS = frozenset({"check_database", "sync_now"})
+
+    # Backup taken BEFORE the transaction opens, mirroring _apply_write's
+    # backup_reason/critical_backup. These used to be taken inline, mid-op;
+    # once the body became transactional that would have meant writing a backup
+    # from inside an open write transaction.
+    _DECK_OP_BACKUP: dict[str, tuple[str, bool]] = {
+        "set_deck_options": ("deck options", False),
+        "delete_deck": ("delete deck", True),
+        "check_database": ("check database", False),
+    }
+
+    def _accept_deck_op_guarded(self, proposal: Proposal) -> list[int]:
+        """Deck ops through the same safety sandwich as content writes.
+
+        Previously these ran inline: no transaction, and a failure partway
+        through a multi-step op could leave a ledger entry describing a write
+        that had been abandoned - an entry the user could then click "undo" on.
+        Now the backup is taken up front, the body runs inside the collection's
+        write transaction, and the ledger is truncated to its pre-write length
+        on any failure, so a rolled-back deck op can never leave a phantom
+        revertible entry behind.
+
+        Deliberately NOT routed through ``_apply_write`` itself: its invariant
+        postconditions assert collection-wide note/card deltas, and deck ops
+        legitimately move cards (delete_deck destroys them, filtered rebuild
+        moves them between decks). Reusing it would mean declaring an
+        expectation per op that mostly says "anything may happen", which is a
+        check in name only. The parts that carry real weight here - backup
+        first, atomic body, no phantom ledger - are what this provides.
+        """
+        reason_critical = self._DECK_OP_BACKUP.get(proposal.op)
+        if reason_critical is not None:
+            reason, critical = reason_critical
+            if proposal.op == "delete_deck":
+                # Only a deck that actually holds cards is destructive; an
+                # empty or filtered one needs no safety net. Computed from
+                # op_args so the decision happens before the transaction.
+                args = proposal.op_args
+                critical = not args.get("filtered") and int(args.get("cards", 0)) > 0
+                if not critical:
+                    reason_critical = None
+            if reason_critical is not None and not self._checkpoint(reason, critical):
+                if critical:
+                    raise ProposalError(
+                        "backup failed; deck not deleted — check disk space / "
+                        "permissions"
+                    )
+                proposal.warnings.append(
+                    f"backup checkpoint failed ({reason}); proceeding without a "
+                    "fresh backup — check disk space / permissions"
+                )
+
+        if proposal.op in self._UNTRANSACTIONAL_DECK_OPS:
+            return self._accept_deck_op(proposal)
+
+        col = self._col()
+        ledger_mark = len(self._ledger)
+        box: dict[str, list[int]] = {}
+
+        def run() -> None:
+            box["touched"] = self._accept_deck_op(proposal)
+
+        try:
+            self._run_in_transaction(col, run)
+        except Exception:
+            del self._ledger[ledger_mark:]
+            raise
+        return box.get("touched", [])
+
     def _accept_deck_op(self, proposal: Proposal) -> list[int]:
         col = self._col()
         a = proposal.op_args
@@ -4534,14 +4603,9 @@ class ProposalManager:
                 if deck.get("dyn"):
                     raise ProposalError("filtered decks have no options preset")
                 conf = col.decks.config_dict_for_deck_id(did)
-                # Shared presets have collection-wide blast radius: checkpoint.
-                # Non-critical (reversible via the ledger below): a failed
-                # checkpoint does not block the change, just warns.
-                if not self._checkpoint("deck options", False):
-                    proposal.warnings.append(
-                        "backup checkpoint failed (deck options); proceeding "
-                        "without a fresh backup — check disk space / permissions"
-                    )
+                # Shared presets have collection-wide blast radius, so this
+                # checkpoints - taken by _accept_deck_op_guarded before the
+                # transaction opens (_DECK_OP_BACKUP), not here.
                 priors: dict[str, Any] = {}
                 for path, new in a["options"].items():
                     node, leaf = self._resolve_option(conf, path)
@@ -4687,12 +4751,9 @@ class ProposalManager:
                 )
             elif proposal.op == "delete_deck":
                 did, deck = self._deck_by_name(col, a["deck"])
-                destructive = not a.get("filtered") and int(a.get("cards", 0)) > 0
-                if destructive and not self._checkpoint("delete deck", True):
-                    raise ProposalError(
-                        "backup failed; deck not deleted — check disk space / "
-                        "permissions"
-                    )
+                # The critical backup for a card-bearing deck is taken by
+                # _accept_deck_op_guarded before the transaction opens, and a
+                # failed one aborts there rather than here.
                 col.decks.remove([did])
                 proposal.warnings = list(proposal.warnings) + [
                     (
@@ -4855,11 +4916,9 @@ class ProposalManager:
                 ]
                 # No ledger entry: the inverse IS Anki's redo.
             elif proposal.op == "check_database":
-                if not self._checkpoint("check database", False):
-                    proposal.warnings.append(
-                        "backup checkpoint failed before Check Database — "
-                        "check disk space / permissions"
-                    )
+                # Checkpointed before this runs (_DECK_OP_BACKUP); this op is
+                # also deliberately NOT wrapped in our transaction, since
+                # fix_integrity repairs the database on its own terms.
                 report, ok = col.fix_integrity()
                 summary = " ".join(str(report).split())
                 proposal.warnings = list(proposal.warnings) + [
@@ -5384,42 +5443,74 @@ class ProposalManager:
                 # Re-create flows through the chokepoint (_apply_create).
                 proposal.note_id = self._apply_create(col, model, proposal)
             else:
-                # SAFETY: the readd EDIT path is not yet routed through
-                # _apply_write; it re-applies an undone edit inline and is
-                # already guarded by this method's broad try/except. What
-                # remains: fold it into the edit chokepoint like _accept_edit.
+                # Re-applying an undone edit is a content write like any
+                # other, so it goes through the chokepoint (SAFETY.md rule 1)
+                # rather than inline with a broad try/except as it used to:
+                # a half-applied re-add now rolls back instead of persisting,
+                # and it can no longer leave a ledger entry describing a write
+                # that did not land.
                 assert proposal.note_id is not None
-                note = col.get_note(proposal.note_id)
-                current = dict(note.items())
-                prior_fields = {
-                    name: current[name] for name in proposal.fields if name in current
-                }
-                prior_tags = list(note.tags)
-                for name, value in proposal.fields.items():
-                    if name in current:
-                        note[name] = value
-                for tag in proposal.add_tags:
-                    if tag not in note.tags:
-                        note.tags.append(tag)
-                note.tags = [t for t in note.tags if t not in proposal.remove_tags]
-                self._tag_edit(note)
-                col.update_note(note)
-                stored = col.get_note(proposal.note_id)
-                self._ledger.append(
-                    LedgerEntry(
-                        id=proposal.id,
-                        kind="edit",
-                        note_id=proposal.note_id,
-                        label=_short_label(next(iter(proposal.fields.values()), "")),
-                        prior_fields=prior_fields,
-                        prior_tags=prior_tags,
-                        written_fields={n: stored[n] for n in prior_fields},
-                        written_tags=list(stored.tags),
+                note_id = int(proposal.note_id)
+
+                def precheck(col: Any) -> None:
+                    try:
+                        col.get_note(note_id)
+                    except Exception:
+                        raise ProposalError("the note no longer exists") from None
+
+                def execute(col: Any, before: invariants.Snapshot) -> _WriteResult:
+                    note = col.get_note(note_id)
+                    current = dict(note.items())
+                    prior_fields = {
+                        name: current[name]
+                        for name in proposal.fields
+                        if name in current
+                    }
+                    prior_tags = list(note.tags)
+                    for name, value in proposal.fields.items():
+                        if name in current:
+                            note[name] = value
+                    for tag in proposal.add_tags:
+                        if tag not in note.tags:
+                            note.tags.append(tag)
+                    note.tags = [
+                        t for t in note.tags if t not in proposal.remove_tags
+                    ]
+                    self._tag_edit(note)
+                    col.update_note(note)
+                    stored = col.get_note(note_id)
+                    self._ledger.append(
+                        LedgerEntry(
+                            id=proposal.id,
+                            kind="edit",
+                            note_id=note_id,
+                            label=_short_label(
+                                next(iter(proposal.fields.values()), "")
+                            ),
+                            prior_fields=prior_fields,
+                            prior_tags=prior_tags,
+                            written_fields={n: stored[n] for n in prior_fields},
+                            written_tags=list(stored.tags),
+                        )
                     )
+                    return _WriteResult(
+                        None,
+                        invariants.Expectation(),
+                        invariants.Scope(
+                            note_ids=(note_id,),
+                            card_ids=tuple(int(c.id) for c in note.cards()),
+                            # update_note stamps the note, not its cards.
+                            written_note_ids=(note_id,),
+                        ),
+                    )
+
+                # lenient_cards for the same reason _accept_edit needs it: a
+                # field edit may legitimately activate or deactivate
+                # conditional cards.
+                self._apply_write(
+                    execute=execute, precheck=precheck, lenient_cards=True
                 )
-                self._observe(
-                    {"event": "applied", "note_ids": [int(proposal.note_id)]}
-                )
+                self._observe({"event": "applied", "note_ids": [note_id]})
         except Exception as exc:  # ProposalError or collection trouble
             self._push(
                 {"type": "proposal_error", "id": proposal.id, "message": str(exc)}
