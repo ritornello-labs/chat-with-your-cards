@@ -117,3 +117,24 @@ excluded:
 - Run-to-run stability on the shared four models: ±.02 soft F1.
 - Decision unchanged: Fable 5 for Phase B; the remaining ~.16 gap at Opus
   includes an unquantified concept-boundary-underdetermination floor.
+
+### §11 the underdetermination floor, measured (2026-07-31)
+
+A second Fable run on the identical sample, scored against the first through
+the adjudicated pipeline, gives **Fable self-agreement = .910 soft F1**. That
+missing .09 is the *underdetermination floor*: on notes admitting several
+defensible framings ("unique readability" vs "structural induction"), even
+the gold model disagrees with itself. No model can score 1.0; .910 is the
+ceiling. Ceiling-normalized, **Opus 4.8 reaches 93% of achievable
+agreement** — half its apparent .156 gap to gold was floor, and its real
+quality gap to Fable is ~.07 soft F1.
+
+Cost to close that ~.07 on the full 24k-note backfill (measured ~224 in /
+~96 out tokens per note): Fable ~$170 OpenRouter / ~$85 Anthropic-batch vs
+Opus ~$85 / ~$42 — a **~$43 one-time premium at batch rates**. Decision
+posture updated from "Fable, clearly" to "Fable by preference, Opus fully
+defensible": the premium is trivial in absolute dollars, but the measured
+delta is the last 7% of achievable agreement, not a categorical gap.
+(Also noted: both Fable runs dropped one batch via OpenRouter — provider
+flakiness is not Kimi-specific; the production backfill on Anthropic's
+batch API sidesteps it.)
