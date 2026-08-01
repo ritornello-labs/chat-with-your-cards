@@ -45,6 +45,7 @@ const OP_LABELS: Record<string, string> = {
   manage_preset: "Options preset",
   assign_preset: "Assign preset",
   set_deck_description: "Deck description",
+  saved_search: "Saved search",
 };
 
 /** What `count` counts - "400 item(s)" says less than nothing. Keyed by op,

@@ -526,6 +526,23 @@ class FakeCol:
     def fix_integrity(self) -> tuple[str, bool]:
         return ("Database rebuilt and optimized.", True)
 
+    # --- collection config (#12b saved searches) ---
+
+    def get_config(self, key: str, default: Any = None) -> Any:
+        import copy
+
+        if not hasattr(self, "_config_store"):
+            self._config_store: dict[str, Any] = {}
+        value = self._config_store.get(key, default)
+        return copy.deepcopy(value)
+
+    def set_config(self, key: str, value: Any) -> None:
+        import copy
+
+        if not hasattr(self, "_config_store"):
+            self._config_store = {}
+        self._config_store[key] = copy.deepcopy(value)
+
     # --- transaction rollback support (see FakeDB.transact) ---
 
     def _snapshot_state(self) -> Any:
@@ -2106,6 +2123,52 @@ class DeckPresetTests(unittest.TestCase):
             manager.submit_set_deck_description(
                 {"deck": "Default", "description": ""}
             )
+
+
+class SavedSearchTests(unittest.TestCase):
+    """Saved searches (#12b): save/update/delete with prior-value revert."""
+
+    def test_save_update_delete_and_revert(self) -> None:
+        manager, col, pushed = make_manager()
+        saved = manager.submit_manage_saved_search(
+            {"action": "save", "name": "Phase 1", "query": 'tag:"analysis"'}
+        )
+        manager.accept({"id": saved["proposal_id"]})
+        self.assertEqual(
+            {"Phase 1": 'tag:"analysis"'}, col.get_config("savedFilters", {})
+        )
+        # Update captures the prior query; revert restores it.
+        updated = manager.submit_manage_saved_search(
+            {"action": "save", "name": "Phase 1", "query": 'tag:"topology"'}
+        )
+        proposal = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertIn("Update saved search", proposal["samples"][0]["text"])
+        manager.accept({"id": updated["proposal_id"]})
+        self.assertEqual(
+            'tag:"topology"', col.get_config("savedFilters", {})["Phase 1"]
+        )
+        manager.revert({"id": updated["proposal_id"]})
+        self.assertEqual(
+            'tag:"analysis"', col.get_config("savedFilters", {})["Phase 1"]
+        )
+        # Delete; revert brings it back.
+        deleted = manager.submit_manage_saved_search(
+            {"action": "delete", "name": "Phase 1"}
+        )
+        manager.accept({"id": deleted["proposal_id"]})
+        self.assertEqual({}, col.get_config("savedFilters", {}))
+        manager.revert({"id": deleted["proposal_id"]})
+        self.assertEqual(
+            'tag:"analysis"', col.get_config("savedFilters", {})["Phase 1"]
+        )
+        # Reverting the ORIGINAL save removes the key entirely (prior=None).
+        manager.revert({"id": saved["proposal_id"]})
+        self.assertNotIn("Phase 1", col.get_config("savedFilters", {}))
+
+    def test_delete_unknown_name_lists_what_exists(self) -> None:
+        manager, col, pushed = make_manager()
+        with self.assertRaisesRegex(ProposalError, "no saved search named"):
+            manager.submit_manage_saved_search({"action": "delete", "name": "Nope"})
 
 
 class SafetyNetTests(unittest.TestCase):

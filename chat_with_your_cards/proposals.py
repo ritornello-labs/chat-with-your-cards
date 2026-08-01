@@ -1450,6 +1450,45 @@ class ProposalManager:
             samples=[f'Description for "{deck_name}": {preview}'],
         )
 
+    def submit_manage_saved_search(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Saved searches (#12b): Browse-sidebar entries in collection
+        config - the curricula shipping vehicle (filtered decks do not
+        survive .apkg export; saved searches do)."""
+        col = self._col()
+        action = str(args.get("action", "")).strip()
+        if action not in ("save", "delete"):
+            raise ProposalError("action must be 'save' or 'delete'")
+        name = str(args.get("name", "")).strip()
+        if not name:
+            raise ProposalError("a saved search needs a name")
+        saved = dict(col.get_config("savedFilters", {}) or {})
+        if action == "save":
+            query = str(args.get("query", "")).strip()
+            if not query:
+                raise ProposalError("save needs a query")
+            try:
+                col.find_cards(query)
+            except Exception as exc:
+                raise ProposalError(f"invalid search {query!r}: {exc}") from None
+            verb = "Update" if name in saved else "Save"
+            samples = [f'{verb} saved search "{name}": {query}']
+            op_args = {"action": action, "name": name, "query": query}
+        else:
+            if name not in saved:
+                raise ProposalError(
+                    f"no saved search named {name!r}; saved: "
+                    + (", ".join(sorted(saved)) or "(none)")
+                )
+            samples = [f'Delete saved search "{name}" ({saved[name]})']
+            op_args = {"action": action, "name": name}
+        return self._deck_op_proposal(
+            op="saved_search",
+            op_args=op_args,
+            deck="",
+            rationale=str(args.get("rationale", "")),
+            samples=samples,
+        )
+
     def submit_undo_change(self, args: dict[str, Any]) -> dict[str, Any]:
         """Undo Anki's queue head (#8) - INSPECTED, never blind.
 
@@ -3558,6 +3597,30 @@ class ProposalManager:
                         },
                     )
                 )
+            elif proposal.op == "saved_search":
+                saved = dict(col.get_config("savedFilters", {}) or {})
+                name = a["name"]
+                prior_query = saved.get(name)
+                if a["action"] == "save":
+                    saved[name] = a["query"]
+                else:
+                    if name not in saved:
+                        raise ProposalError(f"saved search {name!r} is already gone")
+                    del saved[name]
+                col.set_config("savedFilters", saved)
+                self._ledger.append(
+                    LedgerEntry(
+                        id=proposal.id,
+                        kind="deck_op",
+                        note_id=0,
+                        label=f'{a["action"]} saved search "{name}"',
+                        data={
+                            "op": "saved_search",
+                            "name": name,
+                            "prior": prior_query,
+                        },
+                    )
+                )
             elif proposal.op == "delete_deck":
                 did, deck = self._deck_by_name(col, a["deck"])
                 destructive = not a.get("filtered") and int(a.get("cards", 0)) > 0
@@ -4788,6 +4851,14 @@ class ProposalManager:
                     node, leaf = self._resolve_option(conf, path)
                     node[leaf] = prior
                 col.decks.update_config(conf)
+            elif op == "saved_search":
+                saved = dict(col.get_config("savedFilters", {}) or {})
+                prior = entry.data.get("prior")
+                if prior is None:
+                    saved.pop(entry.data["name"], None)
+                else:
+                    saved[entry.data["name"]] = prior
+                col.set_config("savedFilters", saved)
             elif op == "manage_preset":
                 action = entry.data["action"]
                 if action in ("create", "clone"):

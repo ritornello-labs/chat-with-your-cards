@@ -865,6 +865,56 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
 
     check("deck & preset management round-trip (#9)", _deck_preset_flow)
 
+    def _gui_handoff_flow() -> dict[str, Any]:
+        """#12 on real Anki: open_browse validates then opens a REAL Browse
+        window at the query; saved searches land in collection config and
+        Browse's sidebar source of truth."""
+        import importlib as _importlib
+
+        addon = _importlib.import_module(ADDON_PACKAGE)
+        from chat_with_your_cards.tools import build_registry
+
+        registry = build_registry()
+        ctx = addon._ToolCtx()
+        _new_note("browse me", deck="ProbeBrowse")
+
+        with_error = None
+        try:
+            registry.call(ctx, "open_browse", {"query": "added:notanumber"})
+        except Exception as exc:
+            with_error = str(exc)
+        if not with_error or "invalid search" not in with_error:
+            raise AssertionError(f"bad query did not error cleanly: {with_error}")
+
+        result = registry.call(ctx, "open_browse", {"query": 'deck:"ProbeBrowse"'})
+        if not result.get("opened") or result.get("matches") != 1:
+            raise AssertionError(f"open_browse failed: {result}")
+        QTest.qWait(400)
+        import aqt
+
+        browser = aqt.dialogs._dialogs.get("Browser", [None, None])[1]
+        if browser is None:
+            raise AssertionError("no Browser instance after open_browse")
+        browser.close()
+        QTest.qWait(200)
+
+        saved = proposals.submit_manage_saved_search(
+            {"action": "save", "name": "Probe Slice", "query": 'deck:"ProbeBrowse"'}
+        )
+        proposals.accept({"id": saved["proposal_id"]})
+        listed = registry.call(ctx, "list_saved_searches", {})
+        names = [s["name"] for s in listed["saved_searches"]]
+        if "Probe Slice" not in names:
+            raise AssertionError(f"saved search missing: {names}")
+        if mw.col.get_config("savedFilters", {}).get("Probe Slice") != 'deck:"ProbeBrowse"':
+            raise AssertionError("saved search not in collection config")
+        proposals.revert({"id": saved["proposal_id"]})
+        if "Probe Slice" in (mw.col.get_config("savedFilters", {}) or {}):
+            raise AssertionError("saved-search revert did not remove it")
+        return {"browse_matches": result["matches"]}
+
+    check("GUI handoff: open Browse + saved searches (#12)", _gui_handoff_flow)
+
     def _change_set() -> dict[str, Any]:
         ids = [_new_note(f"cs {i}", back="orig") for i in range(3)]
         cs = proposals.open_change_set({"title": "probe sweep"})
