@@ -3439,6 +3439,18 @@ def _run_checks() -> dict[str, Any]:
             STREAM_TIMEOUT_MS,
             "the irreversibility line on a destructive note-type card",
         )
+        # Opt-in capture of the live card while it is still pending, for
+        # eyeballing the copy against a real Anki render rather than the
+        # browser replayer (CWYC_SMOKE_NOTE_TYPE_SHOT=/path/to.png).
+        shot = os.environ.get("CWYC_SMOKE_NOTE_TYPE_SHOT")
+        if shot:
+            try:
+                QTest.qWait(400)
+                Path(shot).parent.mkdir(parents=True, exist_ok=True)
+                if mw.grab().save(shot, "PNG"):
+                    results["screenshot"] = shot
+            except Exception as exc:  # a screenshot must never fail the check
+                results["screenshot_error"] = str(exc)
         flags = _card_flags()
         if flags.get("kind") != "Note type change":
             raise AssertionError(f"wrong kind label: {flags}")

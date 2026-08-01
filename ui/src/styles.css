@@ -2901,6 +2901,18 @@ body {
 .cwyc-ctl {
   position: relative;
   display: inline-flex;
+  /* A flex item's default `min-width: auto` refuses to shrink below its
+     content, so at narrow dock widths the model chip stayed at its full
+     intrinsic width and OVERFLOWED its group - painting on top of the
+     permission-mode chip and past the composer's right edge (seen in a real
+     Anki capture, 2026-08-01: "Propose" with "Default model" printed over it).
+     The max-width ellipsis rule below could not save it: 168px is a cap, not
+     a floor, and nothing was letting the box get smaller in the first place. */
+  min-width: 0;
+}
+.cwyc-ctl > .cwyc-chip {
+  min-width: 0;
+  flex: 0 1 auto;
 }
 .cwyc-panel {
   position: absolute;
