@@ -719,9 +719,16 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
         kinds = sorted(e["kind"] for e in addon.state.attachments)
         if kinds != ["document", "image", "image"]:
             raise AssertionError(f"unexpected staged kinds: {kinds}")
-        blocks = addon._image_context_blocks(addon.state.attachments)
-        if len(blocks) != 2:
-            raise AssertionError(f"expected 2 image blocks, got {len(blocks)}")
+        blocks = addon._context_blocks(addon.state.attachments)
+        # Two images AND the PDF: documents ride inline as `document` blocks
+        # since the shape was verified end-to-end against the real CLI
+        # (2026-08-02). Before that they were staged path-only.
+        block_types = sorted(b["type"] for b in blocks)
+        if block_types != ["document", "image", "image"]:
+            raise AssertionError(f"unexpected content blocks: {block_types}")
+        pdf_block = next(b for b in blocks if b["type"] == "document")
+        if pdf_block["source"]["media_type"] != "application/pdf":
+            raise AssertionError(f"wrong document media type: {pdf_block['source']}")
 
         # Spy on the backend send to prove blocks + block text arrive and the
         # scripted backend accepts the multimodal signature.
@@ -746,12 +753,16 @@ def _collection_flow_checks(state: Any, check: Callable[[str, Callable[[], Any]]
             )
         finally:
             session.send = original_send
-        if len(captured.get("extra_blocks") or []) != 2:
-            raise AssertionError(f"image blocks did not reach the backend: {captured.keys()}")
+        sent = captured.get("extra_blocks") or []
+        if sorted(b["type"] for b in sent) != ["document", "image", "image"]:
+            raise AssertionError(
+                f"content blocks did not reach the backend: "
+                f"{[b.get('type') for b in sent]}"
+            )
         if "<user-attachments>" not in captured["text"] or "ref.pdf" not in captured["text"]:
             raise AssertionError("attachment block text missing from the sent message")
-        if "read them from the path" not in captured["text"]:
-            raise AssertionError("PDF guidance missing from the block text")
+        if "shown to you inline" not in captured["text"]:
+            raise AssertionError("inline-attachment guidance missing from the block text")
         if addon.state.attachments:
             raise AssertionError("pending attachments not cleared after send")
         return {"kinds": kinds, "blocks": len(blocks)}

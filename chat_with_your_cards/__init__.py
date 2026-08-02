@@ -424,12 +424,26 @@ def _attachment_message_block(entries: list[dict[str, Any]]) -> str:
             notes.append(
                 "Too large to show inline (path only): " + ", ".join(oversized)
             )
-    if any(e.get("kind") == "document" for e in entries):
-        notes.append(
-            "PDFs are context material, not card media: read them from the "
-            "path with your file tools; if file tools are off in this "
-            "session, say so instead of guessing at their contents."
-        )
+    documents = [e for e in entries if e.get("kind") == "document"]
+    if documents:
+        too_big = [
+            e["name"]
+            for e in documents
+            if int(e.get("size", 0)) > DOCUMENT_BLOCK_MAX_BYTES
+        ]
+        if len(too_big) < len(documents):
+            notes.append(
+                "The attached PDF(s) are shown to you inline - read them "
+                "directly. They are context material, not card media."
+            )
+        if too_big:
+            notes.append(
+                "Too large to show inline (path only): "
+                + ", ".join(too_big)
+                + ". Read these from the path with your file tools; if file "
+                "tools are off in this session, say so instead of guessing at "
+                "their contents."
+            )
     return (
         "<user-attachments>\nThe user attached these files for this message:\n"
         + "\n".join(lines)
@@ -531,33 +545,50 @@ def _attach_pasted(msg: dict[str, Any]) -> None:
 
 
 IMAGE_BLOCK_MAX_BYTES = 3_750_000  # the API's per-image request budget
+# Documents ride the same base64 path and so pay the same ~33% encoding
+# overhead. Kept well under the API's document ceiling: a PDF large enough to
+# need more is better read from disk with file tools than inlined into every
+# subsequent turn's context.
+DOCUMENT_BLOCK_MAX_BYTES = 8_000_000
 
 
-def _image_context_blocks(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Attached images as stream-json image content blocks (#15b), so the
-    agent SEES them rather than only knowing their paths. Oversized images
-    stay path-only (the block text says which)."""
+def _context_blocks(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Attached images and PDFs as stream-json content blocks (#15b), so the
+    agent SEES them rather than only knowing their paths. Oversized files stay
+    path-only (the block text says which).
+
+    Documents were held back until the shape was verified end-to-end rather
+    than assumed: the CLI *parses* an unsupported block without complaint, so
+    "it did not crash" proved nothing. Probed 2026-08-02 against CLI 2.1.220 -
+    a base64 `document` block carrying a hand-built PDF came back with the
+    exact token embedded in that PDF, `is_error: false`. Same wire shape as
+    images, different `type` and media_type.
+    """
     import base64
+    import os as _os
 
+    from .media_staging import MIME_BY_EXT
+
+    kinds = {"image": ("image", IMAGE_BLOCK_MAX_BYTES),
+             "document": ("document", DOCUMENT_BLOCK_MAX_BYTES)}
     blocks: list[dict[str, Any]] = []
     for entry in entries:
-        if entry.get("kind") != "image":
+        spec = kinds.get(str(entry.get("kind")))
+        if spec is None:
             continue
-        if int(entry.get("size", 0)) > IMAGE_BLOCK_MAX_BYTES:
+        block_type, cap = spec
+        if int(entry.get("size", 0)) > cap:
             continue
         try:
             payload = Path(entry["path"]).read_bytes()
         except OSError:
             continue
-        from .media_staging import MIME_BY_EXT
-        import os as _os
-
         mime = MIME_BY_EXT.get(_os.path.splitext(entry["name"])[1].lower())
         if not mime:
             continue
         blocks.append(
             {
-                "type": "image",
+                "type": block_type,
                 "source": {
                     "type": "base64",
                     "media_type": mime,
@@ -1034,7 +1065,7 @@ def _wire_bridge() -> None:
             # Paths ride the message (#15a); attached images ALSO ride as
             # inline image blocks so the agent sees them (#15b). The files
             # stay staged - the agent may only propose with them a turn later.
-            extra_blocks = _image_context_blocks(state.attachments)
+            extra_blocks = _context_blocks(state.attachments)
             text = text + "\n\n" + _attachment_message_block(state.attachments)
             _clear_composer_attachments(discard_files=False)
         controller.send_user_message(text, extra_blocks=extra_blocks or None)

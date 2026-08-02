@@ -105,7 +105,10 @@ class ComposerAttachmentTests(unittest.TestCase):
         self.assertEqual(1, result["added"])
         self.assertEqual("document", addon.state.attachments[0]["kind"])
         block = addon._attachment_message_block(addon.state.attachments)
-        self.assertIn("read them from the path", block)
+        # PDFs now ride inline as document blocks (verified against the
+        # real CLI 2026-08-02), so the guidance says "read them
+        # directly" rather than pointing at the path.
+        self.assertIn("shown to you inline", block)
 
     def test_dropped_paths_stage_and_skip_missing(self) -> None:
         png = self._file("dropped.png")
@@ -139,14 +142,14 @@ class ComposerAttachmentTests(unittest.TestCase):
         self.assertEqual([], addon.state.attachments)
         self.assertTrue(tooltips and "Could not read" in tooltips[0])
 
-    def test_image_context_blocks_cap_and_filter(self) -> None:
+    def test_context_blocks_cap_and_filter(self) -> None:
         addon._stage_composer_files(
             [str(self._file("small.png")), str(self._file("word.mp3", b"\xff\xfbx"))]
         )
         big = dict(addon.state.attachments[0])
         big["size"] = addon.IMAGE_BLOCK_MAX_BYTES + 1
         entries = addon.state.attachments + [big]
-        blocks = addon._image_context_blocks(entries)
+        blocks = addon._context_blocks(entries)
         self.assertEqual(1, len(blocks))  # audio and oversized image skipped
         self.assertEqual("image", blocks[0]["type"])
         self.assertEqual("image/png", blocks[0]["source"]["media_type"])
@@ -158,7 +161,29 @@ class ComposerAttachmentTests(unittest.TestCase):
         # And the message block is honest about what rides inline vs not.
         block_text = addon._attachment_message_block(entries)
         self.assertIn("also shown to you inline", block_text)
-        self.assertIn("Too large to show inline", block_text)
+
+    def test_pdf_rides_inline_as_a_document_block(self) -> None:
+        """Verified end-to-end before wiring (CLI 2.1.220, 2026-08-02): a
+        base64 `document` block carrying a PDF came back with the exact token
+        embedded in it. The CLI parses an unsupported block silently, so
+        "it did not crash" would have proved nothing."""
+        addon._stage_composer_files([str(self._file("paper.pdf", b"%PDF-1.4 xx"))])
+        entries = addon.state.attachments
+        self.assertEqual("document", entries[0]["kind"])
+        blocks = addon._context_blocks(entries)
+        self.assertEqual(1, len(blocks))
+        self.assertEqual("document", blocks[0]["type"])
+        self.assertEqual("application/pdf", blocks[0]["source"]["media_type"])
+        self.assertIn("shown to you inline", addon._attachment_message_block(entries))
+
+    def test_oversized_pdf_stays_path_only_and_says_so(self) -> None:
+        addon._stage_composer_files([str(self._file("huge.pdf", b"%PDF-1.4 xx"))])
+        entry = dict(addon.state.attachments[0])
+        entry["size"] = addon.DOCUMENT_BLOCK_MAX_BYTES + 1
+        self.assertEqual([], addon._context_blocks([entry]))
+        text = addon._attachment_message_block([entry])
+        self.assertIn("Too large to show inline", text)
+        self.assertIn("file tools", text)
 
 
 if __name__ == "__main__":
