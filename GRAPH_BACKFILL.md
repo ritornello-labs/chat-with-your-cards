@@ -162,3 +162,51 @@ and alias-table residue — not correctness. Decision updated accordingly:
 equally accurate); the Fable premium (~$43) buys denser `presupposes`
 seeding and the salvage-don't-blank policy on degenerate notes, not fewer
 errors. Either choice remains a cheap watermark re-run away from the other.
+
+## 12. The labeling log and mixture-of-experts (v4, user-directed)
+
+**The change.** v2's sweep semantics were *recompute-and-overwrite*: change
+the extractor and every note's stored labeling is invalidated and replaced.
+That discards paid-for judgments — and §11's autopsy proved they retain
+value: every one of the 8 clear failures found (3 Opus, 5 Fable) was caught
+by *another labeling we already owned*. So:
+
+- **`extractions` becomes an append-only log**, keyed by
+  `(note_guid, content_hash, model, prompt_version)`: covers, presupposes,
+  created_at, cost. Rows are never updated or deleted. Re-running a model
+  on changed content adds rows; adding a new model adds rows; nothing is
+  lost. (Storage is trivial — labelings are a few hundred bytes.)
+- **The graph is a compiled view**: a pure function
+  `(extraction log, alias table, policy) → covers/requires edges`.
+  Recompiling is free and local; only *labeling* costs money.
+- **The sweep rule changes** from "recompute if hash mismatch" to "ensure
+  the active policy's required labelings exist for the current
+  content_hash". Cache semantics per (content_hash, model, prompt) —
+  the watermark machinery survives intact, one level down.
+
+**Aggregation policies** (pluggable, start simple):
+
+1. `single(model)` — v2 behavior, a degenerate policy.
+2. `consensus(k-of-n)` — a concept enters the graph as **confirmed** when
+   ≥k labelings support it; single-source concepts enter as
+   **provisional** (usable for hints, not for gates). Measured on the
+   three labelings already in the log (Opus + Fable-A + Fable-B, 285
+   notes): union 4.33 concepts/note, **2-of-3 consensus 3.52 (81% of the
+   union)**, single-source tail 0.81/note — and majority vote catches all
+   8 autopsied clear failures.
+3. `router` (true MoE, later) — dispatch by note type: degenerate/media
+   notes → a salvage-capable model (Fable), long extracts → high-recall
+   model, plain notes → the cheap tier; or weighted voting once per-model
+   reliability priors accumulate from adjudications.
+
+**Cost framing.** Ensembling multiplies labeling cost by the number of
+voters — but §11 priced a full-corpus pass at $42–85/model on the batch
+API, so even a 3-voter ensemble is ~$150–250 one-time, and each new
+model's pass is additive forever. The seven benchmark labelings of the
+300-note sample are, retroactively, the log's first entries: the benchmark
+and production now share one data structure.
+
+**Interaction with §6 phases:** unchanged externally — Phase C compiles
+`covers` from the log via policy; Phase D judges over the compiled concept
+set. The judge's verdicts should also append to a log of their own
+(`judgments`), for the same reasons.
