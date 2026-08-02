@@ -4506,6 +4506,100 @@ class ProposalManager:
         "check_database": ("check database", False),
     }
 
+    # What each deck op is ALLOWED to do to note/card content, checked as a
+    # postcondition inside the transaction. Probed on 25.x (2026-08-01) rather
+    # than assumed:
+    #   delete a deck with a subdeck .... 6 notes/6 cards -> 2/2, and cards
+    #                                     OUTSIDE the subtree were untouched
+    #   filtered create/rebuild ......... counts exactly constant, odid set on
+    #                                     the gathered cards, none dangling
+    #   delete a filtered deck .......... cards return home, counts constant
+    #   rename (with children) .......... content untouched
+    #
+    # The framing matters. Declaring an expected card DELTA for these would be
+    # tautological for the one op that destroys cards ("expect minus however
+    # many are in there" re-reads the number it is checking). Declaring what
+    # must NOT change is not: "cards outside the deleted subtree are untouched"
+    # is exactly the failure worth catching.
+    _DECK_OP_EFFECT: dict[str, str | None] = {
+        "create_deck": "none",
+        "rename_deck": "none",
+        "set_deck_options": "none",
+        "set_deck_limits": "none",
+        "manage_preset": "none",
+        "assign_preset": "none",
+        "set_deck_description": "none",
+        "saved_search": "none",
+        "set_preferences": "none",
+        "create_filtered_deck": "moves",
+        "update_filtered_deck": "moves",
+        "filtered_deck_action": "moves",
+        "delete_deck": "deletes_scoped",
+        # Unbounded by nature, and named here so the omission reads as a
+        # decision rather than an oversight: undo replays an arbitrary earlier
+        # action, Check Database repairs whatever it finds, sync pulls another
+        # device's changes, and a CSV import adds notes by design (it does its
+        # own accounting).
+        "undo_change": None,
+        "check_database": None,
+        "sync_now": None,
+        "import_csv": None,
+    }
+
+    def _deck_op_effect(self, proposal: Proposal) -> str | None:
+        """The table keyed by op, except for the one op whose effect depends on
+        its target: deleting a FILTERED deck destroys nothing - the cards
+        return to their home decks, so counts stay constant and cards
+        legitimately cross from inside the subtree to outside it. Treating
+        that like a normal delete made the scoped check fire on a correct
+        operation (caught by the existing filtered-delete test)."""
+        effect = self._DECK_OP_EFFECT.get(proposal.op, None)
+        if proposal.op == "delete_deck" and proposal.op_args.get("filtered"):
+            return "moves"
+        return effect
+
+    def _deck_subtree_ids(self, col: Any, name: str) -> list[int]:
+        """A deck and its children, by name prefix - the blast radius a delete
+        is allowed to have."""
+        ids = []
+        for entry in col.decks.all_names_and_ids():
+            if entry.name == name or entry.name.startswith(name + "::"):
+                ids.append(int(entry.id))
+        return ids
+
+    def _deck_op_postcondition(
+        self, col: Any, proposal: Proposal, before: dict[str, Any]
+    ) -> None:
+        """Raise InvariantViolation if the op changed more than it may."""
+        effect = self._deck_op_effect(proposal)
+        if effect is None:
+            return
+        if effect in ("none", "moves"):
+            notes = int(col.db.scalar("select count() from notes"))
+            cards = int(col.db.scalar("select count() from cards"))
+            if notes != before["notes"] or cards != before["cards"]:
+                raise invariants.InvariantViolation(
+                    f"{proposal.op} changed content it must not: notes "
+                    f"{before['notes']}->{notes}, cards {before['cards']}->{cards}"
+                )
+        elif effect == "deletes_scoped":
+            outside = int(
+                col.db.scalar(
+                    "select count() from cards where did not in "
+                    + _ids_sql(before["subtree"])
+                    + " and odid not in "
+                    + _ids_sql(before["subtree"])
+                )
+            )
+            if outside != before["outside"]:
+                raise invariants.InvariantViolation(
+                    f"delete_deck touched cards outside its own subtree: "
+                    f"{before['outside']} -> {outside}"
+                )
+        problem = invariants.corruption_free_collection(col)
+        if problem is not None:
+            raise invariants.InvariantViolation(f"{proposal.op}: {problem}")
+
     def _accept_deck_op_guarded(self, proposal: Proposal) -> list[int]:
         """Deck ops through the same safety sandwich as content writes.
 
@@ -4554,11 +4648,35 @@ class ProposalManager:
         ledger_mark = len(self._ledger)
         box: dict[str, list[int]] = {}
 
+        before: dict[str, Any] = {
+            "notes": int(col.db.scalar("select count() from notes")),
+            "cards": int(col.db.scalar("select count() from cards")),
+        }
+        if self._deck_op_effect(proposal) == "deletes_scoped":
+            # Captured BEFORE the delete, while the subtree still exists: the
+            # postcondition compares cards outside it, which is the only
+            # non-tautological thing to assert about an op whose whole job is
+            # destroying the cards inside it.
+            subtree = self._deck_subtree_ids(col, str(proposal.op_args.get("deck", "")))
+            before["subtree"] = subtree
+            before["outside"] = int(
+                col.db.scalar(
+                    "select count() from cards where did not in "
+                    + _ids_sql(subtree)
+                    + " and odid not in "
+                    + _ids_sql(subtree)
+                )
+            )
+
         def run() -> None:
             box["touched"] = self._accept_deck_op(proposal)
+            self._deck_op_postcondition(col, proposal, before)
 
         try:
             self._run_in_transaction(col, run)
+        except invariants.InvariantViolation as exc:
+            del self._ledger[ledger_mark:]
+            raise ProposalError(str(exc)) from None
         except Exception:
             del self._ledger[ledger_mark:]
             raise
@@ -6989,6 +7107,13 @@ def _restore_card_queues(col: Any, prior: dict[int, int]) -> int:
         col.sched.suspend_cards(suspend_ids)
         calls += 1
     return calls
+
+
+def _ids_sql(ids: list[int]) -> str:
+    """Inline an int id list as a SQL tuple. Ids come from the collection, never
+    from user input, so inlining is safe (mirrors invariants._ids2str). An
+    empty list yields `(-1)` rather than `()`, which SQLite rejects."""
+    return "(" + ",".join(str(int(i)) for i in ids) + ")" if ids else "(-1)"
 
 
 def _short_label(text: str, limit: int = 60) -> str:

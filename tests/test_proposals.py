@@ -184,6 +184,13 @@ class FakeDecks:
     def all_names_and_ids(self) -> list[_NamedId]:
         return [_NamedId(d["name"], d["id"]) for d in self._decks.values()]
 
+    def is_filtered(self, did: int) -> bool:
+        """Real Anki exposes this on the API rather than as a `decks.dyn`
+        column (the table stores protobuf blobs now), and the collection-wide
+        corruption check reads it that way."""
+        deck = self._decks.get(int(did))
+        return bool(deck and deck.get("dyn"))
+
     def all(self) -> list[dict[str, Any]]:
         return [dict(d) for d in self._decks.values()]
 
@@ -3798,6 +3805,124 @@ class DeckOpGuardTests(unittest.TestCase):
         self.assertIn(("check database", False), checkpoints)
         self.assertEqual(
             "accepted", pushes_of(pushed, "proposal_resolved")[-1]["status"]
+        )
+
+
+class DeckOpPostconditionTests(unittest.TestCase):
+    """The postconditions must FIRE, not merely exist.
+
+    The first version of this guard declared an expected card *delta* per op,
+    which for delete_deck meant re-reading the number it was checking - a
+    postcondition that could not fail. These assert the opposite framing: what
+    each op must NOT change.
+    """
+
+    def test_content_only_ops_reject_note_or_card_drift(self) -> None:
+        manager, col, pushed = make_manager()
+        _seed_notes(manager, col, pushed)
+        result = manager.submit_create_deck({"name": "Sneaky"})
+
+        # Simulate the op quietly destroying a card. The postcondition, not the
+        # op itself, is what has to notice.
+        original = manager._accept_deck_op
+
+        def sabotage(proposal):
+            touched = original(proposal)
+            col._cards.pop(next(iter(col._cards)))
+            return touched
+
+        manager._accept_deck_op = sabotage
+        manager.accept({"id": result["proposal_id"]})
+
+        errors = [p for p in pushed if p["type"] == "proposal_error"]
+        self.assertTrue(errors, "content drift during a deck op must be caught")
+        self.assertIn("changed content it must not", errors[-1]["message"])
+
+    def test_delete_deck_rejects_touching_cards_outside_its_subtree(self) -> None:
+        """The check that is NOT tautological: a delete may destroy everything
+        inside its own subtree and nothing beyond it."""
+        manager, col, pushed = make_manager()
+        _seed_notes(manager, col, pushed)
+        manager.accept(
+            {"id": manager.submit_create_deck({"name": "Bystander"})["proposal_id"]}
+        )
+        bystander = col.decks.id_for_name("Bystander")
+        victim = next(iter(col._cards.values()))
+        victim.did = bystander
+
+        result = manager.submit_delete_deck({"deck": "Default"})
+        original = manager._accept_deck_op
+
+        def sabotage(proposal):
+            touched = original(proposal)
+            # Reach outside the doomed subtree - the exact failure worth
+            # catching, and invisible to a whole-collection delta check.
+            col._cards.pop(victim.id, None)
+            return touched
+
+        manager._accept_deck_op = sabotage
+        manager.accept({"id": result["proposal_id"]})
+
+        errors = [p for p in pushed if p["type"] == "proposal_error"]
+        self.assertTrue(errors, "an out-of-subtree deletion must be caught")
+        self.assertIn("outside its own subtree", errors[-1]["message"])
+
+    def test_filtered_deck_corruption_is_caught(self) -> None:
+        """A card left in a filtered deck with no home is the corruption Check
+        Database cannot even detect (SAFETY.md hazard 2)."""
+        manager, col, pushed = make_manager()
+        _seed_notes(manager, col, pushed)
+        result = manager.submit_create_filtered_deck(
+            {"name": "Cram", "terms": [{"search": 'deck:"Default"', "limit": 5}]}
+        )
+        original = manager._accept_deck_op
+
+        def sabotage(proposal):
+            touched = original(proposal)
+            for card in col._cards.values():
+                if card.odid:
+                    card.odid = 0  # homeless: in a filtered deck, no way back
+            return touched
+
+        manager._accept_deck_op = sabotage
+        manager.accept({"id": result["proposal_id"]})
+
+        errors = [p for p in pushed if p["type"] == "proposal_error"]
+        self.assertTrue(errors, "homeless filtered cards must be caught")
+        self.assertIn("no home deck", errors[-1]["message"])
+
+    def test_deleting_a_filtered_deck_is_not_treated_as_destructive(self) -> None:
+        """Its cards return home rather than dying, so they legitimately cross
+        from inside the subtree to outside it."""
+        manager, col, pushed = make_manager()
+        _seed_notes(manager, col, pushed)
+        manager.accept(
+            {
+                "id": manager.submit_create_filtered_deck(
+                    {"name": "Cram", "terms": [{"search": 'deck:"Default"', "limit": 5}]}
+                )["proposal_id"]
+            }
+        )
+        cards_before = len(col._cards)
+        result = manager.submit_delete_deck({"deck": "Cram"})
+        manager.accept({"id": result["proposal_id"]})
+
+        self.assertEqual(
+            [], [p for p in pushed if p["type"] == "proposal_error"]
+        )
+        self.assertEqual(cards_before, len(col._cards))
+        default = col.decks.id_for_name("Default")
+        self.assertTrue(all(c.did == default for c in col._cards.values()))
+
+    def test_unbounded_ops_are_named_not_forgotten(self) -> None:
+        """Ops with no checkable expectation are listed with an explicit None,
+        so the omission reads as a decision."""
+        exempt = {
+            op for op, effect in ProposalManager._DECK_OP_EFFECT.items()
+            if effect is None
+        }
+        self.assertEqual(
+            {"undo_change", "check_database", "sync_now", "import_csv"}, exempt
         )
 
 

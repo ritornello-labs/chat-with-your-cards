@@ -371,10 +371,32 @@ ledger on failure so a rolled-back deck op leaves no phantom revertible entry.
 Two ops are deliberately exempt and named as such (`_UNTRANSACTIONAL_DECK_OPS`):
 `check_database` repairs the database on its own terms, and `sync_now` hands
 control to Anki's sync window — an outer write transaction around either would
-be meaningless. Deck ops are still not routed through `_apply_write` itself:
-its postconditions assert collection-wide note/card deltas, and deck ops
-legitimately move and destroy cards, so an expectation per op would mostly say
-"anything may happen" — a check in name only.
+be meaningless. Deck ops are not routed through `_apply_write` itself — its expectation is a
+collection-wide note/card *delta*, and for the one deck op that destroys cards
+that would mean declaring "minus however many are in there", i.e. re-reading
+the number being checked. Instead they get postconditions in the other
+direction: **what each op must NOT change** (`_DECK_OP_EFFECT`), probed on 25.x
+rather than assumed.
+
+- `none` (create/rename/options/limits/presets/description/saved search/
+  preferences) — note and card counts must be identical.
+- `moves` (filtered create/rebuild/action, **and deleting a filtered deck** —
+  its cards return home rather than dying) — counts identical.
+- `deletes_scoped` (deleting a normal deck) — **cards outside the doomed
+  subtree are untouched**, captured before the delete while the subtree still
+  exists. This is the non-tautological one: it catches a delete reaching
+  further than its own tree, which a whole-collection delta cannot see.
+- Explicitly `None`, so the omission is a decision rather than a gap:
+  `undo_change`, `check_database`, `sync_now`, `import_csv` — each may
+  legitimately change anything.
+
+Every op also runs `invariants.corruption_free_collection`, a COLLECTION-WIDE
+check for the two filtered-deck corruptions. The existing scoped versions take
+an explicit id list, which is right for content writes but useless here: a
+rebuild gathers an unknown set and a deletion removes rather than lists, so a
+scoped check would receive an empty list — and a scoped check over an empty
+list passes unconditionally. Filtered-ness is read from the API, not SQL: the
+`decks` table has no `dyn` column on modern Anki.
 
 **#17 and #26 are now surfaced that way** (note-type write path, 2026-08-01): every card in
 that family leads with its blast radius in notes and decks, adds an explicit full-upload

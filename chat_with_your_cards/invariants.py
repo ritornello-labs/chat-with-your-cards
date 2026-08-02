@@ -109,6 +109,40 @@ def no_homeless_filtered_cards(col: Any, deck_ids: Iterable[int]) -> str | None:
     return None
 
 
+def corruption_free_collection(col: Any) -> str | None:
+    """The two filtered-deck corruptions, checked COLLECTION-WIDE.
+
+    The scoped `no_homeless_filtered_cards` / `no_dangling_odid` above take an
+    explicit id list, which is right for content writes: they know exactly
+    which rows they touched. Deck operations do not - a filtered rebuild
+    gathers an unknown set, and a deck deletion removes cards rather than
+    listing them. Handing those a scoped check means handing them an empty
+    list, and a scoped check over an empty list passes unconditionally: a
+    postcondition that cannot fail.
+
+    Both queries are unindexed scans of `cards`, so this is deliberately NOT
+    used on the per-note write path. Deck ops are rare and human-paced; paying
+    two scans to catch the corruption class they can actually cause is a good
+    trade.
+    """
+    # Filtered-ness comes from the API, not SQL: modern Anki stores decks as
+    # protobuf blobs and the `decks` table has no `dyn` column any more.
+    live = [int(entry.id) for entry in col.decks.all_names_and_ids()]
+    filtered = [did for did in live if col.decks.is_filtered(did)]
+    if filtered:
+        homeless = col.db.scalar(
+            f"select count() from cards where odid = 0 and did in {_ids2str(filtered)}"
+        )
+        if homeless:
+            return f"{homeless} card(s) sit in a filtered deck with no home deck"
+    dangling = col.db.scalar(
+        f"select count() from cards where odid != 0 and odid not in {_ids2str(live)}"
+    )
+    if dangling:
+        return f"{dangling} card(s) point at a home deck that no longer exists"
+    return None
+
+
 def no_dangling_odid(col: Any, card_ids: Iterable[int]) -> str | None:
     """No touched card whose ``odid != 0`` points at a deck that no longer
     exists (home deck deleted out of band; never validated by Anki —
