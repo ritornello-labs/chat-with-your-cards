@@ -138,3 +138,27 @@ delta is the last 7% of achievable agreement, not a categorical gap.
 (Also noted: both Fable runs dropped one batch via OpenRouter — provider
 flakiness is not Kimi-specific; the production backfill on Anthropic's
 batch API sidesteps it.)
+
+### §11 disagreement autopsy (2026-07-31): the .07 gap is not accuracy
+
+Manual classification of **all 184 notes** where Opus and Fable-A disagree
+(full report: `anki-graph-bench/opus_fable_classification.md`, Fable-B as
+third witness):
+
+- **167 (91%) defensible differences** — both readings valid.
+- **7 (4%) scoring artifacts** — residual alias gaps ("BLUE" ↔ "best linear
+  unbiased estimator").
+- **Opus clear failures: 3** (+2 single-name blemishes) ≈ 1.5% of notes.
+- **Fable clear failures: 5** ≈ 1.8% of notes — invisible in the score
+  because gold-by-construction can't fail against itself; each was caught
+  by Opus and/or Fable-B (e.g. missing "compounding" on the note defining
+  it; missing "diagonal matrix" when it's in the prompt).
+
+**Conclusion: on contested judgments, Opus and Fable fail at
+indistinguishable rates.** The .07 soft-F1 gap decomposes into Fable's
+richer valid-prerequisite output (useful as Phase D seeds), naming freedom,
+and alias-table residue — not correctness. Decision updated accordingly:
+**Opus 4.8 is the value-rational Phase B default** (~$42 batch,
+equally accurate); the Fable premium (~$43) buys denser `presupposes`
+seeding and the salvage-don't-blank policy on degenerate notes, not fewer
+errors. Either choice remains a cheap watermark re-run away from the other.
