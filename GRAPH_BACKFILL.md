@@ -210,3 +210,29 @@ and production now share one data structure.
 `covers` from the log via policy; Phase D judges over the compiled concept
 set. The judge's verdicts should also append to a log of their own
 (`judgments`), for the same reasons.
+
+## 13. Chosen configuration & full budget (2026-07-31)
+
+Decided: **Phase D = single voter, Opus 4.8** (neighborhood judge over the
+recurrent hub tier, ~2,400 in / ~250 out per concept). Phase B voter set
+still open: single Opus vs the 2-of-3 consensus trio (Opus + Fable + Terra).
+
+End-to-end backfill bill (Anthropic batch API where possible; Terra via
+OpenRouter or OpenAI batch):
+
+| Item | Minimal (B=Opus solo) | Recommended (B=trio) |
+|---|---:|---:|
+| A harvest (deterministic) | $0 | $0 |
+| B extraction, 24k notes | ~$42 | ~$140 ($42 Opus + $85 Fable + ~$15 Terra) |
+| Embeddings (all stages) | ~$0.25 | ~$0.25 |
+| Normalization adjudication band | ~$5 | ~$5 |
+| C covers confirm pass | ~$5 | ~$5 |
+| D judge (Opus, hub tier ~3k) | ~$30 | ~$30 |
+| D benchmark first | ~$10 | ~$10 |
+| **Total one-time** | **~$90** | **~$190** |
+
+Judging all ~10k raw names in D instead of the hub tier adds ~$60. Steady
+state: ~1–2¢ per new/edited note across all stages (the log means re-runs
+only ever buy missing labelings). Prerequisite: Anthropic API credits
+(balance currently empty; the batch discount requires the direct API, not
+OpenRouter).
