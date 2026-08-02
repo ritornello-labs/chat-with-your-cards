@@ -640,10 +640,19 @@ def _notify_deferred(card_id: int | None = None) -> None:
 
 
 def _install_defer_entry_points(config: dict[str, Any]) -> None:
-    """A chord, a Tools entry, and a right-click item on the card itself -
-    the last one is where a reviewer actually looks for a per-card action."""
+    """A chord and a right-click item on the card itself - the latter is where
+    a reviewer actually looks for a per-card action.
+
+    The two Tools-menu entries this used to add ("Defer this card" / "Bring
+    back a deferred card") were REMOVED 2026-08-02 at the user's request. The
+    operation is a manual bury, and Anki's own reviewer already offers burying
+    where people expect to find it; a second pair of top-level menu items for
+    the same thing under a different name was surface without capability. The
+    chord and the right-click entry stay - those are the ones actually used
+    mid-review - and the dock's tray remains the place to see and recall what
+    the session has set aside.
+    """
     from aqt import gui_hooks
-    from aqt.qt import QAction, QKeySequence
     from aqt.utils import tooltip
 
     def run(action: Any) -> None:
@@ -651,19 +660,8 @@ def _install_defer_entry_points(config: dict[str, Any]) -> None:
 
     _bind_defer_shortcut()
 
-    chord = str(config.get("defer_shortcut", DEFER_SHORTCUT))
-    defer_action = QAction(
-        f"Defer this card\t{QKeySequence(chord).toString(QKeySequence.SequenceFormat.NativeText)}",
-        mw,
-    )
-    defer_action.triggered.connect(lambda *_a: run(defer_current_card))
-    back_action = QAction("Bring back a deferred card", mw)
-    back_action.triggered.connect(lambda *_a: run(bring_back_deferred))
-    mw.form.menuTools.addAction(defer_action)
-    mw.form.menuTools.addAction(back_action)
-
     def _context_menu(_webview: Any, menu: Any) -> None:
-        entry = menu.addAction("Defer this card (later today)")
+        entry = menu.addAction("Bury this card (manual, back later today)")
         entry.triggered.connect(lambda *_a: run(defer_current_card))
 
     gui_hooks.reviewer_will_show_context_menu.append(_context_menu)

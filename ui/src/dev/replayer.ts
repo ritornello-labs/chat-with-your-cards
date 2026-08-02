@@ -113,7 +113,7 @@ function pushReviewState(): void {
     set_aside_count: devAside.length,
   });
 }
-// The dev preview always "has a review card on screen" so the Set aside chip
+// The dev preview always "has a review card on screen" so the Bury chip
 // and the undo flow are reachable by hand.
 window.setTimeout(() => {
   pushReviewState();

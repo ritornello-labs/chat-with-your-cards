@@ -512,9 +512,10 @@ def register_proposal_tools(registry: ToolRegistry) -> None:
             "bury_cards",
             "Bury cards until the next day rollover (Anki's manual bury). For "
             "'not this one right now' on the card being reviewed, prefer "
-            "defer_card - it is tracked in the user's set-aside tray; this "
-            "tool is for bulk or off-queue burying. One confirmation; "
-            "revertible.",
+            "defer_card - the same manual bury, but tracked, so it shows in "
+            "the user's buried-today tray and can be recalled as the next "
+            "card. This tool is for bulk or off-queue burying. One "
+            "confirmation; revertible.",
             _card_state_schema(),
             _card_state("bury_cards"),
             writes=True,

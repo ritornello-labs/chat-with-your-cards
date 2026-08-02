@@ -4,7 +4,7 @@ import type { ChatStore } from "../store";
 
 /**
  * The reviewing-side affordances for deferral (task #32 follow-up, user
- * 2026-07-28): a "Set aside" button while a review card is on screen, and a
+ * 2026-07-28): a "Bury" button while a review card is on screen, and a
  * transient Undo chip whenever a card was just deferred - by this button, the
  * chord, the menu, the agent, or defer-on-send.
  *
@@ -34,8 +34,8 @@ export function SetAsideChip({ store }: { store: ChatStore }) {
       data-testid="defer-chip"
       title={
         auto
-          ? "Auto: sending a message sets the current card aside (Settings › Reviewing)"
-          : `Set the current card aside - it comes back later in this session (${settings.deferShortcut})`
+          ? "Auto: sending a message buries the current card (Settings › Reviewing)"
+          : `Manually bury the current card - it comes back later in this session (${settings.deferShortcut})`
       }
       onClick={() => store.deferCurrentCard()}
     >
@@ -50,7 +50,7 @@ export function SetAsideChip({ store }: { store: ChatStore }) {
           strokeLinejoin="round"
         />
       </svg>
-      {auto ? "Set aside · auto" : "Set aside"}
+      {auto ? "Bury · auto" : "Bury"}
     </button>
   );
 }
@@ -79,7 +79,7 @@ export function DeferredUndoChip({ store }: { store: ChatStore }) {
         type="button"
         className="cwyc-deferred-undo-text"
         data-testid="deferred-undo-view"
-        title="See every card set aside today"
+        title="See every card buried today"
         onClick={() => {
           store.openSetAside();
           store.dismissDeferredNotice();

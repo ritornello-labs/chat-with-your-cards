@@ -1085,7 +1085,32 @@ by the developer into typed product features instead), and a saved-widget
 catalog (premature optimization, decided 2026-07-16 — the agent just
 regenerates; custom_instructions can carry per-user standing requests).
 
-## 19. Setting a card aside: deferral + the set-aside tray (2026-07-29/30)
+## 19. Manual bury: the tracked bury + buried-today tray (2026-07-29/30)
+
+> **Renamed and trimmed 2026-08-02 (user-directed, from use).** The feature is
+> called **manual bury** in every user-facing surface now, because that is
+> literally what it does — the mechanism below always was Anki's own manual
+> bury plus a marker. Calling it "defer"/"set aside" invented a second word for
+> an operation Anki already names, and left the dock disagreeing with the
+> reviewer. The dock chip is **Bury**, the tray is **Buried today**, the
+> right-click entry is **Bury this card (manual, back later today)**, and
+> `bury_cards`/`defer_card` now describe each other in those terms.
+>
+> The **two Tools-menu entries were removed** ("Defer this card", "Bring back a
+> deferred card"): Anki's reviewer already offers burying where people look for
+> it, so a second pair of top-level items under a different name was surface
+> without capability. The chord (`Ctrl+Shift+D`), the reviewer right-click
+> entry, the dock chip, the tray, and both agent tools all stay — those are the
+> ones actually reached mid-review. A GUI-smoke assertion now fails if either
+> menu entry drifts back in.
+>
+> The tool IDs `defer_card`/`undefer_card` were deliberately **not** renamed:
+> `bury_cards` already exists for bulk/off-queue burying, and a sibling called
+> `bury_card` would differ from it by one character while behaving differently
+> (tracked, tray-listed, recallable as the next card). Their descriptions now
+> state that difference explicitly instead — the disambiguation is worth more
+> than the symmetry, and renaming would also break existing skills and
+> transcripts for no user-visible gain.
 
 **The invariant that shaped everything:** Anki's backend answers only its own
 queue top (`InvalidInput "not at top of queue"`), and the scheduler service

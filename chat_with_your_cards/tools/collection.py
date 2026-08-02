@@ -636,12 +636,15 @@ def build_registry() -> ToolRegistry:
         ),
         ToolSpec(
             "defer_card",
-            "Set a card aside for later - the user's 'not this one right "
-            "now'. Scheduling (due date, interval, ease, history) is "
-            "untouched, and the change is one native undo away; while set "
-            "aside the card is out of today's queue (a tracked bury) and it "
-            "returns by itself at the next day rollover, or sooner via "
-            "undefer_card.",
+            "MANUALLY BURY one card - the user's 'not this one right now' "
+            "during review. Scheduling (due date, interval, ease, history) is "
+            "untouched, the change is one native undo away, and the card "
+            "returns by itself at the next day rollover or sooner via "
+            "undefer_card. Prefer this over bury_cards for the card being "
+            "reviewed: it is the same manual bury, but tracked, so it appears "
+            "in the dock's buried-today tray and can be recalled as the NEXT "
+            "card. Use bury_cards instead for burying a SET of cards found by "
+            "search.",
             {
                 "type": "object",
                 "properties": {
@@ -658,9 +661,9 @@ def build_registry() -> ToolRegistry:
         ),
         ToolSpec(
             "undefer_card",
-            "Bring a deferred card back. By default it becomes the NEXT card "
-            "shown; pass show_next=false to just clear the deferral and let it "
-            "come round in the normal order.",
+            "Unbury a card this session buried and bring it back. By default "
+            "it becomes the NEXT card shown; pass show_next=false to just "
+            "unbury it and let it come round in the normal order.",
             {
                 "type": "object",
                 "properties": {

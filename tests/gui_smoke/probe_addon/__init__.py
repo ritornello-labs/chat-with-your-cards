@@ -2063,6 +2063,14 @@ def _run_checks() -> dict[str, Any]:
         for expected in ("Toggle chat", "New chat"):
             if expected not in items:
                 raise AssertionError(f"submenu missing {expected!r}: {items}")
+        # Removed deliberately 2026-08-02: the operation is a manual bury and
+        # Anki's reviewer already offers burying where people look for it, so a
+        # second pair of top-level entries under another name was surface
+        # without capability. Asserted so they cannot drift back in.
+        top_level = [a.text().replace("&", "").split("\t")[0] for a in actions]
+        for gone in ("Defer this card", "Bring back a deferred card"):
+            if gone in top_level:
+                raise AssertionError(f"{gone!r} is back on the Tools menu")
 
     check("Tools submenu present with labeled actions", _tools_action)
 
@@ -4527,16 +4535,17 @@ def _run_checks() -> dict[str, Any]:
             QTest.qWait(500)
             asked_about = int(mw.reviewer.card.id)
 
-            # The Set aside chip is visible (review_state reached the dock) and
-            # shows it is in auto mode.
+            # The Bury chip is visible (review_state reached the dock) and
+            # shows it is in auto mode. Labelled "Bury" since 2026-08-02: the
+            # operation always was a manual bury, and the UI now says so.
             _wait_until(
                 lambda: _eval_js(
                     dock.web,
                     "((document.querySelector('[data-testid=defer-chip]')||{})"
                     ".textContent||'');",
-                    DOM_TIMEOUT_MS, "defer chip",
-                ).startswith("Set aside"),
-                DOM_TIMEOUT_MS, "the Set aside chip to appear",
+                    DOM_TIMEOUT_MS, "bury chip",
+                ).startswith("Bury"),
+                DOM_TIMEOUT_MS, "the Bury chip to appear",
             )
 
             _send_message(dock.web, "what is this card about? (defer probe)")

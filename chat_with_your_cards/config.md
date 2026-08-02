@@ -6,26 +6,25 @@
   rail and returns focus to the reviewer/deck browser. Otherwise focuses the chat.
 - `new_chat_shortcut` (default `Ctrl+Shift+J`): starts a fresh chat with fresh
   context; focus stays in the message box.
-- `defer_shortcut` (default `Ctrl+Shift+D`): while reviewing, set the card on
-  screen aside — "not this one right now". Scheduling (due date, interval,
-  ease, history) is untouched, and Anki's own Undo (Cmd+Z) reverts it in one
-  step. While set aside the card is out of today's queue — it is a tracked
-  bury, because Anki's scheduler only ever serves and accepts answers for the
-  top of its own queue, so a card can only be served later by genuinely
-  leaving it. It returns by itself at the next day rollover even if this
-  add-on never runs again, or sooner via "Bring back". The set-aside state
-  syncs (the card is aside on your phone too). Also on the Tools menu, the
-  reviewer's right-click menu, the dock's "Set aside" button, and available
-  to the assistant as `defer_card`. Editable in the Settings panel (gear).
-- `defer_button` (default `true`): show the "Set aside" button by the composer
-  while a review card is on screen. Whenever a card is set aside — by the
-  button, the chord, the menu, the assistant, or defer-on-send — a transient
-  "Card set aside — Undo" chip appears; Undo unmarks it and puts it straight
-  back on screen. Every card set aside today is listed in the **set-aside
-  tray**: a tray icon with a count badge appears in the dock's header (also
-  reachable from the chip's "Card set aside" label), showing each card with
-  its deck and front text, expandable to a front/back preview, with per-card
-  "Review next" and a "Bring all back" button.
+- `defer_shortcut` (default `Ctrl+Shift+D`): while reviewing, **manually bury**
+  the card on screen — "not this one right now". This is Anki's own manual
+  bury, tracked so the dock can list and recall it; the scheduler only ever
+  serves and accepts answers for the top of its own queue, so a card can only
+  be served later by genuinely leaving that queue. Scheduling (due date,
+  interval, ease, history) is untouched, and Anki's own Undo (Cmd+Z) reverts
+  it in one step. It returns by itself at the next day rollover even if this
+  add-on never runs again, or sooner via "Bring back". The buried state syncs
+  (the card is buried on your phone too). Also on the reviewer's right-click
+  menu, the dock's "Bury" button, and available to the assistant as
+  `defer_card`. Editable in the Settings panel (gear).
+- `defer_button` (default `true`): show the "Bury" button by the composer
+  while a review card is on screen. Whenever a card is buried this way — by
+  the button, the chord, the assistant, or bury-on-send — a transient
+  "Card set aside — Undo" chip appears; Undo unburies it and puts it straight
+  back on screen. Every card buried today is listed in the **buried-today
+  tray**: a tray icon with a count badge appears in the dock's header,
+  showing each card with its deck and front text, expandable to a front/back
+  preview, with per-card "Review next" and a "Bring all back" button.
 - `defer_on_send` (default `false`): set the on-screen card aside automatically
   every time you send a message, so you can keep reviewing other cards while
   the assistant thinks about the one you asked about. The "Set aside" button

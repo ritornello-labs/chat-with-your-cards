@@ -5,7 +5,7 @@ import type { ChatStore, SetAsideEntry } from "../store";
 /**
  * The set-aside tray (task #33): a full-pane view the header tray button
  * flips to, listing today's set-aside cards as chips - the "important
- * primitive" view of what the tracked-bury deferral engine is holding.
+ * primitive" view of what the tracked manual-bury engine is holding.
  *
  * Each chip: deck (leaf-first, like the pickers) + a clamped front snippet.
  * Clicking the chip body expands the front/back text preview in place (no
@@ -101,7 +101,7 @@ export function SetAsidePane({ store }: { store: ChatStore }) {
   const entries = ui.setAside;
   const shortcut = ui.settings?.deferShortcut || "Ctrl+Shift+D";
   return (
-    <div className="cwyc-aside" data-testid="aside-pane" role="region" aria-label="Cards set aside today">
+    <div className="cwyc-aside" data-testid="aside-pane" role="region" aria-label="Cards buried today">
       <div className="cwyc-aside-top">
         <button
           type="button"
@@ -123,7 +123,7 @@ export function SetAsidePane({ store }: { store: ChatStore }) {
           </svg>
         </button>
         <div className="cwyc-aside-heading">
-          <span className="cwyc-aside-title">Set aside</span>
+          <span className="cwyc-aside-title">Buried today</span>
           <span className="cwyc-aside-sub">
             {entries.length === 0
               ? "nothing today"
@@ -157,11 +157,12 @@ export function SetAsidePane({ store }: { store: ChatStore }) {
             />
             <path d="M7.5 13h9M7.5 16.5h6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
           </svg>
-          <p className="cwyc-aside-empty-title">Nothing set aside</p>
+          <p className="cwyc-aside-empty-title">Nothing buried</p>
           <p className="cwyc-aside-empty-hint">
-            While reviewing, the <strong>Set aside</strong> chip (or {shortcut}) parks the
-            card here. It stays out of today&rsquo;s counts until you bring it back &mdash;
-            or until the next day begins, when Anki returns it on its own.
+            While reviewing, the <strong>Bury</strong> chip (or {shortcut}) manually
+            buries the card and tracks it here. It stays out of today&rsquo;s counts until
+            you bring it back &mdash; or until the next day begins, when Anki unburies it
+            on its own.
           </p>
         </div>
       ) : (

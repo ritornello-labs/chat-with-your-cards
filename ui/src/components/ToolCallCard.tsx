@@ -94,8 +94,8 @@ const TOOL_LABELS: Record<string, string> = {
   fsrs_optimal_retention: "Computed optimal retention",
   get_preferences: "Read your Anki preferences",
   set_preferences: "Proposed preference changes",
-  defer_card: "Set the card aside",
-  undefer_card: "Brought a card back",
+  defer_card: "Buried a card",
+  undefer_card: "Unburied a card",
 };
 
 /** Strip the MCP transport prefix ("mcp__anki__search_notes" and friends);
