@@ -85,7 +85,7 @@ export function DeferredUndoChip({ store }: { store: ChatStore }) {
           store.dismissDeferredNotice();
         }}
       >
-        Card set aside
+        Card buried
       </button>
       <button
         type="button"

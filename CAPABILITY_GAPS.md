@@ -40,11 +40,18 @@ hidden state, scheduling summary, and user flag. It is paged (`offset`, up to
 before a write. *Mark* is just a tag (`marked`), so single-note marking already
 works.
 
-**Exact-card grading is covered.** `fail_cards_now` records a native Again on
+**Exact-card grading is covered.** `fail_cards_now` records a native rating on
 reviewed exact IDs, including future, hidden, and filtered-deck cards.
 `make_cards_available` is the separate post-grading removal of suspension or
-burial and never rewrites the failure. This does not yet provide general flag,
-suspend, bury, due-date, forget, or reposition operations.
+burial and never rewrites the failure.
+
+*Updated 2026-08-02:* the "Again only" and "no general flag/suspend/bury/
+due-date/forget/reposition" limits recorded here are both gone — card-state ops
+(#3) and scheduling writes (#6) shipped 2026-07-30/31, and grading gained the
+full rating set (#16) via upstream `safe_collection_operations` 0.2.0. What
+remains deliberately unsupported is grading by *search*: the core addresses
+exact card IDs and verifies note GUIDs immediately before the write, and
+recording reviews at query scale would be falsifying a study history.
 
 ## Cross-cutting constraints
 

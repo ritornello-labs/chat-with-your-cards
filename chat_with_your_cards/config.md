@@ -20,7 +20,7 @@
 - `defer_button` (default `true`): show the "Bury" button by the composer
   while a review card is on screen. Whenever a card is buried this way — by
   the button, the chord, the assistant, or bury-on-send — a transient
-  "Card set aside — Undo" chip appears; Undo unburies it and puts it straight
+  "Card buried — Undo" chip appears; Undo unburies it and puts it straight
   back on screen. Every card buried today is listed in the **buried-today
   tray**: a tray icon with a count badge appears in the dock's header,
   showing each card with its deck and front text, expandable to a front/back

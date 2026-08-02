@@ -2124,7 +2124,7 @@ body {
    Bulk/delete/change-set/deck/skill cards used to render as "{n} item(s)".
    These styles carry the operation, the examples, and the affected notes. */
 
-/* "Card set aside - Undo": transient, above the composer, gone in 12s. */
+/* "Card buried - Undo": transient, above the composer, gone in 12s. */
 .cwyc-deferred-undo {
   display: flex;
   align-items: center;

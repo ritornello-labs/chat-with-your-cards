@@ -1125,19 +1125,22 @@ rollover on every device (the marker and bury state sync). Recall pins the
 card by transiently parking (`cwycPrk`) whatever sits ahead of it so the
 stock fetch serves it as the genuine backend top; parks release on the next
 fetch and crash-heal via the same-day marker sweep. Honest cost, stated in
-all user-facing copy: while set aside, the card IS out of today's counts.
+all user-facing copy: while buried, the card IS out of today's counts.
 
 Rejected alternatives (2026-07-30 review): answering non-top cards by
 reimplementing the FSRS answer path (fragile, breaks undo/sync); `set_due_date`
 re-sorting (no-op for same-day cards, order randomized); cosmetic count
 patches (phones show the truth). Tiered native handling (reposition for new
 cards, intraday due-bump for learning cards) noted as a possible refinement;
-the user chose bury-only for now. The true fix is an upstream rslib defer op.
+the user chose bury-only for now — which is why the feature ended up being
+*named* manual bury (see the note at the top of this section). The true fix
+would be an upstream rslib defer op.
 
-**The set-aside tray (task #33):** the set-aside cards are a first-class
-primitive, not invisible state. A tray icon with a live count badge in the
-dock header (shown only while non-empty; the transient "Card set aside —
-Undo" chip's label also opens it) flips the dock from the chat thread to a
+**The buried-today tray (task #33; called the "set-aside tray" until the
+2026-08-02 rename above):** the buried cards are a first-class primitive, not
+invisible state. A tray icon with a live count badge in the dock header (shown
+only while non-empty; the transient "Card buried — Undo" chip's label also
+opens it) flips the dock from the chat thread to a
 full-pane list: each card is a chip with deck (leaf-first) + clamped front
 text, expandable in place to a front/back text preview, with an always-visible
 per-card "Review next" (unbury + pin, the Undo chip's verb) and a header

@@ -151,7 +151,7 @@ export function Header({ store }: { store: ChatStore }) {
       </HeaderButton>
       {/* The set-aside tray (task #33). Present only while it has contents
           (or is open): an empty tray is not worth a permanent button, and
-          the transient "Card set aside" chip introduces it at the moment it
+          the transient "Card buried" chip introduces it at the moment it
           first becomes non-empty. */}
       {ui.setAsideCount > 0 || ui.pane === "aside" ? (
         <button
