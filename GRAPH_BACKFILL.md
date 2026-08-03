@@ -272,3 +272,46 @@ sweep — zero data loss, no manual repair. Idempotent ingest also absorbed
 embedding-cluster → adjudicated aliases) — now clearly load-bearing at this
 scale — then Phase D over the hub tier. Adding Fable as a second voter is
 purely additive whenever wanted (same shards, new model tag).
+
+## 15. Phase D depth: measured candidate structure (2026-08-03)
+
+User decision: **add Fable as a second voter, and reach deep in Phase D**
+(do not stop at the ≥5× hub tier). Sizing the "deep" option requires the
+actual candidate structure, not the note-level pair count. Collapsing the
+71,826 note-level `covers × presupposes` pairs by concept (naive + alias
+normalization, Opus voter) gives **53,085 distinct directed candidate
+pairs** — a 26% collapse, because the same prerequisite relation is asserted
+by many notes.
+
+| Tier (both endpoints ≥ N notes) | concepts | candidate pairs | pairs w/ support ≥2 | prereqs per head |
+|---|---:|---:|---:|---:|
+| ≥1 (everything) | 21,083 | 53,085 | 10,163 | 3.4 |
+| ≥2 (recurrent) | 11,351 | 37,416 | 10,163 | 4.1 |
+| ≥3 | 7,737 | 28,768 | 8,604 | 4.5 |
+| ≥5 (the §13 default) | 4,427 | 18,400 | 5,941 | 5.0 |
+| ≥10 | 1,728 | 7,370 | 2,725 | 5.1 |
+
+Three things this table settles:
+
+1. **Depth is affordable because the judge is per-head, not per-pair.** The
+   unit of work is a concept's neighborhood (head + its 3–5 candidate
+   prerequisites, judged together in one call). Full depth is ~15.6k
+   neighborhoods vs ~3.7k at ≥5× — roughly 2× the Phase B subagent effort,
+   at ~zero marginal cost on the subscription. API-priced (the SaaS number)
+   it is ~$110 rather than §13's ~$30.
+2. **Support ≥2 is not a usable filter for depth.** Every support-≥2 pair
+   already has both endpoints recurrent, so the ≥1 and ≥2 tiers share an
+   identical 10,163 corroborated pairs. The extra 15,669 pairs that full
+   depth buys are *all* single-note assertions — which is exactly the set
+   where a second opinion has the most value, and exactly the set a
+   support-threshold would have discarded.
+3. **Normalization must precede D, not follow it.** Judging `linear map`
+   and `linear transformation` as separate heads both wastes calls and
+   splits the resulting graph — and at 21k names the unmerged tail is where
+   most of the depth lives.
+
+Phase D therefore runs at **tier ≥1 (full depth)**, after normalization,
+single-voter Opus, with its own adjudicated benchmark first per the standing
+rule (§11). Judge output stays a *proposal* (gbrain lesson, §7): edges land
+with provenance and confidence, and cycle-creating edges are rejected at
+write time rather than silently reoriented.
