@@ -236,3 +236,39 @@ state: ~1–2¢ per new/edited note across all stages (the log means re-runs
 only ever buy missing labelings). Prerequisite: Anthropic API credits
 (balance currently empty; the batch discount requires the direct API, not
 OpenRouter).
+
+## 14. Phase B executed (2026-08-03): full-corpus Opus pass complete
+
+The backfill ran on the Max subscription via Opus subagents (marginal cost
+~zero; API pricing reserved for the SaaS posture). **23,797 notes labeled**
+across 19 waves / 97 shards; `sweep_missing()` returns 0. Full run log and
+data: private `anki-graph-bench` repo.
+
+| Metric | Measured |
+|---|---:|
+| covers/note | 1.57 |
+| presupposes/note | 1.86 |
+| distinct concept names | **21,083** |
+| recurring (≥2 notes) | 11,351 |
+| ≥5 notes (Phase D hub tier) | 4,427 |
+| ≥10 notes | 1,728 |
+| candidate `requires` pairs (free, from `presupposes`) | **71,826** |
+
+**Against §10's projection (8–15k):** 21.1k is ~40% over the top of range.
+The Heaps fit was calibrated on a *dense single-domain* sample; the full
+corpus spans dozens of domains whose vocabularies barely overlap, so
+cross-domain breadth beat the projection's downward biases. The
+consequential number was right, though: the recurrent tier is ~11k and the
+≥5× band ~4.4k — Phase D judging over that tier stays in the tens of
+dollars, exactly as §13 budgeted. Cross-domain sparsity also confirms §10's
+finding that the graph will be a union of domain-local clusters.
+
+**Operational validation of v4 (§12):** one subagent died mid-response; its
+176 completed notes ingested normally and the remaining 74 re-queued via the
+sweep — zero data loss, no manual repair. Idempotent ingest also absorbed
+358 duplicate nids from an early exporter bug without corruption.
+
+**Next:** normalization cascade over the 21k names (deterministic →
+embedding-cluster → adjudicated aliases) — now clearly load-bearing at this
+scale — then Phase D over the hub tier. Adding Fable as a second voter is
+purely additive whenever wanted (same shards, new model tag).
