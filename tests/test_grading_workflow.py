@@ -88,6 +88,21 @@ class GradingWorkflowTests(unittest.TestCase):
         self.assertEqual(pushes[1]["grading"]["status"], "auto-accepted")
         self.assertEqual(pushes[-1]["grading"]["status"], "pending")
 
+    def test_full_collection_grading_uses_write_budget(self) -> None:
+        col = FakeCol()
+        col.add_card(FakeCard(101, 201), guid="guid-a")
+        col.add_card(FakeCard(102, 202), guid="guid-b")
+        manager, _pushes, _refreshes = self.manager(
+            col, mode="full-collection", cap=1
+        )
+
+        first = manager.submit_fail({"card_ids": [101]})
+        second = manager.submit_fail({"card_ids": [102]})
+
+        self.assertEqual("auto-accepted", first["status"])
+        self.assertEqual("pending_user_confirmation", second["status"])
+        self.assertEqual([101], col.revlog)
+
     def test_confirmation_fails_closed_if_card_identity_changes(self) -> None:
         col = FakeCol()
         col.add_card(FakeCard(101, 201), guid="guid-before")

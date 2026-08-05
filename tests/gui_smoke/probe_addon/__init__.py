@@ -2343,7 +2343,7 @@ def _run_checks() -> dict[str, Any]:
                     DOM_TIMEOUT_MS,
                     "collection access choices",
                 )
-                == 5
+                == 6
             )
 
         _wait_until(_collection_choices_ready, DOM_TIMEOUT_MS, "all collection access choices")
@@ -2361,7 +2361,7 @@ def _run_checks() -> dict[str, Any]:
         )
         if (
             not collection
-            or collection["modes"] != 5
+            or collection["modes"] != 6
             or collection["left"] < 0
             or collection["right"] > collection["viewport"]
             or collection["scrollHeight"] > collection["clientHeight"] + 1

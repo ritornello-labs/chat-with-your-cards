@@ -212,15 +212,22 @@ def build_system_prompt(
             "filtered_deck_action (rebuild or empty) - one confirmation card "
             "each, like the bulk tools."
         )
-        if permission_mode == "trusted-writes":
+        if permission_mode == "full-collection":
+            parts.append(
+                "\nFull-collection is on: all collection operations, including "
+                "deletes and full-sync changes, apply immediately up to the "
+                "session write budget. Critical backups still run before "
+                "destructive changes. Skill updates still need explicit review "
+                "because they change future agent behavior. Work carefully and "
+                "keep the requested scope narrow."
+            )
+        elif permission_mode == "trusted-writes":
             parts.append(
                 "\nTrusted-writes is on: creations, edits, bulk operations "
-                "change sets, and native grading apply immediately (an Anki backup checkpoint "
-                "runs before bulk applies), up to a per-session write "
-                "budget - past that, changes queue for manual review. "
-                "Deleting notes ALWAYS needs the user's explicit "
-                "confirmation. Work carefully: everything is ledgered and "
-                "revertible, but the user is trusting you not to need it."
+                "change sets, routine deck/scheduling changes, and native "
+                "grading apply immediately up to the session write budget. "
+                "Deletes, non-revertible/full-sync changes, and skill updates "
+                "still need explicit review. Backups run before bulk applies."
             )
         if permission_mode == "auto-accept":
             parts.append(

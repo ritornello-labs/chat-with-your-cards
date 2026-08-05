@@ -101,6 +101,12 @@ class AgentStateRoundTripTests(unittest.TestCase):
         self.assertEqual("full", agent["tools"])
         self.assertEqual("read-only", agent["mode"])
 
+    def test_full_collection_permission_round_trips(self) -> None:
+        controller, pushed = self._controller()
+        controller.set_permission_mode("full-collection")
+        self.assertEqual("full-collection", controller._config["permission_mode"])
+        self.assertEqual("full-collection", self._last_agent(pushed)["mode"])
+
     def test_default_agent_tools_arg_is_sandbox(self) -> None:
         # A caller that omits agent_tools (legacy 3-arg call) gets the safe
         # default rather than raising.

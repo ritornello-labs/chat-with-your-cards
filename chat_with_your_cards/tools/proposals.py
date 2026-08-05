@@ -359,9 +359,9 @@ def register_proposal_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolSpec(
             "delete_notes",
-            "Delete notes. ALWAYS requires explicit user confirmation (even in "
-            "trusted-writes mode) and cannot be undone from the chat; a backup "
-            "checkpoint is created first. Use sparingly.",
+            "Delete notes. Requires explicit confirmation in Trusted writes; "
+            "Full collection applies directly. Cannot be undone from the chat, "
+            "so a backup checkpoint is always created first. Use sparingly.",
             {
                 "type": "object",
                 "properties": {
@@ -619,7 +619,8 @@ def register_proposal_tools(registry: ToolRegistry) -> None:
         ToolSpec(
             "close_change_set",
             "Close a change set and hand it to the user for review (or apply "
-            "directly under trusted-writes). Call once all edits are added.",
+            "directly in Trusted writes or Full collection). Call once all "
+            "edits are added.",
             {
                 "type": "object",
                 "properties": {

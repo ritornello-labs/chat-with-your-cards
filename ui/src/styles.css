@@ -2047,7 +2047,7 @@ body {
 
 .cwyc-access-options {
   display: grid;
-  gap: 2px;
+  gap: 1px;
 }
 
 #cwyc-root .cwyc-access-option {
@@ -2056,14 +2056,14 @@ body {
   align-items: center;
   gap: 9px;
   width: 100%;
-  min-height: 29px;
+  min-height: 27px;
   border: none;
   border-radius: 7px;
   background: transparent;
   color: var(--cwyc-fg);
   font: 400 12.5px var(--cwyc-font);
   text-align: left;
-  padding: 5px 8px;
+  padding: 4px 8px;
   cursor: pointer;
 }
 

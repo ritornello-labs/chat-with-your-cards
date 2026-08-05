@@ -48,7 +48,7 @@ class ToolSpec:
     input_schema: dict[str, Any]
     func: ToolFunc
     writes: bool = False
-    trusted_only: bool = False  # advertised only in trusted-writes mode
+    trusted_only: bool = False  # advertised only in direct-write collection modes
     # Accepted but deliberately NOT advertised in input_schema - aliases kept
     # working for compatibility without inviting their use (propose_note_edit
     # takes `fields` as an alias for `field_changes`). Anything here is exempt

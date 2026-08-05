@@ -433,6 +433,7 @@ class ChatController:
         "read-only",
         "auto-accept",
         "trusted-writes",
+        "full-collection",
     )
 
     def set_permission_mode(self, mode: str) -> None:

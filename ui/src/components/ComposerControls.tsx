@@ -68,6 +68,7 @@ const COLLECTION_ACCESS_SHORT: Readonly<Record<string, string>> = {
   default: "Review",
   "auto-accept": "Auto notes",
   "trusted-writes": "Trusted",
+  "full-collection": "Full",
 };
 
 /**
@@ -121,7 +122,7 @@ function useSmartPanel(open: boolean) {
  *  are hardcoded in proposals.py/grading.py; this table just stops them
  *  being invisible. Keep in sync with _finish_submission (bulk & deck ops
  *  auto-apply under trusted), the auto-accept creations+grading cap,
- *  delete_notes (trusted_only, always confirmed) and submit_skill_update
+ *  Full collection's high-impact direct writes, and submit_skill_update
  *  (always confirmed). */
 const OPERATION_MATRIX: readonly { name: string; by: Record<string, string> }[] = [
   {
@@ -132,6 +133,7 @@ const OPERATION_MATRIX: readonly { name: string; by: Record<string, string> }[] 
       default: "Free",
       "auto-accept": "Free",
       "trusted-writes": "Free",
+      "full-collection": "Free",
     },
   },
   {
@@ -142,6 +144,7 @@ const OPERATION_MATRIX: readonly { name: string; by: Record<string, string> }[] 
       default: "Review card",
       "auto-accept": "Instant, capped per chat",
       "trusted-writes": "Instant, session budget",
+      "full-collection": "Instant, session budget",
     },
   },
   {
@@ -152,6 +155,7 @@ const OPERATION_MATRIX: readonly { name: string; by: Record<string, string> }[] 
       default: "Review card",
       "auto-accept": "Review card",
       "trusted-writes": "Instant, session budget",
+      "full-collection": "Instant, session budget",
     },
   },
   {
@@ -162,6 +166,7 @@ const OPERATION_MATRIX: readonly { name: string; by: Record<string, string> }[] 
       default: "Review card",
       "auto-accept": "Review card",
       "trusted-writes": "Instant, session budget",
+      "full-collection": "Instant, session budget",
     },
   },
   {
@@ -172,6 +177,7 @@ const OPERATION_MATRIX: readonly { name: string; by: Record<string, string> }[] 
       default: "Review card",
       "auto-accept": "Review card",
       "trusted-writes": "Instant, session budget",
+      "full-collection": "Instant, session budget",
     },
   },
   {
@@ -182,6 +188,7 @@ const OPERATION_MATRIX: readonly { name: string; by: Record<string, string> }[] 
       default: "Review card",
       "auto-accept": "Review card",
       "trusted-writes": "Always confirmed",
+      "full-collection": "Instant, may force full sync",
     },
   },
   {
@@ -192,6 +199,7 @@ const OPERATION_MATRIX: readonly { name: string; by: Record<string, string> }[] 
       default: "Confirmation chip",
       "auto-accept": "Instant, same cap",
       "trusted-writes": "Instant, session budget",
+      "full-collection": "Instant, session budget",
     },
   },
   {
@@ -202,6 +210,7 @@ const OPERATION_MATRIX: readonly { name: string; by: Record<string, string> }[] 
       default: "Not offered",
       "auto-accept": "Not offered",
       "trusted-writes": "Always confirmed + backup",
+      "full-collection": "Instant + backup",
     },
   },
   {
@@ -212,6 +221,7 @@ const OPERATION_MATRIX: readonly { name: string; by: Record<string, string> }[] 
       default: "Review card",
       "auto-accept": "Review card",
       "trusted-writes": "Review card",
+      "full-collection": "Review card",
     },
   },
 ];
@@ -260,7 +270,9 @@ export function AccessControl({ store }: { store: ChatStore }) {
     PERMISSION_MODES.find((mode) => mode.id === (previewMode ?? currentMode.id)) ?? currentMode;
   const describedTool =
     AGENT_TOOLS.find((tool) => tool.id === (previewTool ?? currentTool.id)) ?? currentTool;
-  const isRisky = ui.agent.tools !== "sandbox";
+  const collectionIsRisky = ui.agent.mode === "full-collection";
+  const computerIsRisky = ui.agent.tools !== "sandbox";
+  const isRisky = collectionIsRisky || computerIsRisky;
   const triggerLabel = `Access · ${COLLECTION_ACCESS_SHORT[currentMode.id] ?? currentMode.label} / ${currentTool.chip}`;
 
   const returnToOverview = () => {
@@ -331,7 +343,12 @@ export function AccessControl({ store }: { store: ChatStore }) {
                 </span>
                 <AccessChevron />
               </button>
-              {isRisky ? (
+              {collectionIsRisky ? (
+                <div className="cwyc-access-risk" role="note">
+                  Deletes and full-sync collection changes can apply without review. Backups and the session budget still apply.
+                </div>
+              ) : null}
+              {computerIsRisky ? (
                 <div className="cwyc-access-risk" role="note">
                   Computer tools can run shell commands from untrusted card content. {" "}
                   <button type="button" data-testid="risk-modal-open" onClick={() => setModalOpen(true)}>
@@ -356,9 +373,7 @@ export function AccessControl({ store }: { store: ChatStore }) {
                     className={"cwyc-access-option" + (mode.id === ui.agent.mode ? " cwyc-active" : "")}
                     data-testid={`permission-mode-${mode.id}`}
                     onFocus={() => setPreviewMode(mode.id)}
-                    onBlur={() => setPreviewMode(null)}
                     onMouseEnter={() => setPreviewMode(mode.id)}
-                    onMouseLeave={() => setPreviewMode(null)}
                     onClick={() => {
                       store.setPermissionMode(mode.id);
                       returnToOverview();
@@ -415,9 +430,7 @@ export function AccessControl({ store }: { store: ChatStore }) {
                       data-testid={`agent-tools-${tool.id}`}
                       title={disabled ? "Auto needs Opus or Sonnet" : undefined}
                       onFocus={() => setPreviewTool(tool.id)}
-                      onBlur={() => setPreviewTool(null)}
                       onMouseEnter={() => setPreviewTool(tool.id)}
-                      onMouseLeave={() => setPreviewTool(null)}
                       onClick={
                         disabled
                           ? undefined

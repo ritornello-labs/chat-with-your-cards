@@ -154,6 +154,7 @@ class ContextTest(unittest.TestCase):
             "read-only",
             "auto-accept",
             "trusted-writes",
+            "full-collection",
         ):
             for agent_tools in ("sandbox", "full"):
                 with self.subTest(mode=mode, agent_tools=agent_tools):

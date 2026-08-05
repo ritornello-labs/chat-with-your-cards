@@ -351,10 +351,14 @@ compact tokens (`Opus · Med`, full values in its tooltip and menu) so common
 model/effort pairs do not ellipsize in a narrow dock. Access option hover copy
 has a fixed three-line footprint: both panels usually open upward, and a
 variable-height description moved the last rows under a stationary pointer,
-causing hover oscillation. Trusted collection access now also has a real
-server-side safety boundary: routine changes apply directly, while destructive
-or non-revertible operations, full-sync changes, and skill changes remain
-explicit review cards.
+causing hover oscillation. The preview is also sticky: crossing an inter-row
+gap no longer resets the text before the next row receives hover. Trusted
+collection access has a real server-side safety boundary—routine changes apply
+directly, while destructive/full-sync changes remain review cards—and the
+explicit Full collection tier lets users cross that boundary while retaining
+the write budget and critical backups. Skill changes remain review-only. The
+learning CTA says "N of your edits to learn from · Review patterns" so it
+cannot be mistaken for a queue of proposed card edits awaiting approval.
 
 **Fixed 2026-07-23 — `tool_approval`.** Was: never handled in `store.ts`, so
 "Ask each read" (the first entry in the mode picker) hung for 120s and then

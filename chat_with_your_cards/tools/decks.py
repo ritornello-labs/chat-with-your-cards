@@ -1,8 +1,8 @@
 """Deck management tools: deck CRUD, options presets, filtered decks.
 
 Reads answer directly; writes submit to the ProposalManager like every
-other write tool (one confirmation card per operation; direct apply
-under trusted-writes within the session budget).
+other write tool (one confirmation card per operation; direct apply in
+Trusted writes or Full collection within the session budget).
 """
 
 from __future__ import annotations

@@ -173,13 +173,13 @@ function LearningNudgeBar({ store }: { store: ChatStore }) {
   return (
     <div
       className="cwyc-learning-nudge"
-      title="You've edited AI-written cards since the last review - distill the pattern into the authoring skill"
+      title="You changed AI-written cards after they were created. Review the patterns to improve future card writing."
     >
       <span>
-        <strong>{ui.learning.pending}</strong> authoring edit{ui.learning.pending === 1 ? "" : "s"} ready
+        <strong>{ui.learning.pending}</strong> of your edit{ui.learning.pending === 1 ? "" : "s"} to learn from
       </span>
       <button type="button" data-testid="learning-nudge" onClick={() => store.startSkillReview()}>
-        Review
+        Review patterns
       </button>
     </div>
   );

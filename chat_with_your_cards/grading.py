@@ -227,7 +227,7 @@ class GradingManager:
         if mode == "auto-accept":
             cap = max(0, int(self._config.get("auto_accept_cap", 20)))
             return mode if self._auto_graded + count <= cap else None
-        if mode == "trusted-writes":
+        if mode in {"trusted-writes", "full-collection"}:
             budget = max(0, int(self._config.get("write_budget", 200)))
             return mode if self._trusted_graded + count <= budget else None
         return None
@@ -235,7 +235,7 @@ class GradingManager:
     def _consume_budget(self, mode: str | None, count: int) -> None:
         if mode == "auto-accept":
             self._auto_graded += count
-        elif mode == "trusted-writes":
+        elif mode in {"trusted-writes", "full-collection"}:
             self._trusted_graded += count
 
     def submit_fail(self, args: dict[str, Any]) -> dict[str, Any]:

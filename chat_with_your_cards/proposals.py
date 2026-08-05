@@ -434,9 +434,9 @@ class Proposal:
     # kind-level default in _kind_revertible decides.
     revertible: bool | None = None
     # A trusted-writes session normally applies collection changes directly,
-    # but some operations are deliberate safety boundaries: destructive
-    # changes and changes known to force a one-way/full sync must still stop
-    # for an explicit review card. This is server-side policy, not UI copy.
+    # but destructive and full-sync operations remain safety boundaries there.
+    # The explicit full-collection tier may cross those boundaries. This is
+    # server-side policy, not UI copy.
     requires_confirmation: bool = False
     # Edit only (#24a): the note's OTHER fields, unchanged by this proposal.
     # Never written - context so the reviewer can see the rest of the note
@@ -653,7 +653,7 @@ class ProposalManager:
         self._counter = 0
         self._auto_accepted = 0
         self._auto_accept_pause_notified = False
-        self._written = 0  # trusted-writes budget consumed (notes touched)
+        self._written = 0  # direct-write budget consumed (notes touched)
         self._budget_pause_notified = False
         self.session_id = secrets.token_hex(4)
 
@@ -1020,13 +1020,13 @@ class ProposalManager:
     # ---- bulk single-op tools (one semantic operation, one proposal) ----
 
     def _finish_submission(self, proposal: Proposal, writes: int) -> dict[str, Any]:
-        """Common tail for bulk submissions: apply directly under
-        trusted-writes (within budget), otherwise render a proposal card.
+        """Common tail for bulk submissions: apply directly under a direct-write
+        mode (within budget), otherwise render a proposal card.
 
         Trusted writes deliberately stops at destructive operations and
-        operations known to force a one-way/full sync. Those proposal cards
-        carry ``requires_confirmation`` from their submit path, so this shared
-        chokepoint is the enforcement boundary rather than a UI convention.
+        operations known to force a one-way/full sync. Full collection crosses
+        that boundary while retaining critical backups and the session budget.
+        This chokepoint is the enforcement boundary rather than a UI convention.
         """
         self._proposals[proposal.id] = proposal
         if self._quiet:
@@ -1037,12 +1037,10 @@ class ProposalManager:
                 "affected": proposal.count,
                 "warnings": proposal.warnings,
             }
-        if (
-            self._trusted_enabled()
-            and proposal.kind != "delete"
-            and not proposal.requires_confirmation
-            and self._budget_take(writes)
-        ):
+        high_impact_allowed = self._full_collection_enabled() or (
+            proposal.kind != "delete" and not proposal.requires_confirmation
+        )
+        if self._trusted_enabled() and high_impact_allowed and self._budget_take(writes):
             self._push({"type": "proposal", "proposal": proposal.to_payload()})
             try:
                 self.accept({"id": proposal.id, "_direct": True})
@@ -1456,9 +1454,9 @@ class ProposalManager:
 
     def submit_delete_deck(self, args: dict[str, Any]) -> dict[str, Any]:
         """Delete a deck (#9a). Destructive for a normal deck - its cards
-        die with it - so that case is ALWAYS user-confirmed (even under
-        trusted-writes) with a critical backup at apply; a filtered deck is
-        the mild case (cards return home)."""
+        die with it - so trusted-writes requires confirmation and apply creates
+        a critical backup. Full-collection may apply it directly after that
+        backup; a filtered deck is the mild case (cards return home)."""
         col = self._col()
         name = str(args.get("deck", "")).strip()
         did, deck = self._deck_by_name(col, name)
@@ -1498,16 +1496,16 @@ class ProposalManager:
             warnings=warnings,
             requires_confirmation=bool(not filtered and cards),
         )
-        if not filtered and cards:
-            # Destructive: never auto-applies, mirroring delete_notes.
+        if not filtered and cards and not self._full_collection_enabled():
+            # Destructive: trusted-writes stops here; Full collection does not.
             self._proposals[proposal.id] = proposal
             self._push({"type": "proposal", "proposal": proposal.to_payload()})
             return {
                 "status": "pending_user_review",
                 "proposal_id": proposal.id,
                 "affected": cards,
-                "note": "Deleting a deck with cards always requires explicit "
-                "user confirmation.",
+                "note": "Deleting a deck with cards requires explicit user "
+                "confirmation unless Full collection is enabled.",
             }
         return self._finish_submission(proposal, 1)
 
@@ -2941,15 +2939,9 @@ class ProposalManager:
             ],
             requires_confirmation=True,
         )
-        # Deletes are ALWAYS user-confirmed, even under trusted-writes.
-        self._proposals[proposal.id] = proposal
-        self._push({"type": "proposal", "proposal": proposal.to_payload()})
-        return {
-            "status": "pending_user_review",
-            "proposal_id": proposal.id,
-            "affected": proposal.count,
-            "note": "Deletion always requires explicit user confirmation.",
-        }
+        # Trusted writes stops at deletion; Full collection may cross that
+        # boundary, but accept() still requires its critical backup first.
+        return self._finish_submission(proposal, proposal.count)
 
     # ---- deck operations (create/rename/options + filtered decks) ----
 
@@ -6677,10 +6669,16 @@ class ProposalManager:
         return str(self._config.get("permission_mode", "default")) == "auto-accept"
 
     def _trusted_enabled(self) -> bool:
-        return str(self._config.get("permission_mode", "default")) == "trusted-writes"
+        return str(self._config.get("permission_mode", "default")) in {
+            "trusted-writes",
+            "full-collection",
+        }
+
+    def _full_collection_enabled(self) -> bool:
+        return str(self._config.get("permission_mode", "default")) == "full-collection"
 
     def _budget_take(self, n: int) -> bool:
-        """Consume n note-writes from the trusted-writes budget. When the
+        """Consume n note-writes from the direct-write budget. When the
         budget runs out, direct writes pause and everything falls back to
         gated proposals (the safety valve for a runaway agent)."""
         budget = int(self._config.get("write_budget", DEFAULT_WRITE_BUDGET))
@@ -6690,7 +6688,7 @@ class ProposalManager:
                 self._push(
                     {
                         "type": "notice",
-                        "text": f"Trusted-writes budget reached ({budget} notes this "
+                        "text": f"Collection write budget reached ({budget} notes this "
                         "session); further changes need manual review. Start a new "
                         "chat to reset the budget.",
                     }

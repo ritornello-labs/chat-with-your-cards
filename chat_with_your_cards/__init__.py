@@ -860,7 +860,7 @@ def _ensure_mcp() -> tuple[str, str]:
         ctx = _ToolCtx()
         mode = str(state.config.get("permission_mode", "default"))
         read_only = mode == "read-only"
-        trusted = mode == "trusted-writes"
+        trusted = mode in {"trusted-writes", "full-collection"}
 
         specs_by_name = {spec.name: spec for spec in registry.specs(include_trusted=True)}
 
@@ -897,9 +897,12 @@ def _ensure_mcp() -> tuple[str, str]:
                     "this session is read-only; the user must switch the "
                     "permission mode to allow writes"
                 )
-            if spec is not None and spec.trusted_only and live_mode != "trusted-writes":
+            if spec is not None and spec.trusted_only and live_mode not in {
+                "trusted-writes",
+                "full-collection",
+            }:
                 raise PermissionError(
-                    f"{name} is only available in trusted-writes mode"
+                    f"{name} is only available in Trusted writes or Full collection mode"
                 )
             if (
                 spec is not None

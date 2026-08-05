@@ -198,7 +198,10 @@
   `trusted-writes` applies creations, edits, bulk operations, change sets,
   and native grading directly (an Anki backup checkpoint is forced before bulk
   applies) up to `write_budget` notes per session — after that everything
-  falls back to manual review. Deleting notes always asks, in every mode.
+  falls back to manual review. It still asks before deletes, non-revertible or
+  full-sync changes, and skill updates. `full-collection` additionally applies
+  deletes and full-sync changes directly; critical backup checkpoints and the
+  session budget remain enforced. Skill updates still always require review.
 - `approval_timeout_minutes` (default `5`): in `ask-each-read` mode, how long an
   unanswered Allow/Deny prompt stays answerable. The chip shows the deadline
   counting down; past it the chip reads "Expired, no answer" (never "Denied" -
@@ -216,9 +219,10 @@
   created and how many cards may be natively graded without review per chat
   session. The two operations keep separate counters, so a card-writing run
   does not silently consume the grading allowance (or vice versa).
-- `write_budget` (default `200`): in `trusted-writes` mode, how many notes may
-  be written and how many cards may be natively graded directly per chat
-  session before pausing for review. These also use separate counters.
+- `write_budget` (default `200`): in `trusted-writes` and `full-collection`
+  modes, how many notes may be written and how many cards may be natively
+  graded directly per chat session before pausing for review. These also use
+  separate counters.
 - `conventions_prompt` (default empty): your note-authoring conventions (style,
   field usage, tagging). Injected into the assistant's instructions for every
   proposal and materialized as `user_files/skills/note-conventions/SKILL.md`.

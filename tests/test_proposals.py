@@ -2125,8 +2125,8 @@ class CardStateTests(unittest.TestCase):
 
 
 class DeckPresetTests(unittest.TestCase):
-    """Deck & preset management (#9): destructive delete always confirmed,
-    preset lifecycle with recreate-on-revert, assignment, description."""
+    """Deck & preset management (#9): tiered destructive handling, preset
+    lifecycle with recreate-on-revert, assignment, description."""
 
     def test_delete_deck_with_cards_never_auto_applies(self) -> None:
         checkpoints: list = []
@@ -2222,6 +2222,22 @@ class DeckPresetTests(unittest.TestCase):
         proposal = pushes_of(pushed, "proposal")[-1]["proposal"]
         self.assertTrue(proposal["requires_confirmation"])
         self.assertTrue(any("one-way sync" in w for w in proposal["warnings"]))
+
+    def test_full_collection_applies_preset_delete_full_sync(self) -> None:
+        manager, col, _pushed = make_manager(
+            {"permission_mode": "full-collection", "write_budget": 10}
+        )
+        created = manager.submit_manage_preset(
+            {"action": "clone", "preset": "Default", "name": "Focused"}
+        )
+        self.assertEqual("applied", created["status"])
+
+        result = manager.submit_manage_preset(
+            {"action": "delete", "preset": "Focused"}
+        )
+
+        self.assertEqual("applied", result["status"])
+        self.assertNotIn("Focused", [c["name"] for c in col.decks.all_config()])
 
     def test_trusted_writes_stops_before_schema_change(self) -> None:
         manager, _col, pushed = make_manager(
@@ -2833,6 +2849,21 @@ class DeleteTests(unittest.TestCase):
             any("backup" in n["text"] for n in pushes_of(pushed, "notice"))
         )
 
+    def test_delete_applies_directly_in_full_collection_after_backup(self) -> None:
+        checkpoints: list = []
+        manager, col, pushed = make_manager(
+            {"permission_mode": "full-collection"}, checkpoints=checkpoints
+        )
+        ids = _seed_notes(manager, col, pushed)
+
+        result = manager.submit_delete_notes({"note_ids": ids[:2]})
+
+        self.assertEqual("applied", result["status"])
+        self.assertEqual(1, len(col._notes))
+        self.assertTrue(checkpoints)
+        self.assertTrue(checkpoints[-1][1], "delete checkpoint should be critical")
+        self.assertFalse(pushes_of(pushed, "proposal_resolved")[-1]["revertible"])
+
     def test_delete_aborts_when_backup_checkpoint_fails(self) -> None:
         # A critical (delete) checkpoint failure must ABORT before anything is
         # touched - a destructive op must never proceed without a safety net.
@@ -3156,19 +3187,23 @@ SKILL_UPDATE_ARGS = {
 
 
 class SkillUpdateTests(unittest.TestCase):
-    def test_always_pending_even_under_trusted_writes(self) -> None:
-        manager, _, pushed = make_manager(
-            config={"permission_mode": "trusted-writes"},
-            apply_skill=lambda _p: [],
-        )
-        result = manager.submit_skill_update(
-            dict(SKILL_UPDATE_ARGS), old_content="old", observation_ids=["a", "b"]
-        )
-        self.assertEqual("pending_user_review", result["status"])
-        (proposal,) = pushes_of(pushed, "proposal")
-        self.assertEqual("skill_update", proposal["proposal"]["kind"])
-        self.assertEqual(2, proposal["proposal"]["count"])
-        self.assertIn("diff", proposal["proposal"]["op_args"])
+    def test_always_pending_in_direct_write_modes(self) -> None:
+        for mode in ("trusted-writes", "full-collection"):
+            with self.subTest(mode=mode):
+                manager, _, pushed = make_manager(
+                    config={"permission_mode": mode},
+                    apply_skill=lambda _p: [],
+                )
+                result = manager.submit_skill_update(
+                    dict(SKILL_UPDATE_ARGS),
+                    old_content="old",
+                    observation_ids=["a", "b"],
+                )
+                self.assertEqual("pending_user_review", result["status"])
+                (proposal,) = pushes_of(pushed, "proposal")
+                self.assertEqual("skill_update", proposal["proposal"]["kind"])
+                self.assertEqual(2, proposal["proposal"]["count"])
+                self.assertIn("diff", proposal["proposal"]["op_args"])
 
     def test_accept_applies_via_callable_and_is_not_revertible(self) -> None:
         applied: list[Any] = []
@@ -3225,19 +3260,21 @@ NEW_SKILL_ARGS = {
 
 class SkillCreateTests(unittest.TestCase):
     """propose_new_skill's proposal round-trip (workspace task #20):
-    validation, always-pending review (even under trusted-writes), accept
+    validation, always-pending review (even in direct-write modes), accept
     writes via the injected callable, reject writes nothing, and the
     submission-time collision check against existing skill names."""
 
-    def test_always_pending_even_under_trusted_writes(self) -> None:
-        manager, _, pushed = make_manager(
-            config={"permission_mode": "trusted-writes"},
-            apply_skill_create=lambda _p: [],
-        )
-        result = manager.submit_skill_create(dict(NEW_SKILL_ARGS))
-        self.assertEqual("pending_user_review", result["status"])
-        (proposal,) = pushes_of(pushed, "proposal")
-        self.assertEqual("skill_create", proposal["proposal"]["kind"])
+    def test_always_pending_in_direct_write_modes(self) -> None:
+        for mode in ("trusted-writes", "full-collection"):
+            with self.subTest(mode=mode):
+                manager, _, pushed = make_manager(
+                    config={"permission_mode": mode},
+                    apply_skill_create=lambda _p: [],
+                )
+                result = manager.submit_skill_create(dict(NEW_SKILL_ARGS))
+                self.assertEqual("pending_user_review", result["status"])
+                (proposal,) = pushes_of(pushed, "proposal")
+                self.assertEqual("skill_create", proposal["proposal"]["kind"])
 
     def test_accept_applies_via_callable_and_is_not_revertible(self) -> None:
         applied: list[Any] = []
