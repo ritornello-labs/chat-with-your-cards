@@ -339,6 +339,13 @@ export interface SettingsEvent {
   defer_on_send?: boolean;
   /** Whether sandboxed inline widgets (render_widget) may render. */
   widget_rendering?: boolean;
+  /** Analyze corrections once either this count or the age limit is reached. */
+  learning_nudge_threshold?: number;
+  learning_nudge_days?: number;
+  /** Run analysis in a visible review chat, or an isolated background task. */
+  learning_run_mode?: "chat" | "background";
+  /** Review writing-guidance diffs, or apply them automatically with a backup. */
+  skill_update_policy?: "review" | "automatic";
 }
 
 export interface DoneEvent {

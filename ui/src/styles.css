@@ -3334,6 +3334,10 @@ body {
 
 .cwyc-panel-settings {
   min-width: 252px;
+  /* Settings is now the complete user-facing control surface, including the
+     learning workflow. Use the available dock height instead of forcing all
+     sections through the generic 320px menu viewport. */
+  max-height: calc(100vh - 90px);
 }
 .cwyc-setting-row {
   display: flex;
@@ -3373,6 +3377,34 @@ body {
   outline: none;
   border-color: var(--cwyc-accent);
   box-shadow: 0 0 0 2px var(--cwyc-accent-soft);
+}
+#cwyc-root .cwyc-setting-number {
+  flex: 0 0 auto;
+  width: 62px;
+  font: 400 12px var(--cwyc-mono);
+  color: var(--cwyc-fg);
+  background: var(--cwyc-bg);
+  border: 1px solid var(--cwyc-border);
+  border-radius: 6px;
+  padding: 3px 5px;
+  text-align: right;
+}
+#cwyc-root .cwyc-setting-number:focus {
+  outline: none;
+  border-color: var(--cwyc-accent);
+  box-shadow: 0 0 0 2px var(--cwyc-accent-soft);
+}
+.cwyc-setting-subhead {
+  padding: 7px 8px 2px;
+  color: var(--cwyc-fg-subtle);
+  font-size: 11px;
+  font-weight: 600;
+}
+.cwyc-setting-choice-row {
+  align-items: flex-start;
+}
+.cwyc-setting-explanation {
+  padding-top: 4px;
 }
 
 .cwyc-setting-kbd {

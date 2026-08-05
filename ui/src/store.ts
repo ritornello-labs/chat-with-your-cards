@@ -329,6 +329,10 @@ export interface SettingsState {
   readonly deferShortcut: string;
   readonly deferButton: boolean;
   readonly deferOnSend: boolean;
+  readonly learningNudgeThreshold: number;
+  readonly learningNudgeDays: number;
+  readonly learningRunMode: "chat" | "background";
+  readonly skillUpdatePolicy: "review" | "automatic";
 }
 
 /**
@@ -393,15 +397,21 @@ export interface UiState {
   readonly suggestedQuestions: boolean;
   /** Pending (not open) proposal ids, for the bulk bar (#23c). */
   readonly pendingProposals: readonly string[];
-  /** Learning nudge state (#23d): pending observation count + nudge flag. */
-  readonly learning: { pending: number; nudge: boolean } | null;
+  /** Learning state: evidence, visible-chat nudge, or background-job status. */
+  readonly learning: {
+    pending: number;
+    nudge: boolean;
+    running: boolean;
+    updateReady: boolean;
+    proposalId: string;
+  } | null;
 }
 
 /** The permission ladder, most restrictive first (#26). Hints describe
  *  OPERATION CLASSES, not "cards"/"notes" everywhere. Trusted writes stops
  *  at destructive/full-sync changes; Full collection deliberately crosses
  *  those boundaries while preserving the budget and backup checkpoints.
- *  Skill updates remain separately reviewed in every mode. */
+ *  Writing-guidance updates follow their separate learning setting. */
 export const PERMISSION_MODES: readonly { id: string; label: string; hint: string }[] = [
   { id: "ask-each-read", label: "Ask each read", hint: "Every tool call needs your OK" },
   { id: "read-only", label: "Read-only", hint: "Change tools not offered at all" },
@@ -414,12 +424,12 @@ export const PERMISSION_MODES: readonly { id: string; label: string; hint: strin
   {
     id: "trusted-writes",
     label: "Trusted writes",
-    hint: "Routine changes apply instantly; destructive, full-sync & skill changes still need you",
+    hint: "Routine changes apply instantly; destructive & full-sync changes still need you",
   },
   {
     id: "full-collection",
     label: "Full collection",
-    hint: "All collection changes apply instantly within budget; backups still run; skill changes need review",
+    hint: "All collection changes apply instantly within budget; backups still run",
   },
 ];
 
@@ -662,6 +672,11 @@ export class ChatStore {
   /** Learning nudge (#23d): kick off the skill-review chat. */
   startSkillReview(): void {
     postCommand({ type: "start_skill_review" });
+  }
+
+  /** Reveal a skill-update proposal computed by the background learner. */
+  showBackgroundSkillUpdate(proposalId: string): void {
+    postCommand({ type: "show_background_skill_update", proposal_id: proposalId });
   }
 
   rejectProposal(id: string): void {
@@ -1175,10 +1190,22 @@ export class ChatStore {
         break;
       }
       case "learning": {
-        const learn = event as { pending?: number; nudge?: boolean };
+        const learn = event as {
+          pending?: number;
+          nudge?: boolean;
+          running?: boolean;
+          update_ready?: boolean;
+          proposal_id?: string;
+        };
         this.ui = {
           ...this.ui,
-          learning: { pending: Number(learn.pending ?? 0), nudge: !!learn.nudge },
+          learning: {
+            pending: Number(learn.pending ?? 0),
+            nudge: !!learn.nudge,
+            running: !!learn.running,
+            updateReady: !!learn.update_ready,
+            proposalId: String(learn.proposal_id ?? ""),
+          },
         };
         this.emit();
         break;
@@ -1263,6 +1290,10 @@ export class ChatStore {
           defer_shortcut?: string;
           defer_button?: boolean;
           defer_on_send?: boolean;
+          learning_nudge_threshold?: number;
+          learning_nudge_days?: number;
+          learning_run_mode?: string;
+          skill_update_policy?: string;
         };
         const rawMappings = Array.isArray(s.vim_mappings) ? s.vim_mappings : [];
         const vimMappings = rawMappings.filter(
@@ -1285,6 +1316,10 @@ export class ChatStore {
             deferShortcut: String(s.defer_shortcut ?? ""),
             deferButton: s.defer_button !== false,
             deferOnSend: Boolean(s.defer_on_send),
+            learningNudgeThreshold: Math.max(1, Number(s.learning_nudge_threshold ?? 10)),
+            learningNudgeDays: Math.max(1, Number(s.learning_nudge_days ?? 7)),
+            learningRunMode: s.learning_run_mode === "background" ? "background" : "chat",
+            skillUpdatePolicy: s.skill_update_policy === "automatic" ? "automatic" : "review",
           },
         };
         applyThemeClass(theme);

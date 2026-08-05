@@ -201,7 +201,8 @@
   falls back to manual review. It still asks before deletes, non-revertible or
   full-sync changes, and skill updates. `full-collection` additionally applies
   deletes and full-sync changes directly; critical backup checkpoints and the
-  session budget remain enforced. Skill updates still always require review.
+  session budget remain enforced. Writing-guidance updates follow the separate
+  `skill_update_policy` setting.
 - `approval_timeout_minutes` (default `5`): in `ask-each-read` mode, how long an
   unanswered Allow/Deny prompt stays answerable. The chip shows the deadline
   counting down; past it the chip reads "Expired, no answer" (never "Denied" -
@@ -248,12 +249,24 @@
   "review this session's notes in the Browser" and undo-session actions. Set to
   an empty string to disable session tagging (those actions then no-op). With
   `created_tag`, `edited_tag`, and this all empty, AI notes get no automatic tags.
-- `learning_nudge_threshold` (default `10`): how many edits to AI-written
-  cards accumulate before the dock suggests reviewing them for patterns and
-  updating the card-authoring skill (a new chat the assistant starts only
-  when you click; every skill change is confirmed on a proposal card).
-- `learning_nudge_days` (default `7`): also nudge when any unreviewed edit is
-  older than this many days, even below the threshold.
+- `learning_nudge_threshold` (default `10`) and `learning_nudge_days`
+  (default `7`) form one **whichever-happens-first** rule. Pattern analysis
+  becomes due when either this many corrections to AI-written cards have
+  accumulated, or the oldest unprocessed correction has waited this many
+  days. The day value is not a recurring job interval.
+- `learning_run_mode` (default `"chat"`): `"chat"` offers a visible
+  **Review patterns** action that opens a new reflection chat;
+  `"background"` runs the same analysis in an isolated agent session while
+  Anki is open, without replacing or writing into the chat you are reading.
+  Background eligibility is checked when edits are scanned and hourly while
+  Anki remains open. An unchanged batch is not repeatedly analyzed after a
+  no-pattern result.
+- `skill_update_policy` (default `"review"`): `"review"` holds a proposed
+  writing-guidance diff for you; `"automatic"` applies it without prompting.
+  Automatic updates still archive the prior skill version under
+  `user_files/learning/skill-backups/`. Creating a brand-new skill always
+  requires review. These four settings are available under
+  **Settings → Learning from your edits** in the dock.
 - `pins` (managed from the dock's Pins panel, not edited here): pinned deck,
   note type, tags, and prefilled field defaults applied to every proposed note.
 - `stats_refresh_minutes` (default `30`): how often the collection overview

@@ -3205,6 +3205,70 @@ class SkillUpdateTests(unittest.TestCase):
                 self.assertEqual(2, proposal["proposal"]["count"])
                 self.assertIn("diff", proposal["proposal"]["op_args"])
 
+    def test_explicit_automatic_policy_applies_without_a_review_card(self) -> None:
+        applied: list[str] = []
+        manager, _, pushed = make_manager(
+            config={"skill_update_policy": "automatic"},
+            apply_skill=lambda proposal: applied.append(
+                str(proposal.op_args["new_content"])
+            )
+            or ["archived"],
+        )
+        result = manager.submit_skill_update(
+            dict(SKILL_UPDATE_ARGS), old_content="old", observation_ids=["a"]
+        )
+        self.assertEqual("applied", result["status"])
+        self.assertEqual([SKILL_UPDATE_ARGS["new_content"]], applied)
+        self.assertEqual([], pushes_of(pushed, "proposal"))
+        (resolved,) = pushes_of(pushed, "proposal_resolved")
+        self.assertEqual("auto-accepted", resolved["status"])
+
+    def test_automatic_failure_falls_back_to_a_visible_review_card(self) -> None:
+        manager, _, pushed = make_manager(
+            config={"skill_update_policy": "automatic"}
+        )
+        result = manager.submit_skill_update(
+            dict(SKILL_UPDATE_ARGS), old_content="old", observation_ids=["a"]
+        )
+        self.assertEqual("pending_user_review", result["status"])
+        (proposal,) = pushes_of(pushed, "proposal")
+        self.assertEqual(result["proposal_id"], proposal["proposal"]["id"])
+        self.assertTrue(proposal["proposal"]["requires_confirmation"])
+        self.assertFalse(proposal["proposal"]["background"])
+        self.assertTrue(manager.has_pending_skill_update())
+
+    def test_background_job_holds_update_until_user_reveals_it(self) -> None:
+        manager, _, pushed = make_manager(apply_skill=lambda _p: [])
+        manager.begin_background_skill_job("opaque-job-token")
+        result = manager.submit_skill_update(
+            dict(SKILL_UPDATE_ARGS, background_job_id="opaque-job-token"),
+            old_content="old",
+            observation_ids=["a"],
+        )
+        self.assertEqual("ready_for_review", result["status"])
+        self.assertEqual([], pushes_of(pushed, "proposal"))
+        ready = manager.background_skill_update_ready()
+        self.assertIsNotNone(ready)
+        self.assertEqual(result["proposal_id"], ready.id)
+        manager.new_session()
+        self.assertIsNotNone(manager.background_skill_update_ready())
+        self.assertTrue(manager.show_background_skill_update(result["proposal_id"]))
+        (proposal,) = pushes_of(pushed, "proposal")
+        self.assertFalse(proposal["proposal"]["background"])
+        self.assertIsNone(manager.background_skill_update_ready())
+
+    def test_unrecognized_background_token_is_a_normal_visible_proposal(self) -> None:
+        manager, _, pushed = make_manager(apply_skill=lambda _p: [])
+        manager.begin_background_skill_job("real-token")
+        result = manager.submit_skill_update(
+            dict(SKILL_UPDATE_ARGS, background_job_id="wrong-token"),
+            old_content="old",
+            observation_ids=["a"],
+        )
+        self.assertEqual("pending_user_review", result["status"])
+        (proposal,) = pushes_of(pushed, "proposal")
+        self.assertFalse(proposal["proposal"]["background"])
+
     def test_accept_applies_via_callable_and_is_not_revertible(self) -> None:
         applied: list[Any] = []
 

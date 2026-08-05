@@ -48,9 +48,11 @@ class LearningStore:
         self._skill_path = skill_path
         self._snapshots_path = root / "snapshots.json"
         self._observations_path = root / "observations.jsonl"
+        self._background_state_path = root / "background-state.json"
         self._backups_dir = root / "skill-backups"
         self._snapshots: dict[str, dict[str, Any]] = {}
         self._observations: dict[str, dict[str, Any]] = {}
+        self._last_background_ids: list[str] = []
         self._load()
 
     # ---- persistence ----
@@ -65,7 +67,7 @@ class LearningStore:
         try:
             lines = self._observations_path.read_text(encoding="utf-8").splitlines()
         except Exception:
-            return
+            lines = []
         for line in lines:
             try:
                 event = json.loads(line)
@@ -78,6 +80,19 @@ class LearningStore:
             elif event.get("event") == "consumed":
                 for oid in event.get("ids") or []:
                     self._observations.pop(str(oid), None)
+        try:
+            background = json.loads(
+                self._background_state_path.read_text(encoding="utf-8")
+            )
+            ids = (
+                background.get("observation_ids")
+                if isinstance(background, dict)
+                else []
+            )
+            if isinstance(ids, list):
+                self._last_background_ids = [str(oid) for oid in ids]
+        except Exception:
+            self._last_background_ids = []
 
     def _save_snapshots(self) -> None:
         try:
@@ -305,6 +320,45 @@ class LearningStore:
             "pending": len(pending),
             "nudge": len(pending) >= max(1, threshold) or (bool(pending) and stale),
         }
+
+    def background_due(self, threshold: int, days: int) -> bool:
+        """Whether a new background analysis should run.
+
+        The count/age rule decides *when* analysis is useful. The persisted
+        observation-id fingerprint prevents an hourly timer or an Anki restart
+        from analyzing the exact same evidence again after a no-pattern result.
+        Any newly captured correction changes the fingerprint and re-enables a
+        run.
+        """
+        state = self.nudge_state(threshold, days)
+        ids = self.pending_ids()
+        return bool(state["nudge"] and ids and ids != self._last_background_ids)
+
+    def mark_background_attempt(self, ids: list[str], *, persist: bool = True) -> None:
+        """Remember evidence already analyzed.
+
+        A held review proposal is only remembered in memory because proposals
+        are session-local; after an Anki restart the same evidence must be
+        recomputed rather than becoming permanently unreachable. No-pattern
+        results are persisted so hourly scans do not wastefully repeat them.
+        """
+        self._last_background_ids = [str(oid) for oid in ids]
+        if not persist:
+            return
+        try:
+            self._root.mkdir(parents=True, exist_ok=True)
+            self._background_state_path.write_text(
+                json.dumps(
+                    {
+                        "observation_ids": self._last_background_ids,
+                        "ts": int(time.time()),
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
 
     # ---- the skill file the reflection flow maintains ----
 

@@ -241,6 +241,20 @@ class ChatController:
             extra_blocks=extra_blocks,
         )
 
+    def send_background_message(self, text: str) -> None:
+        """Run an internal task in this controller without visible-chat state.
+
+        Background learning owns a separate controller/session, so it can run
+        while the user keeps chatting. It deliberately receives no current-card
+        block and writes no transcript; its filtered push callback decides which
+        completion state, if any, reaches the dock.
+        """
+        text = text.strip()
+        if not text or self.streaming:
+            return
+        self.ensure_ready()
+        self._session.send(text, self._on_event)
+
     def _context_for_send(self) -> tuple[str | None, str]:
         info = current_card_info()
         if info is None:

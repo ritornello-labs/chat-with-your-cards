@@ -40,5 +40,7 @@
   "session_tag_prefix": "ai-chat-dock::session-",
   "learning_nudge_threshold": 10,
   "learning_nudge_days": 7,
+  "learning_run_mode": "chat",
+  "skill_update_policy": "review",
   "pins": {}
 }

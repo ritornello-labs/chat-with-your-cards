@@ -171,6 +171,13 @@ necessarily mounted) that maps the `ChatEvent` stream onto assistant-ui's
 | `reset` | clears the transcript |
 | anything else | ignored, matching `app.js`'s `dispatch()` default case (forward-compatible) |
 
+The header Settings panel also owns the full learning workflow. “Analyze when
+either happens” exposes the correction-count and maximum-wait thresholds as
+one whichever-happens-first rule; “Run analysis” chooses a visible chat or an
+isolated background agent session; “Update writing guidance” chooses review
+or automatic application. Background status and any held update appear above
+the composer, without being counted as card-authoring proposals.
+
 New-note proposals are adapted by `interactionAdapter.ts` to the interaction
 *presentation standard* — an `InteractionPresentation` from the vendored
 `@elvis-labs/interaction-schema` package — and rendered by the vendored

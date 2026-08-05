@@ -657,8 +657,9 @@ budgets vs the existing 8 MB inline cap; and how attachments interact with
 
 The agent gets better by watching how the user changes AI-written cards
 and folding confirmed patterns back into the card-authoring skill. The
-loop is capture -> batch -> reflect -> confirm; nothing changes agent
-behavior without an explicit user accept.
+loop is capture -> batch -> reflect -> apply. Review remains the default;
+an explicit automatic policy may apply an archived, revertible-on-disk skill
+revision without interrupting the user.
 
 - **Capture, channel 1 (accept-time diffs).** When a proposal is accepted,
   the diff between what the agent proposed and what the user accepted
@@ -681,17 +682,24 @@ behavior without an explicit user accept.
   collection itself (~1 KB/note); a cap (and its config + resource-meter
   UI) would solve a problem that cannot occur. The doctor panel reports
   snapshots / pending observations / bytes.
-- **Batch + nudge.** Observations accumulate in
+- **Batch + trigger.** Observations accumulate in
   `user_files/learning/observations.jsonl` (append-only, replayed on
-  load; consumption is an event). A footer nudge appears at
+  load; consumption is an event). Analysis becomes due at
   `learning_nudge_threshold` pending observations (default 10) or when
-  any observation is older than `learning_nudge_days` (default 7).
-  Dismissing hides it until MORE observations accumulate. The nudge states
-  explicitly that reviewing starts a new chat and the current one stays in
-  History.
-- **Reflection chat.** Clicking the nudge starts a new chat seeded with a
-  visible kickoff message (pushed as a `user_message` event, since the
-  webview normally renders user bubbles itself). The agent calls
+  the oldest observation reaches `learning_nudge_days` (default 7), whichever
+  happens first. These are an evidence count and a maximum wait, not two job
+  frequencies. Settings exposes both values alongside where analysis runs and
+  how its result is applied.
+- **Visible or background reflection.** In `learning_run_mode="chat"`, the
+  nudge starts a new chat seeded with a visible kickoff message (pushed as a
+  `user_message` event, since the webview normally renders user bubbles
+  itself). In `"background"`, an hourly/dock-scan eligibility check starts a
+  separate `ChatController` and backend session with sandboxed tools, no
+  current-card block, no visible transcript, and a filtered event sink. The
+  user can keep chatting in the foreground. A persisted observation-id
+  fingerprint prevents the same unchanged evidence from being analyzed again
+  after a no-pattern result; any new correction changes the fingerprint. The
+  agent calls
   `get_edit_observations` (pending observations + current skill), reasons
   about patterns per the `skill-maintenance` meta-skill, and calls
   `propose_skill_update` with a summary, plain-language pattern
@@ -702,11 +710,14 @@ behavior without an explicit user accept.
   edits - sharpen/merge/delete bullets where they belong, no separate
   "learned preferences" section; users who want a different organization
   edit the meta-skill, not the code.
-- **Always gated.** `skill_update` proposals require explicit user
-  confirmation in EVERY permission mode (including Full collection) and are
-  excluded from bulk accept-all: a skill edit changes all future agent
-  behavior. The card shows the pattern statements and a unified diff of
-  the skill. Accepting writes the skill, archives the prior version to
+- **Separate apply policy.** Collection-access modes do not decide whether a
+  `skill_update` can apply. `skill_update_policy="review"` (default) holds a
+  visible-chat proposal normally or a global hidden proposal from background
+  analysis; the composer surfaces **Writing-guidance update ready · Review**
+  without pretending these are pending card edits. The card shows the pattern
+  statements and a unified diff. `"automatic"` applies the same proposal
+  immediately and never asks the user. In both cases, applying writes the
+  skill, archives the prior version to
   `user_files/learning/skill-backups/`, and consumes the observations it
   was based on; there is no ledger revert (restore = copy the archive
   back).

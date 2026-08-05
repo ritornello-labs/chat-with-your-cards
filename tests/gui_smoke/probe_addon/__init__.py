@@ -2626,6 +2626,10 @@ def _run_checks() -> dict[str, Any]:
                 "    theme: !!panel.querySelector('[data-testid=setting-theme-teal]')"
                 "        && !!panel.querySelector('[data-testid=setting-theme-indigo]')"
                 "        && !!panel.querySelector('[data-testid=setting-theme-evergreen]'),"
+                "    learning: !!panel.querySelector('[data-testid=setting-learning-threshold]')"
+                "        && !!panel.querySelector('[data-testid=setting-learning-days]')"
+                "        && !!panel.querySelector('[data-testid=setting-learning-background]')"
+                "        && !!panel.querySelector('[data-testid=setting-skill-update-automatic]'),"
                 "    doctor: !!panel.querySelector('[data-testid=run-doctor]')"
                 "  };"
                 "})();",
@@ -2637,7 +2641,7 @@ def _run_checks() -> dict[str, Any]:
         settings = _panel_state()
         if not (settings and settings.get("restore")
                 and settings.get("dock_side") and settings.get("theme")
-                and settings.get("doctor")):
+                and settings.get("learning") and settings.get("doctor")):
             raise AssertionError(f"settings panel incomplete: {settings}")
         # The theme picker must actually swap the palette: clicking Evergreen
         # puts cwyc-theme-evergreen on <html>; Teal restores the default.

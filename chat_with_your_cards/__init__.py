@@ -6,6 +6,7 @@ that touches aqt is guarded behind the mw check below.
 
 from __future__ import annotations
 
+import secrets
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -75,6 +76,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "session_tag_prefix": "ai-chat-dock::session-",
     "learning_nudge_threshold": 10,
     "learning_nudge_days": 7,
+    # What happens when the count/age rule becomes due: open a user-triggered
+    # reflection chat (current behavior) or run the analysis in a hidden agent
+    # session. Applying the resulting skill diff is a separate decision.
+    "learning_run_mode": "chat",
+    "skill_update_policy": "review",
     "pins": {},
 }
 
@@ -107,6 +113,27 @@ SKILL_REVIEW_PROMPT = (
     "there is no real pattern, just say so."
 )
 
+LEARNING_RUN_MODES = ("chat", "background")
+SKILL_UPDATE_POLICIES = ("review", "automatic")
+
+
+def _norm_learning_run_mode(value: Any) -> str:
+    mode = str(value).strip()
+    return mode if mode in LEARNING_RUN_MODES else "chat"
+
+
+def _norm_skill_update_policy(value: Any) -> str:
+    policy = str(value).strip()
+    return policy if policy in SKILL_UPDATE_POLICIES else "review"
+
+
+def _bounded_int(value: Any, default: int, *, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
 USER_FILES = Path(__file__).resolve().parent / "user_files"
 
 # Ceiling for a `long_running` tool (#13). FSRS optimization is minutes on a
@@ -126,6 +153,11 @@ class AddonState:
     transcripts: Any = None
     approvals: Any = None
     learning: Any = None
+    learning_timer: Any = None
+    background_learning_controller: Optional[ChatController] = None
+    background_learning_running: bool = False
+    background_learning_job_id: str = ""
+    background_learning_observation_ids: list[str] = field(default_factory=list)
     deferral: Any = None
     last_checkpoint: Any = None
     shortcuts: list[Any] = field(default_factory=list)
@@ -731,6 +763,12 @@ def _setup() -> None:
     materialize_conventions_agent_skill(USER_FILES / "agent-home", conventions)
     card_skill_path = materialize_agent_skills(USER_FILES / "agent-home")
     state.learning = LearningStore(USER_FILES / "learning", card_skill_path)
+    from aqt.qt import QTimer
+
+    state.learning_timer = QTimer(mw)
+    state.learning_timer.setInterval(60 * 60 * 1000)
+    state.learning_timer.timeout.connect(_scan_learning)
+    state.learning_timer.start()
 
     state.proposals = ProposalManager(
         get_col=lambda: mw.col,
@@ -1145,6 +1183,10 @@ def _wire_bridge() -> None:
     bridge.on("recheck_backend", lambda _msg: _recheck_backend())
     bridge.on("start_skill_review", lambda _msg: _start_skill_review())
     bridge.on(
+        "show_background_skill_update",
+        lambda msg: _show_background_skill_update(str(msg.get("proposal_id", ""))),
+    )
+    bridge.on(
         "tool_approval_response",
         lambda msg: state.approvals.respond(msg) if state.approvals else None,
     )
@@ -1287,6 +1329,24 @@ def _push_settings() -> None:
             "defer_shortcut": str(state.config.get("defer_shortcut", DEFER_SHORTCUT)),
             "defer_button": bool(state.config.get("defer_button", True)),
             "defer_on_send": bool(state.config.get("defer_on_send", False)),
+            "learning_nudge_threshold": _bounded_int(
+                state.config.get("learning_nudge_threshold"),
+                10,
+                minimum=1,
+                maximum=10_000,
+            ),
+            "learning_nudge_days": _bounded_int(
+                state.config.get("learning_nudge_days"),
+                7,
+                minimum=1,
+                maximum=3_650,
+            ),
+            "learning_run_mode": _norm_learning_run_mode(
+                state.config.get("learning_run_mode")
+            ),
+            "skill_update_policy": _norm_skill_update_policy(
+                state.config.get("skill_update_policy")
+            ),
         }
     )
 
@@ -1315,6 +1375,14 @@ def _set_setting(msg: dict[str, Any]) -> None:
         state.config["defer_button"] = bool(value)
     elif key == "defer_on_send":
         state.config["defer_on_send"] = bool(value)
+    elif key == "learning_nudge_threshold":
+        state.config[key] = _bounded_int(value, 10, minimum=1, maximum=10_000)
+    elif key == "learning_nudge_days":
+        state.config[key] = _bounded_int(value, 7, minimum=1, maximum=3_650)
+    elif key == "learning_run_mode":
+        state.config[key] = _norm_learning_run_mode(value)
+    elif key == "skill_update_policy":
+        state.config[key] = _norm_skill_update_policy(value)
     elif key == "defer_shortcut":
         from aqt.qt import QKeySequence
 
@@ -1343,6 +1411,8 @@ def _set_setting(msg: dict[str, Any]) -> None:
     config[key] = state.config[key]
     mw.addonManager.writeConfig(__name__, config)
     _push_settings()
+    if key.startswith("learning_") or key == "skill_update_policy":
+        _push_learning_state()
 
 
 def _on_config_updated(*_args: Any) -> None:
@@ -1386,6 +1456,7 @@ def _on_config_updated(*_args: Any) -> None:
             ),
         }
     )
+    _push_learning_state()
 
 
 def _set_permission_mode(msg: dict[str, Any]) -> None:
@@ -1538,14 +1609,190 @@ def _apply_new_skill(proposal: Any) -> list[str]:
 
 
 def _push_learning_state() -> None:
-    """Nudge chip state: pending observation count + whether to nudge."""
+    """Push learning state and start a due background analysis when enabled."""
     if state.dock is None or state.learning is None:
         return
-    nudge = state.learning.nudge_state(
-        int(state.config.get("learning_nudge_threshold", 10)),
-        int(state.config.get("learning_nudge_days", 7)),
+    threshold = _bounded_int(
+        state.config.get("learning_nudge_threshold"),
+        10,
+        minimum=1,
+        maximum=10_000,
     )
-    state.dock.bridge.push({"type": "learning", **nudge})
+    days = _bounded_int(
+        state.config.get("learning_nudge_days"),
+        7,
+        minimum=1,
+        maximum=3_650,
+    )
+    run_mode = _norm_learning_run_mode(state.config.get("learning_run_mode"))
+    nudge = state.learning.nudge_state(threshold, days)
+    ready = (
+        state.proposals.background_skill_update_ready()
+        if state.proposals is not None
+        else None
+    )
+    pending_update = bool(
+        state.proposals is not None and state.proposals.has_pending_skill_update()
+    )
+    state.dock.bridge.push(
+        {
+            "type": "learning",
+            "pending": nudge["pending"],
+            "nudge": bool(
+                nudge["nudge"]
+                and run_mode == "chat"
+                and not pending_update
+                and not state.background_learning_running
+            ),
+            "running": state.background_learning_running,
+            "update_ready": ready is not None,
+            "proposal_id": ready.id if ready is not None else "",
+        }
+    )
+    if (
+        run_mode == "background"
+        and not state.background_learning_running
+        and not pending_update
+        and state.learning.background_due(threshold, days)
+    ):
+        from aqt.qt import QTimer
+
+        QTimer.singleShot(0, _start_background_learning)
+
+
+def _background_learning_prompt(job_id: str) -> str:
+    return (
+        SKILL_REVIEW_PROMPT
+        + " This is a hidden background analysis, so do not narrate intermediate "
+        "work. If you propose an update, pass background_job_id="
+        + job_id
+        + " exactly."
+    )
+
+
+def _start_background_learning() -> None:
+    """Start an isolated agent session without replacing the visible chat."""
+    if (
+        state.background_learning_running
+        or state.learning is None
+        or state.proposals is None
+        or mw is None
+        or mw.col is None
+    ):
+        return
+    threshold = _bounded_int(
+        state.config.get("learning_nudge_threshold"), 10, minimum=1, maximum=10_000
+    )
+    days = _bounded_int(
+        state.config.get("learning_nudge_days"), 7, minimum=1, maximum=3_650
+    )
+    if not state.learning.background_due(threshold, days):
+        return
+
+    from .context import build_system_prompt
+    from .controller import ChatController
+
+    job_id = secrets.token_hex(12)
+    observation_ids = state.learning.pending_ids()
+    state.background_learning_running = True
+    state.background_learning_job_id = job_id
+    state.background_learning_observation_ids = observation_ids
+    state.proposals.begin_background_skill_job(job_id)
+
+    background_config = dict(state.config)
+    background_config["agent_tools"] = "sandbox"
+    background_config["permission_mode"] = "default"
+
+    def system_prompt() -> str:
+        return build_system_prompt(
+            permission_mode="default",
+            agent_tools="sandbox",
+            pins=state.proposals.pins if state.proposals else None,
+            custom_instructions=str(state.config.get("custom_instructions", "")),
+        )
+
+    def background_push(payload: dict[str, Any]) -> None:
+        event_type = str(payload.get("type", ""))
+        if event_type == "done":
+            from aqt.qt import QTimer
+
+            QTimer.singleShot(0, lambda: _finish_background_learning(job_id))
+        elif event_type in {"cancelled", "error", "setup_needed"}:
+            message = (
+                str(payload.get("message", ""))
+                or "the agent backend is unavailable"
+            )
+            from aqt.qt import QTimer
+
+            QTimer.singleShot(
+                0, lambda: _finish_background_learning(job_id, error=message)
+            )
+
+    controller = ChatController(
+        push=background_push,
+        config=background_config,
+        system_prompt_builder=system_prompt,
+        ensure_mcp=_ensure_mcp,
+        workdir=USER_FILES / "agent-home",
+    )
+    state.background_learning_controller = controller
+    _push_learning_state()
+    try:
+        controller.send_background_message(_background_learning_prompt(job_id))
+    except Exception as exc:
+        _finish_background_learning(job_id, error=str(exc))
+
+
+def _finish_background_learning(job_id: str, *, error: str = "") -> None:
+    if job_id != state.background_learning_job_id:
+        return
+    controller = state.background_learning_controller
+    state.background_learning_controller = None
+    state.background_learning_running = False
+    state.background_learning_job_id = ""
+    observation_ids = list(state.background_learning_observation_ids)
+    state.background_learning_observation_ids = []
+    if state.proposals is not None:
+        state.proposals.end_background_skill_job(job_id)
+    if controller is not None:
+        controller.shutdown()
+
+    if error:
+        _log_line(f"background learning failed: {error}")
+        if state.dock is not None:
+            state.dock.bridge.push(
+                {"type": "notice", "text": f"Background learning failed: {error}"}
+            )
+    elif state.learning is not None:
+        ready = (
+            state.proposals.background_skill_update_ready()
+            if state.proposals is not None
+            else None
+        )
+        # Hidden review proposals are session-local. Remember their evidence
+        # in memory so this session does not duplicate the job, but let a
+        # restart recompute it rather than stranding an unreachable update.
+        state.learning.mark_background_attempt(
+            observation_ids, persist=ready is None
+        )
+        if state.dock is not None:
+            if ready is not None:
+                text = "A writing-guidance update is ready for review."
+            elif state.proposals is not None and state.proposals.has_pending_skill_update():
+                text = "Automatic guidance update failed; a review card was opened."
+            elif len(state.learning.pending_ids()) < len(observation_ids):
+                text = "Writing guidance was updated in the background."
+            else:
+                text = "Background learning found no durable writing pattern to add."
+            state.dock.bridge.push({"type": "notice", "text": text})
+    _push_learning_state()
+
+
+def _show_background_skill_update(proposal_id: str) -> None:
+    if state.proposals is None:
+        return
+    if state.proposals.show_background_skill_update(proposal_id):
+        _push_learning_state()
 
 
 def _scan_learning() -> None:
@@ -2100,6 +2347,17 @@ def _open_session_browser() -> None:
 
 
 def _teardown() -> None:
+    if state.learning_timer is not None:
+        state.learning_timer.stop()
+        state.learning_timer = None
+    if state.background_learning_controller is not None:
+        state.background_learning_controller.shutdown()
+        state.background_learning_controller = None
+    if state.proposals is not None and state.background_learning_job_id:
+        state.proposals.end_background_skill_job(state.background_learning_job_id)
+    state.background_learning_running = False
+    state.background_learning_job_id = ""
+    state.background_learning_observation_ids = []
     if state.deferral is not None:
         from aqt.reviewer import Reviewer
 

@@ -189,6 +189,44 @@ class LearningStoreTests(unittest.TestCase):
         next(iter(store._observations.values()))["ts"] = 1  # epoch: ancient
         self.assertTrue(store.nudge_state(threshold=5, days=7)["nudge"])
 
+    def test_background_attempt_runs_once_until_new_evidence_arrives(self):
+        store = self.store()
+        store.record_review(
+            proposal_kind="create",
+            note_type="Basic",
+            fields_before={"Front": "a"},
+            fields_after={"Front": "b"},
+        )
+        first_ids = store.pending_ids()
+        self.assertTrue(store.background_due(threshold=1, days=7))
+        store.mark_background_attempt(first_ids)
+        self.assertFalse(store.background_due(threshold=1, days=7))
+        # A persisted no-pattern result also survives restart.
+        reloaded = self.store()
+        self.assertFalse(reloaded.background_due(threshold=1, days=7))
+        # Any new correction changes the evidence fingerprint.
+        reloaded.record_review(
+            proposal_kind="edit",
+            note_type="Basic",
+            fields_before={"Back": "long"},
+            fields_after={"Back": "short"},
+        )
+        self.assertTrue(reloaded.background_due(threshold=1, days=7))
+
+    def test_review_ready_attempt_is_memory_only(self):
+        store = self.store()
+        store.record_review(
+            proposal_kind="create",
+            note_type="Basic",
+            fields_before={"Front": "a"},
+            fields_after={"Front": "b"},
+        )
+        ids = store.pending_ids()
+        store.mark_background_attempt(ids, persist=False)
+        self.assertFalse(store.background_due(threshold=1, days=7))
+        # A held proposal is session-local, so restart must recompute it.
+        self.assertTrue(self.store().background_due(threshold=1, days=7))
+
     # ---- skill file ----
 
     def test_write_skill_archives_previous_version(self):

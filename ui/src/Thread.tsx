@@ -169,14 +169,45 @@ function BulkProposalBar({ store }: { store: ChatStore }) {
  *  Pins, Access, model, or Send. */
 function LearningNudgeBar({ store }: { store: ChatStore }) {
   const { ui } = useChatState(store);
-  if (!ui.learning?.nudge) return null;
+  const learning = ui.learning;
+  if (!learning || (!learning.nudge && !learning.running && !learning.updateReady)) return null;
+  if (learning.updateReady) {
+    return (
+      <div
+        className="cwyc-learning-nudge"
+        title="Background analysis found a durable writing preference. Review the proposed guidance change before it affects future cards."
+      >
+        <span>Writing-guidance update ready</span>
+        <button
+          type="button"
+          data-testid="learning-update-ready"
+          onClick={() => store.showBackgroundSkillUpdate(learning.proposalId)}
+        >
+          Review
+        </button>
+      </div>
+    );
+  }
+  if (learning.running) {
+    return (
+      <div
+        className="cwyc-learning-nudge cwyc-learning-running"
+        title="An isolated agent session is analyzing your corrections without changing this chat."
+      >
+        <span>
+          Learning from <strong>{learning.pending}</strong> correction
+          {learning.pending === 1 ? "" : "s"} in background…
+        </span>
+      </div>
+    );
+  }
   return (
     <div
       className="cwyc-learning-nudge"
       title="You changed AI-written cards after they were created. Review the patterns to improve future card writing."
     >
       <span>
-        <strong>{ui.learning.pending}</strong> of your edit{ui.learning.pending === 1 ? "" : "s"} to learn from
+        <strong>{learning.pending}</strong> of your edit{learning.pending === 1 ? "" : "s"} to learn from
       </span>
       <button type="button" data-testid="learning-nudge" onClick={() => store.startSkillReview()}>
         Review patterns

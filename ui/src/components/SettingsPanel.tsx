@@ -79,6 +79,44 @@ function ShortcutInput(props: {
   );
 }
 
+function NumberInput(props: {
+  value: number;
+  testid: string;
+  min: number;
+  max: number;
+  onCommit: (value: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(props.value));
+  useEffect(() => setDraft(String(props.value)), [props.value]);
+  const commit = () => {
+    const parsed = Number.parseInt(draft, 10);
+    if (Number.isFinite(parsed)) {
+      const value = Math.max(props.min, Math.min(props.max, parsed));
+      if (value !== props.value) props.onCommit(value);
+      setDraft(String(value));
+    } else {
+      setDraft(String(props.value));
+    }
+  };
+  return (
+    <input
+      type="number"
+      className="cwyc-setting-number"
+      data-testid={props.testid}
+      value={draft}
+      min={props.min}
+      max={props.max}
+      inputMode="numeric"
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") commit();
+        else if (e.key === "Escape") setDraft(String(props.value));
+      }}
+    />
+  );
+}
+
 export function SettingsPanel({ store }: { store: ChatStore }) {
   const ui = useChatState(store).ui;
   const settings = ui.settings;
@@ -176,6 +214,93 @@ export function SettingsPanel({ store }: { store: ChatStore }) {
             Lets the agent draw charts and small interactive views in the chat. They run
             in a strict sandbox: no internet, no access to your collection or this app.
           </div>
+          <div className="cwyc-panel-title cwyc-panel-title-gap">Learning from your edits</div>
+          <div className="cwyc-setting-footnote cwyc-setting-explanation">
+            When you correct a card the agent wrote, CWYC keeps the difference as
+            evidence about your writing preferences.
+          </div>
+          <div className="cwyc-setting-subhead">Analyze when either happens</div>
+          <div className="cwyc-setting-row">
+            <span className="cwyc-setting-label">Corrected cards reach</span>
+            <NumberInput
+              value={settings.learningNudgeThreshold}
+              min={1}
+              max={10_000}
+              testid="setting-learning-threshold"
+              onCommit={(value) => store.setSetting("learning_nudge_threshold", value)}
+            />
+          </div>
+          <div className="cwyc-setting-row">
+            <span className="cwyc-setting-label">Oldest correction waits (days)</span>
+            <NumberInput
+              value={settings.learningNudgeDays}
+              min={1}
+              max={3_650}
+              testid="setting-learning-days"
+              onCommit={(value) => store.setSetting("learning_nudge_days", value)}
+            />
+          </div>
+          <div className="cwyc-setting-row cwyc-setting-choice-row">
+            <span className="cwyc-setting-label">When due</span>
+            <div className="cwyc-seg" role="radiogroup" aria-label="Run learning analysis">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={settings.learningRunMode === "chat"}
+                className={"cwyc-seg-btn" + (settings.learningRunMode === "chat" ? " cwyc-active" : "")}
+                data-testid="setting-learning-chat"
+                onClick={() => store.setSetting("learning_run_mode", "chat")}
+              >
+                Offer a chat
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={settings.learningRunMode === "background"}
+                className={"cwyc-seg-btn" + (settings.learningRunMode === "background" ? " cwyc-active" : "")}
+                data-testid="setting-learning-background"
+                onClick={() => store.setSetting("learning_run_mode", "background")}
+              >
+                Background
+              </button>
+            </div>
+          </div>
+          <div className="cwyc-setting-footnote">
+            Offer a chat waits for you to click Review patterns. Background uses
+            an isolated agent session while Anki is open and never replaces the
+            chat you are reading.
+          </div>
+          <div className="cwyc-setting-row cwyc-setting-choice-row">
+            <span className="cwyc-setting-label">Update writing guidance</span>
+            <div className="cwyc-seg" role="radiogroup" aria-label="Apply writing guidance updates">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={settings.skillUpdatePolicy === "review"}
+                className={"cwyc-seg-btn" + (settings.skillUpdatePolicy === "review" ? " cwyc-active" : "")}
+                data-testid="setting-skill-update-review"
+                onClick={() => store.setSetting("skill_update_policy", "review")}
+              >
+                Ask me
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={settings.skillUpdatePolicy === "automatic"}
+                className={"cwyc-seg-btn" + (settings.skillUpdatePolicy === "automatic" ? " cwyc-active" : "")}
+                data-testid="setting-skill-update-automatic"
+                onClick={() => store.setSetting("skill_update_policy", "automatic")}
+              >
+                Automatically
+              </button>
+            </div>
+          </div>
+          {settings.skillUpdatePolicy === "automatic" ? (
+            <div className="cwyc-setting-footnote cwyc-setting-warn">
+              Guidance updates change how future cards are written. The previous
+              version is archived before each automatic update.
+            </div>
+          ) : null}
           <div className="cwyc-panel-title cwyc-panel-title-gap">Reviewing</div>
           <Toggle
             label="Show the Set aside button"

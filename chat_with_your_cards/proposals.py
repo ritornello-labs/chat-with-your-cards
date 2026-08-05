@@ -438,6 +438,10 @@ class Proposal:
     # The explicit full-collection tier may cross those boundaries. This is
     # server-side policy, not UI copy.
     requires_confirmation: bool = False
+    # Background learning proposals are global to the add-on rather than owned
+    # by whichever visible chat happened to be open when analysis finished.
+    # Pending ones survive new_chat() until the user opens/resolves them.
+    background: bool = False
     # Edit only (#24a): the note's OTHER fields, unchanged by this proposal.
     # Never written - context so the reviewer can see the rest of the note
     # (does the new value duplicate something already there?) without the
@@ -499,6 +503,7 @@ class Proposal:
             # real answer with "we don't know".
             **({"revertible": self.revertible} if self.revertible is not None else {}),
             "requires_confirmation": self.requires_confirmation,
+            "background": self.background,
             "context_fields": [
                 {"name": name, "value": value}
                 for name, value in self.context_fields.items()
@@ -655,12 +660,17 @@ class ProposalManager:
         self._auto_accept_pause_notified = False
         self._written = 0  # direct-write budget consumed (notes touched)
         self._budget_pause_notified = False
+        self._background_skill_job_id: str | None = None
         self.session_id = secrets.token_hex(4)
 
     # ---- session lifecycle ----
 
     def new_session(self) -> None:
-        self._proposals.clear()
+        self._proposals = {
+            pid: proposal
+            for pid, proposal in self._proposals.items()
+            if proposal.background and proposal.status == PENDING
+        }
         self._ledger.clear()
         self._counter = 0
         self._auto_accepted = 0
@@ -668,6 +678,44 @@ class ProposalManager:
         self._written = 0
         self._budget_pause_notified = False
         self.session_id = secrets.token_hex(4)
+
+    def begin_background_skill_job(self, job_id: str) -> None:
+        self._background_skill_job_id = str(job_id)
+
+    def end_background_skill_job(self, job_id: str) -> None:
+        if self._background_skill_job_id == str(job_id):
+            self._background_skill_job_id = None
+
+    def background_skill_update_ready(self) -> Proposal | None:
+        return next(
+            (
+                proposal
+                for proposal in reversed(list(self._proposals.values()))
+                if proposal.kind == "skill_update"
+                and proposal.background
+                and proposal.status == PENDING
+            ),
+            None,
+        )
+
+    def has_pending_skill_update(self) -> bool:
+        return any(
+            proposal.kind == "skill_update" and proposal.status == PENDING
+            for proposal in self._proposals.values()
+        )
+
+    def show_background_skill_update(self, proposal_id: str) -> bool:
+        proposal = self._proposals.get(str(proposal_id))
+        if (
+            proposal is None
+            or proposal.kind != "skill_update"
+            or not proposal.background
+            or proposal.status != PENDING
+        ):
+            return False
+        proposal.background = False
+        self._push({"type": "proposal", "proposal": proposal.to_payload()})
+        return True
 
     @property
     def session_tag(self) -> str:
@@ -3390,12 +3438,23 @@ class ProposalManager:
     def submit_skill_update(
         self, args: dict[str, Any], *, old_content: str, observation_ids: list[str]
     ) -> dict[str, Any]:
-        """Propose an update to the card-authoring skill from observed edit
-        patterns. ALWAYS user-confirmed, in every permission mode: a skill
-        change alters all future agent behavior, so the blast radius is high
-        and the confirmation is cheap."""
+        """Propose an update to the card-authoring skill from observed edits.
+
+        Review is the default because this changes future agent behavior. A
+        separate, explicit learning setting may auto-apply it; collection
+        permission modes do not silently grant that authority.
+        """
         import difflib
 
+        job_id = str(args.get("background_job_id", ""))
+        background = bool(
+            job_id
+            and self._background_skill_job_id
+            and secrets.compare_digest(job_id, self._background_skill_job_id)
+        )
+        automatic = (
+            str(self._config.get("skill_update_policy", "review")) == "automatic"
+        )
         summary = str(args.get("summary", "")).strip()
         new_content = str(args.get("new_content", ""))
         patterns = [str(p).strip() for p in (args.get("patterns") or []) if str(p).strip()]
@@ -3432,14 +3491,40 @@ class ProposalManager:
                 "diff": diff,
                 "observation_ids": list(observation_ids),
             },
-            requires_confirmation=True,
+            requires_confirmation=not automatic,
+            background=background,
         )
         self._proposals[proposal.id] = proposal
+        if automatic:
+            self.accept({"id": proposal.id, "_direct": True})
+            if proposal.status in {ACCEPTED, AUTO_ACCEPTED}:
+                return {
+                    "status": "applied",
+                    "proposal_id": proposal.id,
+                    "note": "Writing guidance updated automatically; the prior version was archived.",
+                }
+            # Automatic is a convenience policy, not permission to lose a
+            # failed update invisibly. Fall back to a visible review card so
+            # the error can be surfaced and retried deliberately.
+            proposal.requires_confirmation = True
+            proposal.background = False
+            self._push({"type": "proposal", "proposal": proposal.to_payload()})
+            return {
+                "status": "pending_user_review",
+                "proposal_id": proposal.id,
+                "note": "Automatic application failed, so the update was opened for review.",
+            }
+        if background:
+            return {
+                "status": "ready_for_review",
+                "proposal_id": proposal.id,
+                "note": "Background analysis finished. The update is ready when the user chooses to review it.",
+            }
         self._push({"type": "proposal", "proposal": proposal.to_payload()})
         return {
             "status": "pending_user_review",
             "proposal_id": proposal.id,
-            "note": "Skill updates always require explicit user confirmation.",
+            "note": "This writing-guidance update is waiting for review.",
         }
 
     def submit_skill_create(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -3453,7 +3538,8 @@ class ProposalManager:
         the agent untrusted card content, so a booby-trapped deck could try
         to get a malicious skill planted here. That is why this method only
         ever stages a proposal - ALWAYS user-confirmed, in every permission
-        mode, exactly like submit_skill_update - and the actual file write
+        mode (unlike updates to an existing skill, this has no automatic
+        policy) - and the actual file write
         happens solely on accept, via the injected apply_skill_create
         callable (never here, never from a direct tool write)."""
         name = str(args.get("name", "")).strip()
@@ -4051,7 +4137,8 @@ class ProposalManager:
             elif proposal.kind == "skill_update":
                 # SAFETY: not a collection write at all - _apply_skill writes the
                 # skill markdown file on disk, so the col transaction/invariants
-                # do not apply. Always user-confirmed and never ledger-reverted.
+                # do not apply. Review is the default; the explicit learning
+                # policy may direct-apply it. Never ledger-reverted.
                 if self._apply_skill is None:
                     raise ProposalError("skill updates are not available")
                 proposal.warnings = self._apply_skill(proposal)

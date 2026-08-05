@@ -993,7 +993,14 @@ const WELCOME_SCRIPT: Step[] = [
 
 // Module scope (not inside installDevReplayer): widgetScript() branches on it
 // at send time, mirroring how the real tool reads live config per call.
-const devSettings: Record<string, unknown> = { restore_last_chat: false, dock_side: "right" };
+const devSettings: Record<string, unknown> = {
+  restore_last_chat: false,
+  dock_side: "right",
+  learning_nudge_threshold: 10,
+  learning_nudge_days: 7,
+  learning_run_mode: "chat",
+  skill_update_policy: "review",
+};
 
 export function installDevReplayer(): void {
   let generation = 0;
@@ -1049,7 +1056,14 @@ export function installDevReplayer(): void {
           label: "card in Math::Analysis",
           kind: "card",
         });
-        window.chatUI?.dispatch({ type: "learning", pending: 12, nudge: true });
+        window.chatUI?.dispatch({
+          type: "learning",
+          pending: 12,
+          nudge: true,
+          running: false,
+          update_ready: false,
+          proposal_id: "",
+        });
         window.chatUI?.dispatch({
           type: "ui_config",
           suggested_questions: true,
@@ -1094,6 +1108,10 @@ export function installDevReplayer(): void {
           ],
           theme: String(devSettings.theme ?? "teal"),
           widget_rendering: Boolean(devSettings.widget_rendering),
+          learning_nudge_threshold: Number(devSettings.learning_nudge_threshold ?? 10),
+          learning_nudge_days: Number(devSettings.learning_nudge_days ?? 7),
+          learning_run_mode: String(devSettings.learning_run_mode ?? "chat"),
+          skill_update_policy: String(devSettings.skill_update_policy ?? "review"),
         });
         break;
       case "list_history":
@@ -1290,9 +1308,19 @@ export function installDevReplayer(): void {
           ],
           theme: String(devSettings.theme ?? "teal"),
           widget_rendering: Boolean(devSettings.widget_rendering),
+          learning_nudge_threshold: Number(devSettings.learning_nudge_threshold ?? 10),
+          learning_nudge_days: Number(devSettings.learning_nudge_days ?? 7),
+          learning_run_mode: String(devSettings.learning_run_mode ?? "chat"),
+          skill_update_policy: String(devSettings.skill_update_policy ?? "review"),
         });
         break;
       }
+      case "show_background_skill_update":
+        window.chatUI?.dispatch({
+          type: "notice",
+          text: `Would reveal background proposal ${String(msg.proposal_id ?? "")}.`,
+        });
+        break;
       case "send": {
         const text = String(msg.text ?? "");
         // "setup" previews the first-run onboarding card (task #19) instead

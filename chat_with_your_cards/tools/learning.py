@@ -1,8 +1,8 @@
 """Learning tools: edit observations + skill-update proposals (DESIGN.md
-section 15). The reflection chat reads the accumulated observations with
-get_edit_observations and proposes a revision of the card-authoring skill
-with propose_skill_update; the user confirms every skill change on a
-proposal card, in every permission mode."""
+section 15). A visible reflection chat or hidden background run reads the
+accumulated observations with get_edit_observations and proposes a revision
+of the card-authoring skill with propose_skill_update. Applying it follows the
+separate learning setting, not the collection permission mode."""
 
 from __future__ import annotations
 
@@ -60,10 +60,10 @@ def register_learning_tools(registry: ToolRegistry) -> None:
         ToolSpec(
             "propose_skill_update",
             "Propose a revision of the card-authoring skill based on observed "
-            "edit patterns. Pass the FULL revised skill markdown; the user "
-            "sees your pattern summary plus a diff and confirms. ALWAYS "
-            "user-confirmed, in every permission mode. Accepting consumes the "
-            "pending observations.",
+            "edit patterns. Pass the FULL revised skill markdown. The user "
+            "normally sees a pattern summary plus a diff; an explicit learning "
+            "setting can apply it automatically. Applying consumes the pending "
+            "observations.",
             {
                 "type": "object",
                 "properties": {
@@ -82,6 +82,11 @@ def register_learning_tools(registry: ToolRegistry) -> None:
                         "type": "string",
                         "description": "The complete revised SKILL.md content "
                         "(frontmatter included)",
+                    },
+                    "background_job_id": {
+                        "type": "string",
+                        "description": "Opaque id supplied by a background-learning "
+                        "prompt; omit in normal chats",
                     },
                 },
                 "required": ["summary", "patterns", "new_content"],
