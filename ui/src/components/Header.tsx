@@ -1,8 +1,12 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useChatState } from "../ChatRuntimeProvider";
 import { useDismiss } from "../hooks/useDismiss";
 import { SettingsPanel } from "./SettingsPanel";
 import type { ChatStore, HistoryEntry } from "../store";
+import {
+  OPEN_SETTINGS_EVENT,
+  type SettingsSection,
+} from "../settingsNavigation";
 
 /**
  * The dock header (DESIGN.md section 9): the collapse-to-rail control, chat
@@ -91,10 +95,28 @@ function TargetGlyph({ target }: { target: "terminal" | "desktop" }) {
 
 export function Header({ store }: { store: ChatStore }) {
   const [open, setOpen] = useState<"history" | "settings" | "cc" | null>(null);
+  const [settingsFocus, setSettingsFocus] = useState<{
+    section: SettingsSection;
+    request: number;
+  } | null>(null);
   const ref = useDismiss(open !== null, () => setOpen(null));
   const ui = useChatState(store).ui;
   const targetLabel = ui.openTarget === "desktop" ? "Desktop app" : "Terminal";
   const side = ui.dock?.side ?? "right";
+
+  useEffect(() => {
+    const onOpenSettings = (event: Event) => {
+      const section = (event as CustomEvent<{ section?: unknown }>).detail?.section;
+      if (section !== "learning") return;
+      setSettingsFocus((current) => ({
+        section,
+        request: (current?.request ?? 0) + 1,
+      }));
+      setOpen("settings");
+    };
+    document.addEventListener(OPEN_SETTINGS_EVENT, onOpenSettings);
+    return () => document.removeEventListener(OPEN_SETTINGS_EVENT, onOpenSettings);
+  }, []);
 
   return (
     <div className="cwyc-header" data-testid="header" ref={ref}>
@@ -219,7 +241,10 @@ export function Header({ store }: { store: ChatStore }) {
       <HeaderButton
         title="Settings"
         testid="settings"
-        onClick={() => setOpen(open === "settings" ? null : "settings")}
+        onClick={() => {
+          if (open !== "settings") setSettingsFocus(null);
+          setOpen(open === "settings" ? null : "settings");
+        }}
       >
         {/* A real gear (Feather "settings", MIT): the previous hand-drawn
             glyph didn't read as a cog (dogfood 2026-07-13). */}
@@ -237,7 +262,13 @@ export function Header({ store }: { store: ChatStore }) {
       </HeaderButton>
 
       {open === "history" ? <HistoryPanel store={store} onClose={() => setOpen(null)} /> : null}
-      {open === "settings" ? <SettingsPanel store={store} /> : null}
+      {open === "settings" ? (
+        <SettingsPanel
+          store={store}
+          focusSection={settingsFocus?.section ?? null}
+          focusRequest={settingsFocus?.request ?? 0}
+        />
+      ) : null}
       {open === "cc" ? (
         <div className="cwyc-panel cwyc-panel-header" role="menu">
           <div className="cwyc-panel-title">Open in</div>

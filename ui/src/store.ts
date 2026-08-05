@@ -47,6 +47,7 @@
 import type { ThreadMessageLike } from "@assistant-ui/react";
 import { postCommand } from "./bridge";
 import { dismissAllPopovers } from "./hooks/useDismiss";
+import { openSettingsSection } from "./settingsNavigation";
 import type {
   BridgeCommand,
   ChatEvent,
@@ -404,6 +405,7 @@ export interface UiState {
     running: boolean;
     updateReady: boolean;
     proposalId: string;
+    automationNudge: boolean;
   } | null;
 }
 
@@ -537,14 +539,8 @@ export class ChatStore {
 
   // ---- outbound: UI -> Python (postCommand mirrors app.js's post()) ----
 
-  sendUserMessage(text: string): void {
-    if (this.isRunning || !text.trim()) return;
-    // The message IS the revision request, so the proposal it replaces stops
-    // being the live offer exactly now - not when the button was clicked.
-    if (this.pendingSupersedeId) {
-      postCommand({ type: "proposal_supersede", id: this.pendingSupersedeId });
-      this.pendingSupersedeId = null;
-    }
+  private beginUserTurn(text: string): boolean {
+    if (this.isRunning || !text.trim()) return false;
     const userMsg: StoreMessage = {
       id: nextId("u"),
       role: "user",
@@ -562,6 +558,18 @@ export class ChatStore {
     this.currentAssistantId = assistantMsg.id;
     this.isRunning = true;
     this.emit();
+    return true;
+  }
+
+  sendUserMessage(text: string): void {
+    if (this.isRunning || !text.trim()) return;
+    // The message IS the revision request, so the proposal it replaces stops
+    // being the live offer exactly now - not when the button was clicked.
+    if (this.pendingSupersedeId) {
+      postCommand({ type: "proposal_supersede", id: this.pendingSupersedeId });
+      this.pendingSupersedeId = null;
+    }
+    if (!this.beginUserTurn(text)) return;
     postCommand({ type: "send", text });
   }
 
@@ -677,6 +685,21 @@ export class ChatStore {
   /** Reveal a skill-update proposal computed by the background learner. */
   showBackgroundSkillUpdate(proposalId: string): void {
     postCommand({ type: "show_background_skill_update", proposal_id: proposalId });
+  }
+
+  /** Contextual CTA in a manually started learning chat. */
+  openLearningSettings(): void {
+    this.dismissLearningAutomationNudge();
+    openSettingsSection("learning");
+  }
+
+  dismissLearningAutomationNudge(): void {
+    if (!this.ui.learning?.automationNudge) return;
+    this.ui = {
+      ...this.ui,
+      learning: { ...this.ui.learning, automationNudge: false },
+    };
+    this.emit();
   }
 
   rejectProposal(id: string): void {
@@ -1189,6 +1212,9 @@ export class ChatStore {
         this.emit();
         break;
       }
+      case "user_message":
+        this.beginUserTurn(String((event as { text?: string }).text ?? ""));
+        break;
       case "learning": {
         const learn = event as {
           pending?: number;
@@ -1205,6 +1231,23 @@ export class ChatStore {
             running: !!learn.running,
             updateReady: !!learn.update_ready,
             proposalId: String(learn.proposal_id ?? ""),
+            automationNudge: this.ui.learning?.automationNudge ?? false,
+          },
+        };
+        this.emit();
+        break;
+      }
+      case "learning_review_started": {
+        const current = this.ui.learning;
+        this.ui = {
+          ...this.ui,
+          learning: {
+            pending: current?.pending ?? 0,
+            nudge: false,
+            running: false,
+            updateReady: false,
+            proposalId: "",
+            automationNudge: true,
           },
         };
         this.emit();
@@ -1822,6 +1865,12 @@ export class ChatStore {
     this.isRunning = false;
     this.hasUnread = false;
     this.usage = null;
+    if (this.ui.learning?.automationNudge) {
+      this.ui = {
+        ...this.ui,
+        learning: { ...this.ui.learning, automationNudge: false },
+      };
+    }
     this.emit();
   }
 

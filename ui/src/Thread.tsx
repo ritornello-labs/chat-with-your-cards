@@ -170,7 +170,42 @@ function BulkProposalBar({ store }: { store: ChatStore }) {
 function LearningNudgeBar({ store }: { store: ChatStore }) {
   const { ui } = useChatState(store);
   const learning = ui.learning;
-  if (!learning || (!learning.nudge && !learning.running && !learning.updateReady)) return null;
+  if (
+    !learning ||
+    (!learning.nudge &&
+      !learning.running &&
+      !learning.updateReady &&
+      !learning.automationNudge)
+  ) return null;
+  if (learning.automationNudge) {
+    return (
+      <div
+        className="cwyc-learning-nudge cwyc-learning-automation"
+        title="Open the learning settings for background analysis and automatic guidance updates."
+      >
+        <span>Run future pattern reviews on their own?</span>
+        <div className="cwyc-learning-nudge-actions">
+          <button
+            type="button"
+            data-testid="learning-automate"
+            onClick={() => store.openLearningSettings()}
+          >
+            Automate this
+          </button>
+          <button
+            type="button"
+            className="cwyc-learning-nudge-dismiss"
+            data-testid="learning-automate-dismiss"
+            aria-label="Dismiss automation suggestion"
+            title="Dismiss"
+            onClick={() => store.dismissLearningAutomationNudge()}
+          >
+            ×
+          </button>
+        </div>
+      </div>
+    );
+  }
   if (learning.updateReady) {
     return (
       <div

@@ -1180,11 +1180,20 @@ export function installDevReplayer(): void {
         });
         break;
       case "start_skill_review":
+        window.chatUI?.dispatch({ type: "reset" });
         window.chatUI?.dispatch({
-          type: "notice",
-          text: "Desktop Anki starts the skill-review chat here.",
+          type: "user_message",
+          text: "Review how I have edited AI-written cards and update the card-authoring skill when the evidence supports a durable pattern.",
         });
-        window.chatUI?.dispatch({ type: "learning", pending: 0, nudge: false });
+        window.chatUI?.dispatch({
+          type: "learning",
+          pending: 12,
+          nudge: false,
+          running: false,
+          update_ready: false,
+          proposal_id: "",
+        });
+        window.chatUI?.dispatch({ type: "learning_review_started" });
         break;
       case "run_doctor":
         window.setTimeout(() => {

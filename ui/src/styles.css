@@ -1700,6 +1700,35 @@ body {
   text-decoration: underline;
 }
 
+.cwyc-learning-nudge-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+/* The manual pattern-review chat is the moment background learning makes
+   sense. Keep the suggestion compact and contextual; the actual choices live
+   in Settings, where this CTA deep-links. */
+.cwyc-learning-automation {
+  background: var(--cwyc-accent-soft);
+  border-radius: 0 7px 7px 0;
+}
+
+#cwyc-root .cwyc-learning-nudge .cwyc-learning-nudge-dismiss {
+  width: 24px;
+  color: var(--cwyc-fg-faint);
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1;
+  text-decoration: none;
+}
+
+#cwyc-root .cwyc-learning-nudge .cwyc-learning-nudge-dismiss:hover {
+  color: var(--cwyc-fg-subtle);
+  text-decoration: none;
+}
+
 .cwyc-bulk-bar {
   display: flex;
   align-items: center;

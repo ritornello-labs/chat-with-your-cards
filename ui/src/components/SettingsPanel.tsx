@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useChatState } from "../ChatRuntimeProvider";
 import { THEME_NAMES, type ChatStore, type DoctorRow, type ThemeName } from "../store";
 
@@ -117,10 +117,27 @@ function NumberInput(props: {
   );
 }
 
-export function SettingsPanel({ store }: { store: ChatStore }) {
+export function SettingsPanel({
+  store,
+  focusSection = null,
+  focusRequest = 0,
+}: {
+  store: ChatStore;
+  focusSection?: "learning" | null;
+  focusRequest?: number;
+}) {
   const ui = useChatState(store).ui;
   const settings = ui.settings;
   const [doctorRequested, setDoctorRequested] = useState(false);
+  const learningSectionRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (focusSection !== "learning") return;
+    const frame = window.requestAnimationFrame(() => {
+      learningSectionRef.current?.scrollIntoView({ block: "start" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusSection, focusRequest]);
 
   return (
     <div
@@ -214,7 +231,13 @@ export function SettingsPanel({ store }: { store: ChatStore }) {
             Lets the agent draw charts and small interactive views in the chat. They run
             in a strict sandbox: no internet, no access to your collection or this app.
           </div>
-          <div className="cwyc-panel-title cwyc-panel-title-gap">Learning from your edits</div>
+          <div
+            ref={learningSectionRef}
+            className="cwyc-panel-title cwyc-panel-title-gap"
+            data-testid="settings-learning-section"
+          >
+            Learning from your edits
+          </div>
           <div className="cwyc-setting-footnote cwyc-setting-explanation">
             When you correct a card the agent wrote, CWYC keeps the difference as
             evidence about your writing preferences.

@@ -693,7 +693,11 @@ revision without interrupting the user.
 - **Visible or background reflection.** In `learning_run_mode="chat"`, the
   nudge starts a new chat seeded with a visible kickoff message (pushed as a
   `user_message` event, since the webview normally renders user bubbles
-  itself). In `"background"`, an hourly/dock-scan eligibility check starts a
+  itself). That manually triggered chat carries one dismissible contextual
+  nudge — **Run future pattern reviews on their own? · Automate this** — which
+  opens the Settings popover already scrolled to **Learning from your edits**;
+  it is reset with the chat and is not permanent composer chrome. In
+  `"background"`, an hourly/dock-scan eligibility check starts a
   separate `ChatController` and backend session with sandboxed tools, no
   current-card block, no visible transcript, and a filtered event sink. The
   user can keep chatting in the foreground. A persisted observation-id

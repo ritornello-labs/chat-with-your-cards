@@ -164,6 +164,7 @@ necessarily mounted) that maps the `ChatEvent` stream onto assistant-ui's
 | `proposal` (`proposals.py`'s `Proposal.to_payload()`, same dict `app.js`'s `renderProposal()` reads) | `{type:"data", name:"proposal"}` part, created once and updated in place on repeat pushes for the same `id` |
 | `proposal_resolved` | merges `status`/`note_id`/`warnings` into that data part |
 | `proposal_error` | attaches an `errorMessage` to that data part |
+| `user_message` | starts a visible user turn when Python originates a chat (the learning-review kickoff); ordinary composer sends are already optimistic |
 | `usage` | **not** a message part - a side channel (`store.getSnapshot().usage`) the footer reads directly |
 | `done` | current assistant message -> `status: {type:"complete"}`; `isRunning=false` |
 | `cancelled` | current assistant message -> `status: {type:"incomplete", reason:"cancelled"}`; `isRunning=false` |
@@ -173,10 +174,12 @@ necessarily mounted) that maps the `ChatEvent` stream onto assistant-ui's
 
 The header Settings panel also owns the full learning workflow. “Analyze when
 either happens” exposes the correction-count and maximum-wait thresholds as
-one whichever-happens-first rule; “Run analysis” chooses a visible chat or an
-isolated background agent session; “Update writing guidance” chooses review
+one whichever-happens-first rule; “When due” chooses a visible chat offer or
+an isolated background agent session; “Update writing guidance” chooses review
 or automatic application. Background status and any held update appear above
-the composer, without being counted as card-authoring proposals.
+the composer, without being counted as card-authoring proposals. A manually
+started pattern-review chat also shows a dismissible **Automate this** nudge;
+it opens Settings and scrolls the panel directly to the learning section.
 
 New-note proposals are adapted by `interactionAdapter.ts` to the interaction
 *presentation standard* — an `InteractionPresentation` from the vendored

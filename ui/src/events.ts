@@ -211,11 +211,28 @@ export interface ContextEvent {
   kind?: string;
 }
 
-/** Learning nudge state (#23d): pending edit-observation count. */
+/** A user turn originated by Python rather than the composer (currently the
+ * learning-review kickoff). Ordinary composer messages render optimistically
+ * and are not echoed through this event. */
+export interface UserMessageEvent {
+  type: "user_message";
+  text: string;
+}
+
+/** Learning nudge/background state (#23d). */
 export interface LearningEvent {
   type: "learning";
   pending: number;
   nudge: boolean;
+  running?: boolean;
+  update_ready?: boolean;
+  proposal_id?: string;
+}
+
+/** The user manually started a pattern-review chat. The UI uses this to offer
+ * the directly relevant automation settings without adding chat copy. */
+export interface LearningReviewStartedEvent {
+  type: "learning_review_started";
 }
 
 /** The full set-aside list (task #33): pushed on ready, on get_deferred, and
@@ -463,8 +480,10 @@ export type KnownChatEvent =
   | ReviewStateEvent
   | CardDeferredEvent
   | DeferredListEvent
+  | UserMessageEvent
   | ContextEvent
   | LearningEvent
+  | LearningReviewStartedEvent
   | AttachmentsEvent
   | LedgerEvent
   | GradingEvent

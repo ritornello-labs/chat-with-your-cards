@@ -1823,6 +1823,7 @@ def _start_skill_review() -> None:
         # it from send_user_message - a plain bridge push avoids recording
         # the message twice).
         state.dock.bridge.push({"type": "user_message", "text": SKILL_REVIEW_PROMPT})
+        state.dock.bridge.push({"type": "learning_review_started"})
     state.controller.send_user_message(SKILL_REVIEW_PROMPT)
 
 
