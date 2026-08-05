@@ -315,3 +315,52 @@ single-voter Opus, with its own adjudicated benchmark first per the standing
 rule (§11). Judge output stays a *proposal* (gbrain lesson, §7): edges land
 with provenance and confidence, and cycle-creating edges are rejected at
 write time rather than silently reoriented.
+
+## 16. Two-voter corpus measurement (2026-08-04) — and a reframing of Phase D
+
+The Fable second-voter pass reached 19,725 / 23,702 notes before a
+subscription quota wall (the remainder is queued; the log makes the pause
+free). That is enough dual coverage to measure the thing the second voter
+was bought for.
+
+**Opus vs Fable, full corpus, adjudicated normalizer:** mean per-note soft
+F1 **.771**; 30.2% of notes in perfect agreement, 2.4% with zero overlap.
+Split by field:
+
+| Field | Cross-voter overlap |
+|---|---:|
+| `covers` (what the note teaches) | **.601** |
+| `presupposes` (what it assumes) | **.427** |
+
+Three consequences for the design:
+
+**a. The benchmark measured the easy end.** §11's ladder (Opus .844 against
+Fable gold, .910 self-agreement ceiling) came from a dense single-domain
+Math sample. The same two models agree at .771 across the real corpus. The
+ranking is probably still ordinally right, but every absolute number in §11
+is optimistic, and the underdetermination floor corpus-wide is larger than
+the .09 measured on Math. Any public accuracy claim must be re-measured on a
+sample stratified across deck groups.
+
+**b. Phase D is not polish — it is what makes the edges usable.** The
+53,085 candidate `requires` pairs (§15) are derived entirely from
+`presupposes`, which is the *least* reproducible field in the pipeline
+(.427). Reading §15 and §16 together: the free candidate edges are
+plentiful, cheap, and individually unreliable, and the judge is the step
+that converts them into something a scheduler can act on. This retires any
+version of the plan where raw `presupposes` ships as a dependency graph, and
+it strengthens the full-depth decision — a support threshold would have
+concentrated the judge on the pairs that least need judging.
+
+**c. Normalization gets no help from string cleaning.** Stage 1 of the
+cascade (deterministic: token-set equality, acronym expansion, parenthetical
+flagging) collapses **1.2%** of the 24,290-name vocabulary. 33.2% of names
+occur exactly once. The dedup problem is semantic; embeddings plus
+adjudication carry all of it. Budget accordingly — this was assumed to be
+the cheap stage and it is not.
+
+An implementation note worth keeping: the first acronym rule proposed
+`ip ~ italian pasta ~ invasion of poland`. Tightening to ≥3 characters with
+a unique expansion fixed it. Stage 1 emits *proposals* into
+`norm_candidates.txt` and never auto-merges — the gbrain findings-as-proposals
+rule (§7) earning its place on the first real run.
