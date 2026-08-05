@@ -400,8 +400,9 @@ export interface UiState {
 /** The permission ladder, most restrictive first (#26). Hints describe
  *  OPERATION CLASSES, not "cards"/"notes" everywhere - and they describe
  *  verified behavior: under trusted, note writes, bulk sweeps AND deck &
- *  structure ops all auto-apply within the shared session budget (deletes
- *  and skill updates always need explicit confirmation, in every mode). */
+ *  structure ops auto-apply within the shared session budget. Destructive
+ *  deletes, full-sync changes, and skill updates remain explicit safety
+ *  boundaries even under trusted writes. */
 export const PERMISSION_MODES: readonly { id: string; label: string; hint: string }[] = [
   { id: "ask-each-read", label: "Ask each read", hint: "Every tool call needs your OK" },
   { id: "read-only", label: "Read-only", hint: "Change tools not offered at all" },
@@ -414,7 +415,7 @@ export const PERMISSION_MODES: readonly { id: string; label: string; hint: strin
   {
     id: "trusted-writes",
     label: "Trusted writes",
-    hint: "Changes apply instantly under a session budget; deletes & skill updates still need you",
+    hint: "Routine changes apply instantly; destructive, full-sync & skill changes still need you",
   },
 ];
 

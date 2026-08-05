@@ -433,6 +433,11 @@ class Proposal:
     # so BEFORE the click rather than the ledger only after it. None = the
     # kind-level default in _kind_revertible decides.
     revertible: bool | None = None
+    # A trusted-writes session normally applies collection changes directly,
+    # but some operations are deliberate safety boundaries: destructive
+    # changes and changes known to force a one-way/full sync must still stop
+    # for an explicit review card. This is server-side policy, not UI copy.
+    requires_confirmation: bool = False
     # Edit only (#24a): the note's OTHER fields, unchanged by this proposal.
     # Never written - context so the reviewer can see the rest of the note
     # (does the new value duplicate something already there?) without the
@@ -493,6 +498,7 @@ class Proposal:
             # written by proposal_resolved, and a null here would clobber a
             # real answer with "we don't know".
             **({"revertible": self.revertible} if self.revertible is not None else {}),
+            "requires_confirmation": self.requires_confirmation,
             "context_fields": [
                 {"name": name, "value": value}
                 for name, value in self.context_fields.items()
@@ -1015,7 +1021,13 @@ class ProposalManager:
 
     def _finish_submission(self, proposal: Proposal, writes: int) -> dict[str, Any]:
         """Common tail for bulk submissions: apply directly under
-        trusted-writes (within budget), otherwise render a proposal card."""
+        trusted-writes (within budget), otherwise render a proposal card.
+
+        Trusted writes deliberately stops at destructive operations and
+        operations known to force a one-way/full sync. Those proposal cards
+        carry ``requires_confirmation`` from their submit path, so this shared
+        chokepoint is the enforcement boundary rather than a UI convention.
+        """
         self._proposals[proposal.id] = proposal
         if self._quiet:
             # Internal batch item (#27): the caller drives accept itself.
@@ -1028,6 +1040,7 @@ class ProposalManager:
         if (
             self._trusted_enabled()
             and proposal.kind != "delete"
+            and not proposal.requires_confirmation
             and self._budget_take(writes)
         ):
             self._push({"type": "proposal", "proposal": proposal.to_payload()})
@@ -1483,6 +1496,7 @@ class ProposalManager:
             count=cards,
             samples=[{"text": line} for line in samples],
             warnings=warnings,
+            requires_confirmation=bool(not filtered and cards),
         )
         if not filtered and cards:
             # Destructive: never auto-applies, mirroring delete_notes.
@@ -1507,6 +1521,7 @@ class ProposalManager:
         name = str(args.get("name", "")).strip()
         preset = str(args.get("preset", "")).strip()
         warnings: list[str] = []
+        requires_confirmation = False
         if action in ("create", "clone"):
             if not name:
                 raise ProposalError(f"{action} needs the new preset's `name`")
@@ -1545,6 +1560,7 @@ class ProposalManager:
                 "the same values and reassigns those decks, but the forced "
                 "sync stands."
             )
+            requires_confirmation = True
             op_args = {"action": action, "preset": preset}
         return self._deck_op_proposal(
             op="manage_preset",
@@ -1553,6 +1569,7 @@ class ProposalManager:
             rationale=str(args.get("rationale", "")),
             samples=samples,
             warnings=warnings,
+            requires_confirmation=requires_confirmation,
         )
 
     def submit_assign_preset(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -1845,6 +1862,10 @@ class ProposalManager:
                 "(Anki will ask which side wins - choose this device)"
             )
         can_revert = meta["revertible"] if revertible is None else revertible
+        # Non-revertible note-type operations destroy field content, cards, or
+        # review history. Full-sync operations require choosing which sync
+        # side wins. Neither boundary is crossed silently in trusted mode.
+        requires_confirmation = bool(meta["full_sync"] or can_revert is False)
         proposal = Proposal(
             id=self._next_id(),
             kind="note_type_op",
@@ -1859,6 +1880,7 @@ class ProposalManager:
             count=count,
             samples=[{"text": line} for line in samples],
             warnings=lines,
+            requires_confirmation=requires_confirmation,
         )
         return self._finish_submission(proposal, 1)
 
@@ -2917,6 +2939,7 @@ class ProposalManager:
                 "Deleting notes cannot be undone from the chat ledger. A backup "
                 "checkpoint is created first (File > Switch Profile restores it)."
             ],
+            requires_confirmation=True,
         )
         # Deletes are ALWAYS user-confirmed, even under trusted-writes.
         self._proposals[proposal.id] = proposal
@@ -3041,6 +3064,7 @@ class ProposalManager:
         samples: list[str],
         count: int = 0,
         warnings: list[str] | None = None,
+        requires_confirmation: bool = False,
     ) -> dict[str, Any]:
         proposal = Proposal(
             id=self._next_id(),
@@ -3055,6 +3079,7 @@ class ProposalManager:
             count=count,
             samples=[{"text": line} for line in samples],
             warnings=warnings or [],
+            requires_confirmation=requires_confirmation,
         )
         return self._finish_submission(proposal, 1)
 
@@ -3415,6 +3440,7 @@ class ProposalManager:
                 "diff": diff,
                 "observation_ids": list(observation_ids),
             },
+            requires_confirmation=True,
         )
         self._proposals[proposal.id] = proposal
         self._push({"type": "proposal", "proposal": proposal.to_payload()})
@@ -3494,6 +3520,7 @@ class ProposalManager:
             rationale=rationale,
             samples=[{"text": description}],
             op_args={"name": name, "description": description, "markdown": markdown},
+            requires_confirmation=True,
         )
         self._proposals[proposal.id] = proposal
         self._push({"type": "proposal", "proposal": proposal.to_payload()})

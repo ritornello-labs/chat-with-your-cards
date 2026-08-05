@@ -2093,13 +2093,18 @@ body {
 }
 
 .cwyc-access-description {
-  min-height: 36px;
+  /* Hover changes the copy. A fixed footprint is essential for panels that
+     open above the composer: if this box grows or shrinks, every option row
+     moves under a stationary pointer and the last two choices oscillate. */
+  box-sizing: border-box;
+  height: 62px;
   margin: 5px 4px 0;
   padding: 6px 8px;
   border-top: 1px solid var(--cwyc-border-subtle);
   color: var(--cwyc-fg-subtle);
   font-size: 11px;
   line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .cwyc-access-risk {

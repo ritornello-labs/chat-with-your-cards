@@ -2267,6 +2267,9 @@ def _run_checks() -> dict[str, Any]:
             "  });"
             "  var access = document.querySelector('[data-testid=access-control]');"
             "  out.access_label = access ? access.textContent : '';"
+            "  var model = document.querySelector('[data-testid=model-picker]');"
+            "  out.model_label = model ? model.textContent : '';"
+            "  out.model_overflow = model ? model.scrollWidth - model.clientWidth : 0;"
             "  out.context_chip = document.querySelectorAll('[data-testid=context-chip]').length;"
             "  var cc = document.querySelector('[data-testid=open-cc]');"
             "  out.open_cc_text = cc ? cc.textContent : '';"
@@ -2278,12 +2281,16 @@ def _run_checks() -> dict[str, Any]:
         missing = [
             key
             for key, count in controls.items()
-            if key != "context_chip" and isinstance(count, int) and count != 1
+            if key not in ("context_chip", "model_overflow")
+            and isinstance(count, int)
+            and count != 1
         ]
         if missing:
             raise AssertionError(f"control surface incomplete ({missing}): {controls}")
         if "Access · Review / Sandbox" not in controls["access_label"]:
             raise AssertionError(f"access control does not reflect agent state: {controls}")
+        if controls["model_overflow"] > 0 or "…" in controls["model_label"]:
+            raise AssertionError(f"model/effort status is clipped: {controls}")
         if controls["context_chip"] != 0:
             raise AssertionError(f"passive context chip still rendered: {controls}")
         if "Claude Code" not in controls["open_cc_text"]:

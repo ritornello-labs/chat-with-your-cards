@@ -2205,6 +2205,36 @@ class DeckPresetTests(unittest.TestCase):
             restored["id"], col.decks.get(col.decks.id_for_name("Default"))["conf"]
         )
 
+    def test_trusted_writes_stops_before_preset_delete_full_sync(self) -> None:
+        manager, col, pushed = make_manager(
+            {"permission_mode": "trusted-writes", "write_budget": 10}
+        )
+        created = manager.submit_manage_preset(
+            {"action": "clone", "preset": "Default", "name": "Focused"}
+        )
+        self.assertEqual("applied", created["status"])
+
+        result = manager.submit_manage_preset(
+            {"action": "delete", "preset": "Focused"}
+        )
+        self.assertEqual("pending_user_review", result["status"])
+        self.assertIn("Focused", [c["name"] for c in col.decks.all_config()])
+        proposal = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertTrue(proposal["requires_confirmation"])
+        self.assertTrue(any("one-way sync" in w for w in proposal["warnings"]))
+
+    def test_trusted_writes_stops_before_schema_change(self) -> None:
+        manager, _col, pushed = make_manager(
+            {"permission_mode": "trusted-writes", "write_budget": 10}
+        )
+        result = manager.submit_manage_note_type_fields(
+            {"note_type": "Basic", "op": "add", "field": "Source"}
+        )
+        self.assertEqual("pending_user_review", result["status"])
+        proposal = pushes_of(pushed, "proposal")[-1]["proposal"]
+        self.assertTrue(proposal["requires_confirmation"])
+        self.assertTrue(any("full upload" in w for w in proposal["warnings"]))
+
     def test_default_preset_cannot_be_deleted(self) -> None:
         manager, col, pushed = make_manager()
         with self.assertRaisesRegex(ProposalError, "cannot be deleted"):

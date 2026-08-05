@@ -346,6 +346,16 @@ agent/model picker, unified Access panel + Shift+Tab, doctor panel, chat
 history panel. Cmd+J / Cmd+Shift+J were not lost either — they moved to Qt
 shortcuts (`shortcuts.py`), which is the correct home.
 
+**Access/composer follow-up (2026-08-05).** The closed model status uses
+compact tokens (`Opus · Med`, full values in its tooltip and menu) so common
+model/effort pairs do not ellipsize in a narrow dock. Access option hover copy
+has a fixed three-line footprint: both panels usually open upward, and a
+variable-height description moved the last rows under a stationary pointer,
+causing hover oscillation. Trusted collection access now also has a real
+server-side safety boundary: routine changes apply directly, while destructive
+or non-revertible operations, full-sync changes, and skill changes remain
+explicit review cards.
+
 **Fixed 2026-07-23 — `tool_approval`.** Was: never handled in `store.ts`, so
 "Ask each read" (the first entry in the mode picker) hung for 120s and then
 auto-denied, because Python blocks on `approvals.py`'s `event.wait(120)` for a

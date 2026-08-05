@@ -15,20 +15,20 @@ import { TagChips } from "./TagChips";
  * state Python re-pushes afterwards ("agent" / "pins" events).
  */
 
-const MODELS: readonly { id: string; label: string }[] = [
-  { id: "", label: "Default model" },
-  { id: "fable", label: "Fable" },
-  { id: "opus", label: "Opus" },
-  { id: "sonnet", label: "Sonnet" },
-  { id: "haiku", label: "Haiku" },
+const MODELS: readonly { id: string; label: string; chip: string }[] = [
+  { id: "", label: "Default model", chip: "Default" },
+  { id: "fable", label: "Fable", chip: "Fable" },
+  { id: "opus", label: "Opus", chip: "Opus" },
+  { id: "sonnet", label: "Sonnet", chip: "Sonnet" },
+  { id: "haiku", label: "Haiku", chip: "Haiku" },
 ];
 
-const EFFORTS: readonly { id: string; label: string }[] = [
-  { id: "", label: "Default effort" },
-  { id: "low", label: "Low" },
-  { id: "medium", label: "Medium" },
-  { id: "high", label: "High" },
-  { id: "max", label: "Max" },
+const EFFORTS: readonly { id: string; label: string; chip: string }[] = [
+  { id: "", label: "Default effort", chip: "Default" },
+  { id: "low", label: "Low", chip: "Low" },
+  { id: "medium", label: "Medium", chip: "Med" },
+  { id: "high", label: "High", chip: "High" },
+  { id: "max", label: "Max", chip: "Max" },
 ];
 
 // The agent-tools axis (DESIGN.md section 5) - orthogonal to the permission
@@ -165,13 +165,23 @@ const OPERATION_MATRIX: readonly { name: string; by: Record<string, string> }[] 
     },
   },
   {
-    name: "Decks & structure",
+    name: "Routine decks & structure",
     by: {
       "ask-each-read": "Review card",
       "read-only": "Not offered",
       default: "Review card",
       "auto-accept": "Review card",
       "trusted-writes": "Instant, session budget",
+    },
+  },
+  {
+    name: "Full-sync changes",
+    by: {
+      "ask-each-read": "Review card",
+      "read-only": "Not offered",
+      default: "Review card",
+      "auto-accept": "Review card",
+      "trusted-writes": "Always confirmed",
     },
   },
   {
@@ -185,7 +195,7 @@ const OPERATION_MATRIX: readonly { name: string; by: Record<string, string> }[] 
     },
   },
   {
-    name: "Deleting notes",
+    name: "Destructive deletes",
     by: {
       "ask-each-read": "Not offered",
       "read-only": "Not offered",
@@ -727,17 +737,26 @@ export function ModelPicker({ store }: { store: ChatStore }) {
   const [open, setOpen] = useState(false);
   const ref = useDismiss(open, () => setOpen(false));
   const panel = useSmartPanel(open);
-  const modelLabel = MODELS.find((m) => m.id === ui.agent.model)?.label ?? ui.agent.model;
-  const label =
-    (ui.agent.effort ? `${modelLabel} · ${ui.agent.effort}` : modelLabel) +
+  const model = MODELS.find((m) => m.id === ui.agent.model);
+  const effort = EFFORTS.find((e) => e.id === ui.agent.effort);
+  const modelLabel = model?.label ?? ui.agent.model;
+  const modelChip = model?.chip ?? ui.agent.model;
+  const fullLabel =
+    (ui.agent.effort ? `${modelLabel} · ${effort?.label ?? ui.agent.effort}` : modelLabel) +
     (ui.agent.fast ? " · fast" : "");
+  // Closed chips are status summaries, not the editing surface. Compact
+  // stable tokens keep common choices fully visible in narrow Anki docks;
+  // the menu and tooltip retain the unabbreviated values.
+  const label =
+    (ui.agent.effort ? `${modelChip} · ${effort?.chip ?? ui.agent.effort}` : modelChip) +
+    (ui.agent.fast ? " · ⚡" : "");
 
   return (
     <div className="cwyc-ctl" ref={ref}>
       <button
         type="button"
         className="cwyc-chip"
-        title="Model, reasoning effort, and fast mode (applies from your next message)"
+        title={`${fullLabel} — applies from your next message`}
         data-testid="model-picker"
         onClick={() => setOpen((o) => !o)}
       >
