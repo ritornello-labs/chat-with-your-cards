@@ -300,7 +300,8 @@ checked >= 4.5:1 (WCAG AA) in both modes.
 classes, for the GUI probe: `composer-input`, `send`, `stop`,
 `assistant-message`, `user-message`, `tool-chip`, `thinking-indicator`
 (live), `thinking-summary` (collapsed/done), `proposal-card`,
-`proposal-approve`, `proposal-edit`, `proposal-reject`, `error-banner`.
+`proposal-approve`, `proposal-edit`, `proposal-reject`, `access-control`,
+`access-collection`, `access-computer`, and `error-banner`.
 
 All styling remains centralized (`src/styles.css`, one file, one
 CSS-variable block per theme) on top of assistant-ui's **headless primitives**
@@ -341,7 +342,7 @@ while this file claimed it was a known gap.
 **Since shipped** (were on this list, no longer gaps): word-level field diff
 (2026-07-23, now `wordDiff` from `@elvis-labs/interaction-ui-react`), the
 **ask-each-read approval chip** (2026-07-23 — see below), pins panel,
-agent/model picker, permission-mode chip + Shift+Tab, doctor panel, chat
+agent/model picker, unified Access panel + Shift+Tab, doctor panel, chat
 history panel. Cmd+J / Cmd+Shift+J were not lost either — they moved to Qt
 shortcuts (`shortcuts.py`), which is the correct home.
 
@@ -407,8 +408,10 @@ given late is consumed by the agent's next attempt.
   `_accept_create` already honoured.
 - Friendly tool-name labels + hiding internal tools — every call still renders
   its raw tool name.
-- Bulk accept/reject bar, learning nudge, suggested-questions ghost text,
-  context chip.
+- Bulk accept/reject bar, learning nudge, and suggested-questions ghost text
+  have shipped. The passive context chip also shipped, then was deliberately
+  removed on 2026-08-05: it repeated existing context, looked clickable, and
+  consumed the scarcest composer space without offering an action.
 - ~~Proposal keyboard review~~ — **fixed 2026-07-27 (#21)**: Cmd+Enter
   accept, Cmd+Backspace reject, Cmd+Up/Down cycle. The target card is
   highlighted and `aria-current`, because a shortcut that accepts a proposal

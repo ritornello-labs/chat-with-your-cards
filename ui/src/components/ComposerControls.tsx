@@ -7,9 +7,10 @@ import { ComboBox } from "./ComboBox";
 import { TagChips } from "./TagChips";
 
 /**
- * The composer control row (DESIGN.md section 9): permission-mode chip and
- * Pins bottom-left, model/effort picker bottom-right (send/stop lives next to
- * it in Thread.tsx). Each control posts an existing bridge command
+ * The composer control row (DESIGN.md section 9): Pins/attachments bottom-left,
+ * one Access control for the two independent permission axes in the middle,
+ * and model/effort bottom-right (send/stop lives next to it in Thread.tsx).
+ * Each control posts an existing bridge command
  * (set_permission_mode / set_pins / set_agent) and reflects the authoritative
  * state Python re-pushes afterwards ("agent" / "pins" events).
  */
@@ -48,7 +49,7 @@ const AGENT_TOOLS: readonly {
   { id: "sandbox", chip: "Sandbox", label: "Sandbox", hint: "Anki tools + read-only files. No shell." },
   {
     id: "acceptEdits",
-    chip: "Accept edits",
+    chip: "Edit",
     label: "Accept edits",
     hint: "Shell + file edits, auto-approved.",
   },
@@ -58,8 +59,16 @@ const AGENT_TOOLS: readonly {
     label: "Auto — classifier",
     hint: "Shell + files; a safety classifier vets each call. Needs Opus/Sonnet.",
   },
-  { id: "full", chip: "Full tools", label: "Full — auto-approve", hint: "Shell + file writes, no checks." },
+  { id: "full", chip: "Full", label: "Full — auto-approve", hint: "Shell + file writes, no checks." },
 ];
+
+const COLLECTION_ACCESS_SHORT: Readonly<Record<string, string>> = {
+  "ask-each-read": "Ask",
+  "read-only": "Read only",
+  default: "Review",
+  "auto-accept": "Auto notes",
+  "trusted-writes": "Trusted",
+};
 
 /**
  * Composer panels default to opening UPWARD (they sit above the bottom-pinned
@@ -99,9 +108,8 @@ function useSmartPanel(open: boolean) {
   return {
     panelRef,
     // `down` = opens below the trigger (top-anchored). When it opens ABOVE
-    // (bottom-anchored, the common case) a caller that reveals content on hover
-    // must add it on the anchored side, or the items shift out from under the
-    // cursor and flicker - see ToolsChip's risk line.
+    // (bottom-anchored, the common case) dynamically inserted content belongs
+    // below stable choices so it does not move a hovered item.
     down,
     panelClass: "cwyc-panel cwyc-panel-composer" + (down ? " cwyc-panel-composer-down" : ""),
     panelStyle: maxHeight !== undefined ? { maxHeight } : undefined,
@@ -198,80 +206,235 @@ const OPERATION_MATRIX: readonly { name: string; by: Record<string, string> }[] 
   },
 ];
 
-export function ModeChip({ store }: { store: ChatStore }) {
+type AccessSection = "collection" | "computer";
+
+function AccessChevron() {
+  return (
+    <svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true">
+      <path
+        d="M4.5 2.5 8 6 4.5 9.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** One compact entry point for two genuinely independent safety axes.
+ *  The trigger shows short current values; the overview names both domains in
+ *  full. Drilling into one domain renders labels only and one shared
+ *  description, so the panel stays usable in a short/narrow Anki dock. */
+export function AccessControl({ store }: { store: ChatStore }) {
   const { ui } = useChatState(store);
   const [open, setOpen] = useState(false);
+  const [section, setSection] = useState<AccessSection | null>(null);
   const [detail, setDetail] = useState(false);
-  const ref = useDismiss(open, () => setOpen(false));
+  const [previewMode, setPreviewMode] = useState<string | null>(null);
+  const [previewTool, setPreviewTool] = useState<AgentTools | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const close = () => {
+    setOpen(false);
+    setSection(null);
+    setDetail(false);
+    setPreviewMode(null);
+    setPreviewTool(null);
+  };
+  const ref = useDismiss(open, close);
   const panel = useSmartPanel(open);
-  const current = PERMISSION_MODES.find((m) => m.id === ui.agent.mode) ?? PERMISSION_MODES[2];
+  const currentMode = PERMISSION_MODES.find((m) => m.id === ui.agent.mode) ?? PERMISSION_MODES[2];
+  const currentTool = AGENT_TOOLS.find((t) => t.id === ui.agent.tools) ?? AGENT_TOOLS[0];
+  const describedMode =
+    PERMISSION_MODES.find((mode) => mode.id === (previewMode ?? currentMode.id)) ?? currentMode;
+  const describedTool =
+    AGENT_TOOLS.find((tool) => tool.id === (previewTool ?? currentTool.id)) ?? currentTool;
+  const isRisky = ui.agent.tools !== "sandbox";
+  const triggerLabel = `Access · ${COLLECTION_ACCESS_SHORT[currentMode.id] ?? currentMode.label} / ${currentTool.chip}`;
+
+  const returnToOverview = () => {
+    setSection(null);
+    setDetail(false);
+    setPreviewMode(null);
+    setPreviewTool(null);
+  };
 
   return (
     <div className="cwyc-ctl" ref={ref}>
       <button
         type="button"
-        className="cwyc-chip"
-        title={`Permission mode: ${current.label} — ${current.hint} (Shift+Tab cycles)`}
-        data-testid="mode-chip"
-        onClick={() => setOpen((o) => !o)}
+        className={"cwyc-chip cwyc-access-trigger" + (isRisky ? " cwyc-chip-warn" : "")}
+        title={`Access — Anki collection: ${currentMode.label}. Computer tools: ${currentTool.label}. Shift+Tab cycles collection access.`}
+        data-testid="access-control"
+        aria-expanded={open}
+        onClick={() => {
+          if (open) close();
+          else setOpen(true);
+        }}
       >
-        {current.label}
+        <svg className="cwyc-access-icon" viewBox="0 0 14 14" width="11" height="11" aria-hidden="true">
+          <path
+            d="M7 1.4 12 3.2v3.5c0 3-1.8 5-5 5.9-3.2-.9-5-2.9-5-5.9V3.2z"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.2"
+            strokeLinejoin="round"
+          />
+        </svg>
+        <span>{triggerLabel}</span>
       </button>
       {open ? (
         <div
-          className={panel.panelClass + " cwyc-panel-mode"}
+          className={panel.panelClass + " cwyc-panel-access"}
           style={panel.panelStyle}
           ref={panel.panelRef}
-          role="menu"
+          role="dialog"
+          aria-label="Access settings"
         >
-          <div className="cwyc-panel-title">Permission mode</div>
-          {/* One ladder, most restrictive at the top (#26). The rail marks
-              the ordering; the matrix below explains the hardcoded per-class
-              carve-outs that used to be invisible. */}
-          <div className="cwyc-mode-ladder">
-            {PERMISSION_MODES.map((mode) => (
+          {section === null ? (
+            <>
+              <div className="cwyc-panel-title">Access</div>
               <button
-                key={mode.id}
                 type="button"
-                className={"cwyc-menu-item" + (mode.id === ui.agent.mode ? " cwyc-active" : "")}
-                onClick={() => {
-                  store.setPermissionMode(mode.id);
-                  setOpen(false);
-                }}
+                className="cwyc-access-axis"
+                data-testid="access-collection"
+                onClick={() => setSection("collection")}
               >
-                <span className="cwyc-ladder-dot" aria-hidden="true" />
-                <span className="cwyc-menu-label">{mode.label}</span>
-                <span className="cwyc-menu-hint">{mode.hint}</span>
+                <span className="cwyc-access-axis-copy">
+                  <span className="cwyc-access-axis-name">Anki collection</span>
+                  <span className="cwyc-access-axis-value">{currentMode.label}</span>
+                  <span className="cwyc-access-axis-hint">{currentMode.hint}</span>
+                </span>
+                <AccessChevron />
               </button>
-            ))}
-          </div>
-          <button
-            type="button"
-            className="cwyc-mode-detail-toggle"
-            data-testid="mode-detail-toggle"
-            aria-expanded={detail}
-            onClick={() => setDetail((d) => !d)}
-          >
-            {detail ? "Hide details" : `What happens under ${current.label}?`}
-          </button>
-          {detail ? (
-            <div className="cwyc-mode-matrix" data-testid="mode-matrix">
-              {OPERATION_MATRIX.map((row) => (
-                <div className="cwyc-mode-matrix-row" key={row.name}>
-                  <span className="cwyc-mode-matrix-op">{row.name}</span>
-                  <span className="cwyc-mode-matrix-val">
-                    {row.by[current.id] ?? "Review card"}
-                  </span>
+              <button
+                type="button"
+                className="cwyc-access-axis"
+                data-testid="access-computer"
+                onClick={() => setSection("computer")}
+              >
+                <span className="cwyc-access-axis-copy">
+                  <span className="cwyc-access-axis-name">Computer tools</span>
+                  <span className="cwyc-access-axis-value">{currentTool.label}</span>
+                  <span className="cwyc-access-axis-hint">{currentTool.hint}</span>
+                </span>
+                <AccessChevron />
+              </button>
+              {isRisky ? (
+                <div className="cwyc-access-risk" role="note">
+                  Computer tools can run shell commands from untrusted card content. {" "}
+                  <button type="button" data-testid="risk-modal-open" onClick={() => setModalOpen(true)}>
+                    What&rsquo;s the risk?
+                  </button>
                 </div>
-              ))}
-              <div className="cwyc-mode-matrix-note">
-                Shell &amp; file access is a separate axis — the agent-tools
-                chip next to this one.
+              ) : null}
+            </>
+          ) : section === "collection" ? (
+            <>
+              <button type="button" className="cwyc-access-back" onClick={returnToOverview}>
+                ‹ Access
+              </button>
+              <div className="cwyc-panel-title">Anki collection</div>
+              <div className="cwyc-access-options" role="radiogroup" aria-label="Anki collection access">
+                {PERMISSION_MODES.map((mode) => (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={mode.id === ui.agent.mode}
+                    className={"cwyc-access-option" + (mode.id === ui.agent.mode ? " cwyc-active" : "")}
+                    data-testid={`permission-mode-${mode.id}`}
+                    onFocus={() => setPreviewMode(mode.id)}
+                    onBlur={() => setPreviewMode(null)}
+                    onMouseEnter={() => setPreviewMode(mode.id)}
+                    onMouseLeave={() => setPreviewMode(null)}
+                    onClick={() => {
+                      store.setPermissionMode(mode.id);
+                      returnToOverview();
+                    }}
+                  >
+                    <span className="cwyc-access-radio" aria-hidden="true" />
+                    <span>{mode.label}</span>
+                  </button>
+                ))}
               </div>
-            </div>
+              <div className="cwyc-access-description" aria-live="polite">{describedMode.hint}</div>
+              <button
+                type="button"
+                className="cwyc-mode-detail-toggle"
+                data-testid="mode-detail-toggle"
+                aria-expanded={detail}
+                onClick={() => setDetail((value) => !value)}
+              >
+                {detail ? "Hide operation details" : `What happens under ${currentMode.label}?`}
+              </button>
+              {detail ? (
+                <div className="cwyc-mode-matrix" data-testid="mode-matrix">
+                  {OPERATION_MATRIX.map((row) => (
+                    <div className="cwyc-mode-matrix-row" key={row.name}>
+                      <span className="cwyc-mode-matrix-op">{row.name}</span>
+                      <span className="cwyc-mode-matrix-val">{row.by[currentMode.id] ?? "Review card"}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </>
+          ) : null}
+          {section === "computer" ? (
+            <>
+              <button type="button" className="cwyc-access-back" onClick={returnToOverview}>
+                ‹ Access
+              </button>
+              <div className="cwyc-panel-title">Computer tools</div>
+              <div className="cwyc-access-options" role="radiogroup" aria-label="Computer tools access">
+                {AGENT_TOOLS.map((tool) => {
+                  const disabled = tool.id === "auto" && ui.agent.model === "haiku";
+                  return (
+                    <button
+                      key={tool.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={tool.id === ui.agent.tools}
+                      disabled={disabled}
+                      className={
+                        "cwyc-access-option" +
+                        (tool.id === ui.agent.tools ? " cwyc-active" : "") +
+                        (disabled ? " cwyc-menu-item-disabled" : "")
+                      }
+                      data-testid={`agent-tools-${tool.id}`}
+                      title={disabled ? "Auto needs Opus or Sonnet" : undefined}
+                      onFocus={() => setPreviewTool(tool.id)}
+                      onBlur={() => setPreviewTool(null)}
+                      onMouseEnter={() => setPreviewTool(tool.id)}
+                      onMouseLeave={() => setPreviewTool(null)}
+                      onClick={
+                        disabled
+                          ? undefined
+                          : () => {
+                              store.setAgentTools(tool.id);
+                              returnToOverview();
+                            }
+                      }
+                    >
+                      <span className="cwyc-access-radio" aria-hidden="true" />
+                      <span>{tool.label}{disabled ? " · needs Opus/Sonnet" : ""}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="cwyc-access-description" aria-live="polite">{describedTool.hint}</div>
+              <div className="cwyc-access-risk" role="note">
+                Non-sandbox modes can auto-run commands influenced by untrusted card content. {" "}
+                <button type="button" data-testid="risk-modal-open" onClick={() => setModalOpen(true)}>
+                  What&rsquo;s the risk?
+                </button>
+              </div>
+            </>
           ) : null}
         </div>
       ) : null}
+      {modalOpen ? <RiskModal onClose={() => setModalOpen(false)} /> : null}
     </div>
   );
 }
@@ -627,120 +790,6 @@ export function ModelPicker({ store }: { store: ChatStore }) {
           </button>
         </div>
       ) : null}
-    </div>
-  );
-}
-
-/**
- * The agent-tools axis, split out of the model/effort menu into its own chip
- * (DESIGN.md section 5 / dogfood follow-up): sandbox vs full shell/file
- * access is a materially different risk decision than model/effort, and
- * burying it made the "full" state easy to miss. The chip itself carries the
- * warning color when full tools are active, so the risky state is visible
- * without opening anything.
- */
-export function ToolsChip({ store }: { store: ChatStore }) {
-  const { ui } = useChatState(store);
-  const [open, setOpen] = useState(false);
-  const ref = useDismiss(open, () => setOpen(false));
-  const panel = useSmartPanel(open);
-  const [hoverRisky, setHoverRisky] = useState(false);
-  const [riskDismissed, setRiskDismissed] = useState(false);
-  const [modalOpen, setModalOpen] = useState(false);
-  const current = AGENT_TOOLS.find((t) => t.id === ui.agent.tools) ?? AGENT_TOOLS[0];
-  // Every non-sandbox tier hands the agent a real shell on your machine, so the
-  // warning accent and risk line ride on "not sandbox", not just "full".
-  const isRisky = ui.agent.tools !== "sandbox";
-  // The risk line rides on a risky tier being the selected OR hovered choice;
-  // dismissing it hides it until you drop back to sandbox.
-  useEffect(() => {
-    if (!isRisky) setRiskDismissed(false);
-  }, [isRisky]);
-  const showRisk = (isRisky || hoverRisky) && !riskDismissed;
-  // Rendered on the panel's ANCHORED side so revealing it on hover never moves
-  // the menu items: above them when the panel opens upward (bottom-anchored),
-  // below them when it opens downward. Otherwise the hovered risky item slides
-  // out from under the cursor and flickers (dogfood 2026-07-15).
-  const riskLine = (
-    <div className="cwyc-risk-line" role="note">
-      <span className="cwyc-risk-line-text">
-        These tiers auto-run shell commands — including any hidden in untrusted
-        card content.{" "}
-        <button
-          type="button"
-          className="cwyc-risk-link"
-          data-testid="risk-modal-open"
-          onClick={() => setModalOpen(true)}
-        >
-          What&rsquo;s the risk?
-        </button>
-      </span>
-      <button
-        type="button"
-        className="cwyc-risk-dismiss"
-        aria-label="Dismiss warning"
-        title="Dismiss"
-        onClick={() => setRiskDismissed(true)}
-      >
-        ×
-      </button>
-    </div>
-  );
-
-  return (
-    <div className="cwyc-ctl" ref={ref}>
-      <button
-        type="button"
-        className={"cwyc-chip" + (isRisky ? " cwyc-chip-warn" : "")}
-        title="Agent tools: shell/file access (applies from your next message)"
-        data-testid="tools-chip"
-        onClick={() => setOpen((o) => !o)}
-      >
-        {current.chip}
-      </button>
-      {open ? (
-        <div className={panel.panelClass} style={panel.panelStyle} ref={panel.panelRef}>
-          <div className="cwyc-panel-title">Agent tools</div>
-          {showRisk && !panel.down ? riskLine : null}
-          {AGENT_TOOLS.map((tool) => {
-            const risky = tool.id !== "sandbox";
-            // Auto's safety classifier only runs on premium models; the CLI
-            // silently downgrades `--permission-mode auto` to a no-classifier
-            // mode on Haiku (verified 2026-07-14), so offering it there would
-            // promise a safety net that isn't active. Disable it instead.
-            const disabled = tool.id === "auto" && ui.agent.model === "haiku";
-            return (
-              <button
-                key={tool.id}
-                type="button"
-                disabled={disabled}
-                className={
-                  "cwyc-menu-item" +
-                  (tool.id === ui.agent.tools ? " cwyc-active" : "") +
-                  (disabled ? " cwyc-menu-item-disabled" : "")
-                }
-                data-testid={`agent-tools-${tool.id}`}
-                title={
-                  disabled
-                    ? "Auto needs Opus or Sonnet — the safety classifier isn't available on Haiku"
-                    : undefined
-                }
-                onMouseEnter={risky && !disabled ? () => setHoverRisky(true) : undefined}
-                onMouseLeave={risky && !disabled ? () => setHoverRisky(false) : undefined}
-                onClick={disabled ? undefined : () => store.setAgentTools(tool.id)}
-              >
-                <span className="cwyc-menu-label">
-                  {tool.label}
-                  {disabled ? " · needs Opus/Sonnet" : ""}
-                </span>
-                <span className="cwyc-menu-hint">{tool.hint}</span>
-              </button>
-            );
-          })}
-          {showRisk && panel.down ? riskLine : null}
-        </div>
-      ) : null}
-      {modalOpen ? <RiskModal onClose={() => setModalOpen(false)} /> : null}
     </div>
   );
 }

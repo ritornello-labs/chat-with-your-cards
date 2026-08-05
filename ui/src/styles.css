@@ -1664,14 +1664,40 @@ body {
   color: var(--cwyc-text-dim);
 }
 
-/* Chrome parity (#23): context chip, bulk bar, learning nudge. */
-.cwyc-chip-static {
-  cursor: default;
-  color: var(--cwyc-text-dim);
-  max-width: 190px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* Chrome parity (#23): bulk bar + learning nudge. The old passive context
+   chip was removed: it repeated the empty-state/reviewer context while
+   looking interactive. The learning CTA is session context, not a setting,
+   so it sits above the writing surface rather than consuming toolbar width. */
+.cwyc-learning-nudge {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 27px;
+  padding: 3px 6px 3px 9px;
+  border-left: 2px solid var(--cwyc-accent);
+  color: var(--cwyc-fg-subtle);
+  font-size: 11.5px;
+}
+
+.cwyc-learning-nudge strong {
+  color: var(--cwyc-accent-ink);
+  font-weight: 650;
+}
+
+#cwyc-root .cwyc-learning-nudge button {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--cwyc-accent-ink);
+  font: 600 11.5px var(--cwyc-font);
+  padding: 3px 5px;
+  cursor: pointer;
+}
+
+#cwyc-root .cwyc-learning-nudge button:hover {
+  color: var(--cwyc-accent-hover);
+  text-decoration: underline;
 }
 
 .cwyc-bulk-bar {
@@ -1937,47 +1963,165 @@ body {
   word-break: break-word;
 }
 
-/* Permission ladder + per-class matrix (#26). The rail marks the
-   restrictive -> permissive ordering; the matrix names the operation
-   classes whose carve-outs are hardcoded in Python. */
-.cwyc-panel-mode {
-  min-width: 300px;
+/* Unified Access control. The overview names the two independent domains;
+   drilling into one shows compact labels plus a single shared description.
+   This keeps the complete menu below 320px instead of wrapping five long
+   explanations into a clipped panel at real dock widths. */
+#cwyc-root .cwyc-panel-access {
+  width: min(360px, calc(100vw - 24px));
+  min-width: min(280px, calc(100vw - 24px));
+  max-width: min(360px, calc(100vw - 24px));
 }
 
-.cwyc-mode-ladder {
+#cwyc-root .cwyc-access-back {
+  display: block;
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--cwyc-border-subtle);
+  background: transparent;
+  color: var(--cwyc-fg-subtle);
+  font: 500 11px var(--cwyc-font);
+  text-align: left;
+  padding: 4px 8px 6px;
+  cursor: pointer;
+}
+
+#cwyc-root .cwyc-access-back:hover {
+  color: var(--cwyc-fg);
+}
+
+#cwyc-root .cwyc-access-axis {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--cwyc-fg);
+  padding: 7px 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+#cwyc-root .cwyc-access-axis:hover {
+  background: var(--cwyc-surface);
+}
+
+.cwyc-access-axis + .cwyc-access-axis {
+  margin-top: 2px;
+}
+
+.cwyc-access-axis-copy {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 1px;
+}
+
+.cwyc-access-axis-name {
+  color: var(--cwyc-fg-subtle);
+  font: 500 10.5px var(--cwyc-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.045em;
+}
+
+.cwyc-access-axis-value {
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.cwyc-access-axis-hint {
+  overflow: hidden;
+  color: var(--cwyc-fg-subtle);
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cwyc-access-axis > svg {
+  flex: 0 0 auto;
+  color: var(--cwyc-fg-faint);
+}
+
+.cwyc-access-options {
+  display: grid;
+  gap: 2px;
+}
+
+#cwyc-root .cwyc-access-option {
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 29px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--cwyc-fg);
+  font: 400 12.5px var(--cwyc-font);
+  text-align: left;
+  padding: 5px 8px;
+  cursor: pointer;
 }
 
-.cwyc-mode-ladder::before {
-  content: "";
-  position: absolute;
-  left: 13px;
-  top: 12px;
-  bottom: 12px;
-  width: 2px;
-  background: var(--cwyc-border);
-  border-radius: 1px;
+#cwyc-root .cwyc-access-option:hover,
+#cwyc-root .cwyc-access-option:focus-visible {
+  background: var(--cwyc-surface);
+  outline: none;
 }
 
-#cwyc-root .cwyc-mode-ladder .cwyc-menu-item {
-  position: relative;
-  padding-left: 26px;
+#cwyc-root .cwyc-access-option.cwyc-active {
+  background: var(--cwyc-accent-soft);
+  color: var(--cwyc-accent-ink);
 }
 
-.cwyc-ladder-dot {
-  position: absolute;
-  left: 9px;
-  top: 13px;
+.cwyc-access-radio {
+  flex: 0 0 auto;
   width: 10px;
   height: 10px;
-  border-radius: 50%;
   border: 2px solid var(--cwyc-border);
+  border-radius: 50%;
   background: var(--cwyc-bg);
 }
 
-#cwyc-root .cwyc-mode-ladder .cwyc-active .cwyc-ladder-dot {
+.cwyc-access-option.cwyc-active .cwyc-access-radio {
   border-color: var(--cwyc-accent);
   background: var(--cwyc-accent);
+}
+
+.cwyc-access-description {
+  min-height: 36px;
+  margin: 5px 4px 0;
+  padding: 6px 8px;
+  border-top: 1px solid var(--cwyc-border-subtle);
+  color: var(--cwyc-fg-subtle);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.cwyc-access-risk {
+  margin: 6px 4px 2px;
+  padding: 6px 8px;
+  border-left: 2px solid var(--cwyc-warn);
+  border-radius: 4px;
+  background: var(--cwyc-warn-soft);
+  color: var(--cwyc-warn);
+  font-size: 10.75px;
+  line-height: 1.4;
+}
+
+#cwyc-root .cwyc-access-risk button {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  padding: 0;
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .cwyc-mode-detail-toggle {
@@ -2012,14 +2156,6 @@ body {
 
 .cwyc-mode-matrix-val {
   text-align: right;
-}
-
-.cwyc-mode-matrix-note {
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px dashed var(--cwyc-border);
-  color: var(--cwyc-text-dim);
-  font-size: 11px;
 }
 
 .cwyc-preview-expand {
@@ -3017,46 +3153,39 @@ body {
 
 .cwyc-composer-bar {
   /* Chrome, not part of the writing surface: no frame of its own, and sitting
-     just outside the input's box. */
+     just outside the input's box. Three explicit areas prevent unrelated
+     controls from interleaving when the dock narrows. */
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   padding: 0 2px;
-  justify-content: space-between;
-  /* Send sits on the LAST line of a wrapped chip block, not centred against
-     it. */
-  align-items: flex-end;
-  gap: 5px 6px;
-  /* Send must NOT wrap: it is the primary action and its position has to be
-     stable, or it hops between lines as chips reflow (dogfood 2026-07-23).
-     Only the chips wrap, inside their own groups. */
-  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
 }
-/* Context group - grown to five chips (#23: context, pins, attach,
-   set-aside, learning nudge), so it now SHRINKS and wraps like the other
-   groups instead of shoving the row off the edge. The extra margin is the
-   category break - a divider RULE would have to wrap along with the chips,
-   which it cannot do sanely. */
-.cwyc-composer-context {
-  flex: 0 1 auto;
-  margin-right: 4px;
-}
-.cwyc-composer-context,
-.cwyc-composer-left,
+
+.cwyc-composer-accessories,
+.cwyc-composer-access,
 .cwyc-composer-right {
   display: flex;
   align-items: center;
   gap: 5px;
   min-width: 0;
-  /* Chips reflow within the group rather than shoving the send button out of
-     the row (dogfood 2026-07-13: "buttons crammed together" at small widths). */
+}
+
+.cwyc-composer-accessories {
+  grid-column: 1;
+  justify-content: flex-start;
   flex-wrap: wrap;
 }
-.cwyc-composer-left {
-  flex: 1 1 auto;
+
+.cwyc-composer-access {
+  grid-column: 2;
+  justify-content: center;
 }
+
 .cwyc-composer-right {
-  /* Stay glued to the right edge, and never shrink the send button away. */
-  margin-left: auto;
-  flex: 0 1 auto;
+  grid-column: 3;
   justify-content: flex-end;
+  flex-wrap: nowrap;
 }
 #cwyc-root .cwyc-chip {
   border: 1px solid var(--cwyc-border);
@@ -3106,6 +3235,63 @@ body {
   max-width: 168px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+#cwyc-root .cwyc-access-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 210px;
+}
+
+.cwyc-access-trigger .cwyc-access-icon {
+  flex: 0 0 auto;
+}
+
+.cwyc-access-trigger > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Real Anki docks commonly land around 300–450 CSS px even when they look
+   physically wide on a Retina screenshot. At those widths, accessories and
+   model/send retain the first row; Access gets a deliberate full second row. */
+@media (max-width: 520px) {
+  .cwyc-composer-bar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 5px;
+  }
+
+  .cwyc-composer-accessories {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .cwyc-composer-right {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .cwyc-composer-access {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-content: flex-start;
+  }
+
+  #cwyc-root .cwyc-composer-access .cwyc-access-trigger {
+    max-width: 100%;
+  }
+
+  #cwyc-root .cwyc-composer-right .cwyc-chip {
+    max-width: 108px;
+  }
+}
+
+@media (max-width: 340px) {
+  #cwyc-root .cwyc-composer-right .cwyc-chip {
+    max-width: 82px;
+  }
 }
 #cwyc-root .cwyc-chip:hover {
   background: var(--cwyc-surface);
@@ -3481,55 +3667,6 @@ body {
 }
 .cwyc-tagchips-list {
   top: calc(100% + 3px);
-}
-
-/* ---- full-agent-tools risk affordance ------------------------------------ */
-
-/* Persistent, dismissable warning line in the Model/effort menu when Full is
-   the selected or hovered agent-tools choice. Amber/warn accent, not the clay
-   red of a hard error. */
-.cwyc-risk-line {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  margin: 6px 4px 2px;
-  padding: 6px 8px;
-  border-radius: 7px;
-  background: var(--cwyc-warn-soft);
-  border: 1px solid var(--cwyc-accent-ring);
-}
-.cwyc-risk-line-text {
-  flex: 1 1 auto;
-  font-size: 11px;
-  line-height: 1.45;
-  color: var(--cwyc-warn);
-}
-#cwyc-root .cwyc-risk-link {
-  border: none;
-  background: none;
-  padding: 0;
-  font: inherit;
-  font-weight: 600;
-  color: var(--cwyc-accent-ink);
-  text-decoration: underline;
-  cursor: pointer;
-  white-space: nowrap;
-}
-#cwyc-root .cwyc-risk-link:hover {
-  color: var(--cwyc-accent-hover);
-}
-#cwyc-root .cwyc-risk-dismiss {
-  flex: 0 0 auto;
-  border: none;
-  background: none;
-  padding: 0 2px;
-  font-size: 15px;
-  line-height: 1;
-  color: var(--cwyc-warn);
-  cursor: pointer;
-}
-#cwyc-root .cwyc-risk-dismiss:hover {
-  color: var(--cwyc-fg);
 }
 
 /* The risk modal: a faux-viewport overlay over the whole dock (absolute, not

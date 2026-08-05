@@ -14,7 +14,7 @@ import { ReasoningBlock } from "./components/ReasoningBlock";
 import { DenialBanner, ErrorBanner } from "./components/ErrorBanner";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { TextPart } from "./components/TextPart";
-import { AttachButton, ModeChip, ModelPicker, PinsButton, ToolsChip } from "./components/ComposerControls";
+import { AccessControl, AttachButton, ModelPicker, PinsButton } from "./components/ComposerControls";
 import { VimComposer } from "./components/VimComposer";
 import { LedgerStrip } from "./components/LedgerStrip";
 import { Announcer } from "./components/Announcer";
@@ -164,43 +164,24 @@ function BulkProposalBar({ store }: { store: ChatStore }) {
   );
 }
 
-/** What the assistant will see (#23a) + the learning nudge (#23d): both are
- *  context-category chrome, so they live with Pins and Attach. */
-function ContextChip({ store }: { store: ChatStore }) {
-  const { ui } = useChatState(store);
-  if (!ui.context) return null;
-  return (
-    <span
-      className="cwyc-chip cwyc-chip-static"
-      title="What the assistant will see with your next message"
-      data-testid="context-chip"
-    >
-      <svg viewBox="0 0 14 14" width="11" height="11" aria-hidden="true" fill="none">
-        <circle cx="7" cy="7" r="2.2" fill="currentColor" />
-        <path
-          d="M1.2 7C2.8 4 4.8 2.5 7 2.5S11.2 4 12.8 7C11.2 10 9.2 11.5 7 11.5S2.8 10 1.2 7Z"
-          stroke="currentColor"
-          strokeWidth="1.2"
-        />
-      </svg>
-      {ui.context.label}
-    </span>
-  );
-}
-
-function LearningNudgeChip({ store }: { store: ChatStore }) {
+/** This is a contextual action, not a persistent composer setting. Keeping it
+ *  above the writing surface prevents a sporadic, wordy CTA from displacing
+ *  Pins, Access, model, or Send. */
+function LearningNudgeBar({ store }: { store: ChatStore }) {
   const { ui } = useChatState(store);
   if (!ui.learning?.nudge) return null;
   return (
-    <button
-      type="button"
-      className="cwyc-chip cwyc-chip-on"
+    <div
+      className="cwyc-learning-nudge"
       title="You've edited AI-written cards since the last review - distill the pattern into the authoring skill"
-      data-testid="learning-nudge"
-      onClick={() => store.startSkillReview()}
     >
-      ✎ Review {ui.learning.pending} edit{ui.learning.pending === 1 ? "" : "s"}
-    </button>
+      <span>
+        <strong>{ui.learning.pending}</strong> authoring edit{ui.learning.pending === 1 ? "" : "s"} ready
+      </span>
+      <button type="button" data-testid="learning-nudge" onClick={() => store.startSkillReview()}>
+        Review
+      </button>
+    </div>
   );
 }
 
@@ -281,6 +262,7 @@ function Composer({ store }: { store: ChatStore }) {
       <LedgerStrip store={store} />
       <BulkProposalBar store={store} />
       <DeferredUndoChip store={store} />
+      <LearningNudgeBar store={store} />
       {ui.settings?.vimMode ? (
         <VimComposer store={store} />
       ) : (
@@ -293,20 +275,17 @@ function Composer({ store }: { store: ChatStore }) {
         />
       )}
       <div className="cwyc-composer-bar">
-        {/* Context first, then behaviour. Pins says what rides WITH the
-            message; the rest say how the agent should act. Its own group so
-            the attachment control (task #15) has a home next to it rather
-            than being wedged among the mode chips. */}
-        <div className="cwyc-composer-context">
-          <ContextChip store={store} />
+        {/* Message accessories, access policy, then model/send. Grid areas
+            give each role a stable home; at narrow dock widths Access moves
+            onto a deliberate second row instead of six chips wrapping in an
+            accidental order. */}
+        <div className="cwyc-composer-accessories">
           <PinsButton store={store} />
           <AttachButton store={store} />
           <SetAsideChip store={store} />
-          <LearningNudgeChip store={store} />
         </div>
-        <div className="cwyc-composer-left">
-          <ModeChip store={store} />
-          <ToolsChip store={store} />
+        <div className="cwyc-composer-access">
+          <AccessControl store={store} />
         </div>
         <div className="cwyc-composer-right">
           <ModelPicker store={store} />

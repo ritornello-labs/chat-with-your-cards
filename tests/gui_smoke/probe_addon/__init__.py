@@ -2251,22 +2251,23 @@ def _run_checks() -> dict[str, Any]:
     def _control_surface() -> dict[str, Any]:
         """Parity rebuild (dogfood 2026-07-11): the header (new-chat, history,
         open-in-Claude-Code split button, doctor cog) and the composer control
-        row (permission-mode chip, Pins, model/effort picker) must render, and
-        the mode chip must reflect the authoritative "agent" push (the probe
-        profile runs permission_mode=default -> label "Propose")."""
+        row (unified Access control, Pins, model/effort picker) must render, and
+        Access must reflect both authoritative permission axes (the probe
+        profile runs permission_mode=default + agent_tools=sandbox)."""
         controls = _eval_js(
             dock.web,
             "(function() {"
             "  var ids = ['header','new-chat','history-button','open-cc',"
-            "             'open-cc-caret','settings','mode-chip','pins-button',"
-            "             'model-picker','tools-chip','collapse','rail'];"
+            "             'open-cc-caret','settings','access-control','pins-button',"
+            "             'model-picker','collapse','rail'];"
             "  var out = {};"
             "  ids.forEach(function(id) {"
             "    out[id.replace(/-/g, '_')] ="
             "      document.querySelectorAll('[data-testid=' + id + ']').length;"
             "  });"
-            "  var chip = document.querySelector('[data-testid=mode-chip]');"
-            "  out.mode_label = chip ? chip.textContent : '';"
+            "  var access = document.querySelector('[data-testid=access-control]');"
+            "  out.access_label = access ? access.textContent : '';"
+            "  out.context_chip = document.querySelectorAll('[data-testid=context-chip]').length;"
             "  var cc = document.querySelector('[data-testid=open-cc]');"
             "  out.open_cc_text = cc ? cc.textContent : '';"
             "  return out;"
@@ -2274,13 +2275,93 @@ def _run_checks() -> dict[str, Any]:
             DOM_TIMEOUT_MS,
             "control surface query",
         )
-        missing = [key for key, count in controls.items() if isinstance(count, int) and count != 1]
+        missing = [
+            key
+            for key, count in controls.items()
+            if key != "context_chip" and isinstance(count, int) and count != 1
+        ]
         if missing:
             raise AssertionError(f"control surface incomplete ({missing}): {controls}")
-        if controls["mode_label"] != "Propose":
-            raise AssertionError(f"mode chip does not reflect agent state: {controls}")
+        if "Access · Review / Sandbox" not in controls["access_label"]:
+            raise AssertionError(f"access control does not reflect agent state: {controls}")
+        if controls["context_chip"] != 0:
+            raise AssertionError(f"passive context chip still rendered: {controls}")
         if "Claude Code" not in controls["open_cc_text"]:
             raise AssertionError(f"open-in-Claude-Code button mislabeled: {controls}")
+
+        opened = _eval_js(
+            dock.web,
+            "(function() {"
+            "  var b = document.querySelector('[data-testid=access-control]');"
+            "  if (!b) return false; b.click(); return true;"
+            "})();",
+            DOM_TIMEOUT_MS,
+            "open Access panel",
+        )
+        if opened is not True:
+            raise AssertionError("could not open Access panel")
+
+        def _access_open() -> bool:
+            return bool(
+                _eval_js(
+                    dock.web,
+                    "!!document.querySelector('.cwyc-panel-access');",
+                    DOM_TIMEOUT_MS,
+                    "Access panel visibility",
+                )
+            )
+
+        _wait_until(_access_open, DOM_TIMEOUT_MS, "Access panel to render")
+        overview = _eval_js(
+            dock.web,
+            "(function() {"
+            "  var p = document.querySelector('.cwyc-panel-access');"
+            "  var c = document.querySelector('[data-testid=access-collection]');"
+            "  if (!p || !c) return null;"
+            "  var r = p.getBoundingClientRect();"
+            "  var out = {left:r.left, right:r.right, width:r.width, viewport:innerWidth};"
+            "  c.click(); return out;"
+            "})();",
+            DOM_TIMEOUT_MS,
+            "Access overview geometry",
+        )
+        if not overview or overview["left"] < 0 or overview["right"] > overview["viewport"]:
+            raise AssertionError(f"Access overview overflows the dock: {overview}")
+
+        def _collection_choices_ready() -> bool:
+            return (
+                _eval_js(
+                    dock.web,
+                    "document.querySelectorAll('[data-testid^=permission-mode-]').length;",
+                    DOM_TIMEOUT_MS,
+                    "collection access choices",
+                )
+                == 5
+            )
+
+        _wait_until(_collection_choices_ready, DOM_TIMEOUT_MS, "all collection access choices")
+        collection = _eval_js(
+            dock.web,
+            "(function() {"
+            "  var p = document.querySelector('.cwyc-panel-access');"
+            "  if (!p) return null; var r = p.getBoundingClientRect();"
+            "  return {left:r.left, right:r.right, viewport:innerWidth,"
+            "          modes:document.querySelectorAll('[data-testid^=permission-mode-]').length,"
+            "          scrollHeight:p.scrollHeight, clientHeight:p.clientHeight};"
+            "})();",
+            DOM_TIMEOUT_MS,
+            "collection access panel geometry",
+        )
+        if (
+            not collection
+            or collection["modes"] != 5
+            or collection["left"] < 0
+            or collection["right"] > collection["viewport"]
+            or collection["scrollHeight"] > collection["clientHeight"] + 1
+        ):
+            raise AssertionError(f"collection access choices are clipped: {collection}")
+        controls["access_overview"] = overview
+        controls["access_collection"] = collection
         return controls
 
     check("control surface present (header + composer row)", _control_surface)
