@@ -3,7 +3,7 @@
 An AI chat dock inside Anki, with the card you are reviewing and the structure
 of your collection available as context.
 
-[![Chat With Your Cards opening beside Anki](https://ritornello.dev/media/ankiweb/2026-07-31-v2/chat-with-your-cards/preview.gif)](https://ritornello.dev/media/ankiweb/2026-07-31-v2/chat-with-your-cards/demo.mp4)
+[![Reviewing a proposed companion card beside Anki](https://ritornello.dev/media/ankiweb/2026-08-05-v3/chat-with-your-cards/gallery-01.png)](https://ritornello.dev/media/ankiweb/2026-08-05-v3/chat-with-your-cards/demo.mp4)
 
 [Browse the development-preview gallery](https://ritornello.dev/#chat-with-your-cards).
 
