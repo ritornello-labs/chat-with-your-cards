@@ -11,13 +11,11 @@ collection, and review proposed changes before anything is applied.
 
 ## Development preview
 
-![Review a proposed companion card before it is written](https://ritornello.dev/media/ankiweb/2026-08-05-v3/chat-with-your-cards/gallery-01.png)
+![Request a focused companion card beside the reviewer](https://ritornello.dev/media/ankiweb/2026-08-06-v4/chat-with-your-cards/gallery-01.png)
 
-![Explain the current card in plain language](https://ritornello.dev/media/ankiweb/2026-08-05-v3/chat-with-your-cards/gallery-02.png)
+![Review the proposed front, back, deck, and tags](https://ritornello.dev/media/ankiweb/2026-08-06-v4/chat-with-your-cards/gallery-02.png)
 
-![Find prerequisite cards in the collection](https://ritornello.dev/media/ankiweb/2026-08-05-v3/chat-with-your-cards/gallery-03.png)
-
-[Full-resolution workflow MP4](https://ritornello.dev/media/ankiweb/2026-08-05-v3/chat-with-your-cards/demo.mp4)
+[3.4-second full-resolution workflow MP4](https://ritornello.dev/media/ankiweb/2026-08-06-v4/chat-with-your-cards/demo.mp4)
 
 The dock stays inside Anki and supports ordinary chat, card explanations,
 collection tools, reversible proposals, and explicit approval for changes.
