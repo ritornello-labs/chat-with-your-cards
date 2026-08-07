@@ -97,8 +97,8 @@ export function SetupCard({ platform, store }: { platform: string; store: ChatSt
       <p className="cwyc-setup-lede">
         This chat is running on a built-in demo right now. For real answers about your cards, it
         needs <strong>Claude Code</strong>, a command-line tool from Anthropic that this add-on
-        talks to. The tool itself is a free download; the AI behind it runs on a Claude
-        subscription or a pay-as-you-go key (step 2).
+        talks to. The tool itself is a free download; using the AI requires a Claude
+        account with Claude Code access.
       </p>
 
       <ol className="cwyc-setup-steps">
@@ -112,33 +112,11 @@ export function SetupCard({ platform, store }: { platform: string; store: ChatSt
           </div>
         </li>
         <li>
-          <div className="cwyc-setup-step-title">Sign in — pick whichever fits</div>
+          <div className="cwyc-setup-step-title">Sign in to Claude Code</div>
           <div className="cwyc-setup-step-note">
-            <strong>Already have a Claude subscription</strong> (Pro, Max, Team, or Enterprise)?
-            Open a terminal, run <code>claude</code>, and follow the link it shows to log in.
-            That's it — this chat picks up the same login.
+            Open a terminal, run <code>claude</code>, and follow the link it shows. CWYC uses
+            that same official CLI login; it does not accept or store API keys.
           </div>
-          <div className="cwyc-setup-step-note">
-            <strong>No subscription?</strong> Anthropic also bills pay-as-you-go by usage — the
-            cheapest way to try it is the Haiku model, which costs only cents for light use.
-            Create an API key at{" "}
-            <a href="https://platform.claude.com/" target="_blank" rel="noreferrer">
-              platform.claude.com
-            </a>
-            , then open{" "}
-            <em>Anki &gt; Tools &gt; Add-ons &gt; Chat With Your Cards &gt; Config</em> and paste
-            your key into <code>anthropic_api_key</code> (or, if you use 1Password,{" "}
-            <code>anthropic_api_key_op</code> accepts an <code>op://</code> reference instead —
-            never paste a key here in the chat).
-          </div>
-          <button
-            type="button"
-            className="cwyc-chip"
-            data-testid="setup-open-config"
-            onClick={() => store.openAddonConfig()}
-          >
-            Open add-on config
-          </button>
         </li>
         <li>
           <div className="cwyc-setup-step-title">You're set — no restart needed</div>

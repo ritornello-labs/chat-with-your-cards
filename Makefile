@@ -3,6 +3,7 @@ SHELL := /bin/bash
 
 PYTHON ?= python3
 UV ?= uv
+ANKI_VERSION ?= 25.09
 
 PY_FILES := $(shell git ls-files --cached --others --exclude-standard '*.py' ':!:dist/**' ':!:node_modules/**' ':!:.venv/**' ':!:_vendor/**')
 MYPY_FILES := $(shell git ls-files --cached --others --exclude-standard '*.py' ':!:tests/**' ':!:dist/**' ':!:node_modules/**' ':!:.venv/**' ':!:_vendor/**' ':!:chat_with_your_cards/_vendor/**')
@@ -17,7 +18,7 @@ help:
 	@printf "  make type   Run type checks where typed source exists\n"
 	@printf "  make test   Run unit tests and repository hygiene tests\n"
 	@printf "  make test-gui-smoke         Run disposable Anki GUI smoke checks (macOS host)\n"
-	@printf "  make test-gui-smoke-docker  Run the GUI smoke checks in Docker/Xvfb\n"
+	@printf "  make test-gui-smoke-docker  Run the GUI smoke checks in Docker/Xvfb (ANKI_VERSION=$(ANKI_VERSION))\n"
 	@printf "  make check  Run lint, type, and test\n"
 
 lint: lint-paths lint-python lint-js lint-shell
@@ -60,7 +61,7 @@ test-gui-smoke:
 	@$(UV) run --group dev anki-workbench smoke --timeout 120
 
 test-gui-smoke-docker:
-	@docker build -f tests/gui_smoke/Dockerfile -t chat-with-your-cards-anki-gui . && \
+	@docker build --build-arg ANKI_VERSION=$(ANKI_VERSION) -f tests/gui_smoke/Dockerfile -t chat-with-your-cards-anki-gui . && \
 		docker run --rm -v "$$PWD":/workspace -w /workspace chat-with-your-cards-anki-gui
 
 check: lint type test

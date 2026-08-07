@@ -646,7 +646,6 @@ class ClaudeCliSession:
         fast_mode: bool = False,
         agent_tools: str = "sandbox",
         web_access: bool = True,
-        extra_env: dict[str, str] | None = None,
         resume_session_id: str | None = None,
         mcp_servers: dict[str, Any] | None = None,
         mcp_inherit_user: bool = False,
@@ -659,7 +658,6 @@ class ClaudeCliSession:
         self._fast_mode = fast_mode
         self._agent_tools = agent_tools
         self._web_access = web_access
-        self._extra_env = extra_env or {}
         self._mcp_inherit_user = mcp_inherit_user
         self._mcp_disabled = list(mcp_disabled or [])
         self._workdir = workdir
@@ -786,7 +784,6 @@ class ClaudeCliSession:
         # /opt/homebrew/bin etc.), so the agent's Read can find poppler's
         # pdftoppm for PDFs and other CLI tools it shells out to.
         env["PATH"] = augmented_path(env.get("PATH", ""))
-        env.update(self._extra_env)  # e.g. ANTHROPIC_API_KEY for BYOK
         self._process = subprocess.Popen(
             args,
             cwd=self._workdir,
@@ -1021,7 +1018,6 @@ class ClaudeCliBackend:
         fast_mode: Callable[[], bool] | None = None,
         agent_tools: Callable[[], str] | None = None,
         web_access: bool = True,
-        extra_env: dict[str, str] | None = None,
         mcp_servers: dict[str, Any] | None = None,
         mcp_inherit_user: bool = False,
         mcp_disabled: list[str] | None = None,
@@ -1037,7 +1033,6 @@ class ClaudeCliBackend:
         self._fast_mode = fast_mode or (lambda: False)
         self._agent_tools = agent_tools or (lambda: "sandbox")
         self._web_access = web_access
-        self._extra_env = extra_env or {}
         self._mcp_servers = mcp_servers or {}
         self._mcp_inherit_user = mcp_inherit_user
         self._mcp_disabled = mcp_disabled or []
@@ -1057,7 +1052,6 @@ class ClaudeCliBackend:
             fast_mode=bool(self._fast_mode()),
             agent_tools=str(self._agent_tools()),
             web_access=self._web_access,
-            extra_env=self._extra_env,
             resume_session_id=(context or {}).get("resume_session_id"),
             mcp_servers=self._mcp_servers,
             mcp_inherit_user=self._mcp_inherit_user,

@@ -236,6 +236,79 @@ PUBLIC_PROPOSE_SCRIPT: list[Step] = [
     },
 ]
 
+CREATE_FILTERED_DECK_SCRIPT: list[Step] = [
+    {
+        "kind": "text",
+        "markdown": (
+            "I found new Spanish pronunciation cards across the nested language decks. "
+            "A filtered deck keeps their home decks and scheduling intact while giving "
+            "you one focused practice queue.\n\n"
+        ),
+    },
+    {
+        "kind": "propose",
+        "proposal_kind": "create_filtered_deck",
+        "payload": {
+            "name": "Focus::Spanish pronunciation",
+            "terms": [
+                {
+                    "search": 'tag:pronunciation deck:"Languages::Spanish::*" is:new',
+                    "limit": 40,
+                    "order": 6,
+                }
+            ],
+            "reschedule": True,
+            "rationale": (
+                "Collect today’s new Spanish pronunciation cards without moving them "
+                "out of their course decks."
+            ),
+        },
+    },
+    {
+        "kind": "text",
+        "markdown": "Review the search, limit, and scheduling behavior before creating it.",
+    },
+]
+
+REBUILD_FILTERED_DECKS_SCRIPT: list[Step] = [
+    {
+        "kind": "text",
+        "markdown": (
+            "There are three filtered queues under **Focus**. I grouped the rebuild into "
+            "one reviewable action so you do not have to confirm each deck separately.\n\n"
+        ),
+    },
+    {
+        "kind": "propose",
+        "proposal_kind": "filtered_deck_action",
+        "payload": {
+            "action": "rebuild",
+            "pattern": "Focus::*",
+            "rationale": "Refresh every daily focus queue from its saved search.",
+        },
+    },
+]
+
+MOVE_CARDS_SCRIPT: list[Step] = [
+    {
+        "kind": "text",
+        "markdown": (
+            "Four pronunciation cards are still in the language inbox. This would move "
+            "their actual cards into the Spanish pronunciation deck, so I’m leaving the "
+            "change pending for review.\n\n"
+        ),
+    },
+    {
+        "kind": "propose",
+        "proposal_kind": "move_cards",
+        "payload": {
+            "query": 'tag:pronunciation deck:"Languages::Inbox"',
+            "deck": "Languages::Spanish::Pronunciation",
+            "rationale": "Put the imported Spanish sound cards with the rest of the course.",
+        },
+    },
+]
+
 SCRIPTS: dict[str, list[Step]] = {
     "default": DEFAULT_SCRIPT,
     "public_explain": PUBLIC_EXPLAIN_SCRIPT,
@@ -244,6 +317,9 @@ SCRIPTS: dict[str, list[Step]] = {
     "long": LONG_SCRIPT,
     "propose": PROPOSE_SCRIPT,
     "public_propose": PUBLIC_PROPOSE_SCRIPT,
+    "create_filtered_deck": CREATE_FILTERED_DECK_SCRIPT,
+    "rebuild_filtered_decks": REBUILD_FILTERED_DECKS_SCRIPT,
+    "move_cards": MOVE_CARDS_SCRIPT,
 }
 
 
@@ -254,6 +330,14 @@ def select_script(user_text: str) -> list[Step]:
         return PUBLIC_EXPLAIN_SCRIPT
     if "turn my confusion" in lowered:
         return PUBLIC_PROPOSE_SCRIPT
+    if "create a filtered deck" in lowered:
+        return CREATE_FILTERED_DECK_SCRIPT
+    if "rebuild all filtered decks" in lowered:
+        return REBUILD_FILTERED_DECKS_SCRIPT
+    if "move cards" in lowered and "deck" in lowered:
+        return MOVE_CARDS_SCRIPT
+    if "related cards" in lowered or "cards related" in lowered:
+        return TOOL_SCRIPT
     if "prerequisite" in lowered or "before this" in lowered:
         return PREREQUISITE_SCRIPT
     if "propose" in lowered or "create a note" in lowered or "make a card" in lowered:

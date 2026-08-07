@@ -1219,7 +1219,7 @@ export function installDevReplayer(): void {
                 detail:
                   "3 AI-written note(s) watched, 1 pending observation(s), 4 KB on disk (uncapped by design - grows only with AI-written notes)",
               },
-              { label: "Anthropic billing", status: "ok", detail: "harness login (no API key configured)" },
+              { label: "Harness authentication", status: "ok", detail: "Claude Code login" },
               { label: "Codex", status: "missing", detail: "not found on PATH" },
             ],
           });

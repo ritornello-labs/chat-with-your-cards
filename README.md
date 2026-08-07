@@ -39,15 +39,30 @@ their product intent.
 
 ## Status
 
-**Active developer preview.** The core chat, collection tools, note proposals,
-safe application/revert path, and real-Anki GUI tests are working. It is not yet
-published on AnkiWeb, and configuration still assumes a technically comfortable
-user.
+**Public preview, v0.1.0.** The core chat, collection tools, note proposals,
+safe application/revert path, and real-Anki GUI tests are working. This first
+release is intentionally for technically comfortable users while the supported
+backend set and installation experience broaden.
 
-The first backend uses a locally installed CLI agent through a loopback MCP
-server. Claude Code is implemented; a Codex adapter and a direct BYOK API
-backend are planned. See [DESIGN.md](DESIGN.md) for the current architecture and
-milestones.
+The supported backend is a locally installed, officially authenticated Claude
+Code CLI, connected to the add-on through a loopback MCP server. Codex and Pi
+adapters are planned. CWYC does not accept or store API keys.
+
+## Requirements and installation
+
+- Anki 25.09 on macOS or Linux. Windows is experimental in v0.1.0.
+- [Claude Code](https://claude.com/claude-code) 2.1.220 or newer, installed and
+  signed in through its official CLI.
+
+Download [chat-with-your-cards.ankiaddon](https://github.com/ritornello-labs/chat-with-your-cards/releases/download/v0.1.0/chat-with-your-cards.ankiaddon),
+open it with Anki, and restart Anki when prompted. Open the dock with
+`Ctrl+J` (`Cmd+J` on macOS). If Claude Code is not available, CWYC opens in a
+built-in demonstration mode and shows setup instructions; **Re-check** switches
+to the real backend without restarting Anki.
+
+Read [PRIVACY.md](PRIVACY.md) before use. CWYC sends the prompts and collection
+context needed for a chat through your installed Claude Code CLI. CWYC itself
+does not collect telemetry.
 
 ## What it can do
 
@@ -141,10 +156,12 @@ See [tests/gui_smoke/README.md](tests/gui_smoke/README.md) for platform details.
 | `tests/` | Unit, contract, and disposable-Anki GUI tests |
 | `DESIGN.md` | Architecture, decisions, milestones, and known issues |
 | `SAFETY.md` | Threat model and write-safety invariants |
+| `PRIVACY.md` | Data flow, local storage, and provider boundary |
+| `SECURITY.md` | Security posture and vulnerability reporting |
 | `COMPLIANCE.md` | Distribution and backend compliance review |
 
-The future `.ankiaddon` artifact is the `chat_with_your_cards/` directory
-packaged for Anki.
+The `.ankiaddon` artifact is built deterministically from the tracked release
+configuration in `pyproject.toml`.
 
 ## License
 

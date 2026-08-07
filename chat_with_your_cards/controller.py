@@ -130,11 +130,6 @@ class ChatController:
             return ScriptedBackend(_qt_schedule)
 
         url, token = self._ensure_mcp()
-        from .keys import resolve_agent_env
-
-        extra_env, key_problems = resolve_agent_env(self._config)
-        for problem in key_problems:
-            self._push({"type": "notice", "text": f"API key config: {problem}"})
         self.backend_kind = "claude"
         return ClaudeCliBackend(
             cli_path=cli_path,
@@ -151,7 +146,6 @@ class ChatController:
             fast_mode=lambda: bool(self._config.get("fast_mode", False)),
             agent_tools=lambda: _norm_agent_tools(self._config.get("agent_tools")),
             web_access=bool(self._config.get("web_access", True)),
-            extra_env=extra_env,
             mcp_servers=self._config.get("mcp_servers") or {},
             mcp_inherit_user=bool(self._config.get("mcp_inherit_user", False)),
             mcp_disabled=list(self._config.get("mcp_disabled") or []),
@@ -508,34 +502,30 @@ class ChatController:
             self._transcripts.set_backend_session(self.backend_session_id)
             self._transcripts.flush()
         payload = event_to_dict(event)
-        if payload.get("type") == "usage" and not self._is_byok():
-            # On subscription (harness login) the CLI reports total_cost_usd as
-            # a notional API-EQUIVALENT figure - the user pays $0 per message, so
-            # showing a dollar amount is misleading. Drop it; tokens still show
-            # (they reflect real context/usage size). dogfood 2026-07-11.
+        if payload.get("type") == "usage":
+            # The supported backend authenticates through the user's harness.
+            # Its total_cost_usd is a notional API-equivalent figure rather than
+            # a CWYC charge, so showing it would be misleading. Tokens still
+            # reflect real context/usage size. dogfood 2026-07-11.
             payload["cost_usd"] = None
         self._push(payload)
-
-    def _is_byok(self) -> bool:
-        """True when the user configured their own API key (bring-your-own-key),
-        so per-message dollar cost is real. Empty = subscription auth."""
-        keys = (
-            "anthropic_api_key",
-            "anthropic_api_key_op",
-            "openai_api_key",
-            "openai_api_key_op",
-        )
-        return any(str(self._config.get(k, "")).strip() for k in keys)
 
     def _handle_proposal_request(self, event: ProposalRequest) -> None:
         if self._proposals is None:
             self._push({"type": "notice", "text": "Proposals are not available."})
             return
         try:
-            if event.kind == "edit":
-                self._proposals.submit_edit(event.payload)
-            else:
-                self._proposals.submit_create(event.payload)
+            handlers = {
+                "create": self._proposals.submit_create,
+                "edit": self._proposals.submit_edit,
+                "create_filtered_deck": self._proposals.submit_create_filtered_deck,
+                "filtered_deck_action": self._proposals.submit_filtered_deck_action,
+                "move_cards": self._proposals.submit_move_cards,
+            }
+            handler = handlers.get(event.kind)
+            if handler is None:
+                raise ValueError(f"unsupported scripted proposal kind: {event.kind}")
+            handler(event.payload)
         except Exception as exc:  # ProposalError or collection trouble
             self._push({"type": "notice", "text": f"Proposal failed: {exc}"})
 

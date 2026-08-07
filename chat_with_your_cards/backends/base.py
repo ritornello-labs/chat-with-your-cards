@@ -59,7 +59,7 @@ class ProposalRequest:
     exercise the genuine proposal path.
     """
 
-    kind: str  # "create" | "edit"
+    kind: str  # scripted ProposalManager method selector; see controller.py
     payload: dict[str, Any]
 
 

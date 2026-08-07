@@ -1,7 +1,11 @@
 {
   "package": "chat_with_your_cards",
   "name": "Chat With Your Cards",
-  "min_point_version": 250500,
+  "mod": 1786065931,
+  "min_point_version": 250900,
+  "max_point_version": 250900,
+  "author": "Elvis Sik",
   "human_version": "0.1.0",
+  "description": "A review-aware Claude Code assistant dock for Anki.",
   "homepage": "https://github.com/ritornello-labs/chat-with-your-cards"
 }

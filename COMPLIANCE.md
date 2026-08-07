@@ -30,9 +30,8 @@ integration.
 1. **Spawn-only, forever.** CWYC spawns the user's own official CLI binary.
    It never reads stored credentials (`~/.claude/.credentials.json`, the
    macOS Keychain), never calls the vendor API with a subscription
-   credential, and never exports an extracted token as an API key. A direct
-   API backend, when it lands, is BYOK: the user supplies their own API key,
-   used openly as an API key.
+   credential, and never exports an extracted token as an API key. CWYC does
+   not accept or store API keys.
 2. **Never proxy or pool.** One user, their own login, their own machine.
    CWYC never routes multiple users through one account and never relays
    requests between machines.

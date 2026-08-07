@@ -6,7 +6,7 @@ These instructions apply to the `chat-with-your-cards` repository: "Chat With Yo
 
 ## Source of truth
 
-- `DESIGN.md` is the authoritative design document: architecture, backend decision (CLI-agent-first with a backend abstraction; BYOK later), tools, permission modes, note proposals, milestones, and the known-issues list.
+- `DESIGN.md` is the authoritative design document: architecture, the Claude-Code-first backend decision with Codex/Pi adapters later, tools, permission modes, note proposals, milestones, and the known-issues list. API-key authentication is not a supported CWYC surface.
 - Keep `DESIGN.md` updated when decisions change; record resolved open questions instead of deleting them.
 
 ## Working rules

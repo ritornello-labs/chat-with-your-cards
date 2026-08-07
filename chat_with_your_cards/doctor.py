@@ -12,22 +12,29 @@ subprocesses can take a second each) and push the result to the UI.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
 from typing import Any, Callable
 
 VERSION_TIMEOUT_S = 10
+CLAUDE_MIN_VERSION = (2, 1, 220)
 
 HARNESSES = [
     ("Claude Code", "claude", "https://claude.com/claude-code"),
     ("Codex CLI (future backend)", "codex", "https://developers.openai.com/codex/cli/"),
     ("Pi (future backend)", "pi", "https://pi.dev/"),
-    ("1Password CLI (for op:// keys)", "op", "https://developer.1password.com/docs/cli/"),
 ]
 
 
-def _binary_row(label: str, path: str | None, link: str) -> dict[str, Any]:
+def _binary_row(
+    label: str,
+    path: str | None,
+    link: str,
+    *,
+    minimum: tuple[int, int, int] | None = None,
+) -> dict[str, Any]:
     if path is None:
         return {"label": label, "status": "missing", "detail": "not found on PATH", "link": link}
     try:
@@ -42,18 +49,41 @@ def _binary_row(label: str, path: str | None, link: str) -> dict[str, Any]:
             "link": link,
         }
     if result.returncode != 0:
-        detail = (result.stderr or result.stdout).strip().splitlines()
+        error_lines = (result.stderr or result.stdout).strip().splitlines()
         return {
             "label": label,
             "status": "broken",
-            "detail": f"{path}: " + (detail[0][:120] if detail else "--version failed"),
+            "detail": f"{path}: "
+            + (error_lines[0][:120] if error_lines else "--version failed"),
             "link": link,
         }
-    version = (result.stdout or result.stderr).strip().splitlines()
+    version_lines = (result.stdout or result.stderr).strip().splitlines()
+    detail = (version_lines[0][:80] if version_lines else "installed") + f" — {path}"
+    if minimum is not None:
+        match = re.search(
+            r"\b(\d+)\.(\d+)\.(\d+)\b",
+            version_lines[0] if version_lines else "",
+        )
+        if match is None:
+            return {
+                "label": label,
+                "status": "warn",
+                "detail": detail + "; version could not be verified",
+                "link": link,
+            }
+        found = tuple(int(part) for part in match.groups())
+        if found < minimum:
+            required = ".".join(str(part) for part in minimum)
+            return {
+                "label": label,
+                "status": "broken",
+                "detail": detail + f"; CWYC requires {required}+",
+                "link": link,
+            }
     return {
         "label": label,
         "status": "ok",
-        "detail": (version[0][:80] if version else "installed") + f" — {path}",
+        "detail": detail,
         "link": link,
     }
 
@@ -75,7 +105,14 @@ def gather_report(
             path = find_claude(str(config.get("claude_cli_path", "")))
         else:
             path = shutil.which(binary)
-        rows.append(_binary_row(label, path, link))
+        rows.append(
+            _binary_row(
+                label,
+                path,
+                link,
+                minimum=CLAUDE_MIN_VERSION if binary == "claude" else None,
+            )
+        )
 
     rows.append(
         {
@@ -153,12 +190,13 @@ def gather_report(
                 "AI-written notes)",
             }
         )
-    key_source = "harness login (no API key configured)"
-    if str(config.get("anthropic_api_key_op", "")).strip():
-        key_source = "1Password reference (op://)"
-    elif str(config.get("anthropic_api_key", "")).strip():
-        key_source = "pasted key in add-on config"
-    rows.append({"label": "Anthropic billing", "status": "ok", "detail": key_source})
+    rows.append(
+        {
+            "label": "Harness authentication",
+            "status": "ok",
+            "detail": "Claude Code login",
+        }
+    )
     rows.append(
         {
             "label": "Permission mode",

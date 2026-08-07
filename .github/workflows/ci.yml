@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - uses: astral-sh/setup-uv@v6
+      - name: Install Socket Firewall
+        run: npm install -g sfw
+      - name: Install locked development dependencies
+        run: sfw uv sync --frozen --group dev
+      - name: Run checks
+        env:
+          UV_NO_SYNC: "1"
+        run: make check

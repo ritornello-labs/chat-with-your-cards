@@ -15,7 +15,12 @@ permissions needed) and writes JSON to `$ANKI_ADDON_WORKBENCH_RESULT`.
     make test-gui-smoke-docker
 
 Builds the workbench-generated `Dockerfile` (Anki launcher + Xvfb) and runs
-the smoke inside it. Regenerate the Dockerfile after workbench upgrades with
+the smoke inside it on Anki 25.09. To verify another release during a future
+compatibility expansion, pass its exact version, for example:
+
+    make test-gui-smoke-docker ANKI_VERSION=25.07.5
+
+Regenerate the Dockerfile after workbench upgrades with
 `uv run --group dev anki-workbench dockerfile --out tests/gui_smoke/Dockerfile`.
 
 For the stable README/demo captures, set `CWYC_PUBLIC_SCREENSHOT=1` and pass an

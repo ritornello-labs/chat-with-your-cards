@@ -22,6 +22,20 @@ exclude-newer-package = { anki-addon-workbench = "2026-07-04" }
 [tool.uv.pip]
 exclude-newer = "7 days"
 
+[tool.anki-addon-release]
+source_dir = "chat_with_your_cards"
+manifest = "chat_with_your_cards/manifest.json"
+artifact_dir = "dist"
+artifact_name = "chat-with-your-cards.ankiaddon"
+include = ["*.py", "manifest.json", "config.json", "config.md", "_vendor", "backends", "tools", "web"]
+exclude = ["__pycache__", "*.pyc", "user_files"]
+
+[tool.anki-addon-release.ankiweb]
+listing_file = "release/ankiweb.md"
+changelog_file = "CHANGELOG.md"
+login_email_env = "ANKIWEB_EMAIL"
+login_password_env = "ANKIWEB_PASSWORD"
+
 [tool.anki-addon-workbench]
 project_name = "Chat With Your Cards"
 addon_package = "chat_with_your_cards"
@@ -40,7 +54,6 @@ include = [
     "search_terms.py",
     "deferral.py",
     "doctor.py",
-    "keys.py",
     "transcripts.py",
     "proposals.py",
     "preview_window.py",

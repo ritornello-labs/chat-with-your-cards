@@ -179,13 +179,6 @@
   to the chat, this add-on, or your collection) with a CSP that blocks all
   network access — display only. The toggle is about consent and surface
   area, not the security boundary. Applies immediately, mid-chat included.
-- `anthropic_api_key` / `openai_api_key` (default empty): paste an API key to
-  bill usage to it instead of the agent's own login. Stored in Anki's
-  plain-text add-on config - the less-secure option.
-- `anthropic_api_key_op` / `openai_api_key_op` (default empty): a 1Password
-  reference (`op://Vault/Item/field`) resolved via the `op` CLI when the
-  agent starts; the secret never touches disk. Takes precedence over the
-  pasted key.
 - `permission_mode` (default `default`): `default` allows collection reads without
   asking and gates all writes behind proposal cards; `read-only` removes the
   write tools entirely; `ask-each-read` additionally shows an inline

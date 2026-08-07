@@ -26,6 +26,9 @@ class FixtureScriptsTest(unittest.TestCase):
                 "long",
                 "propose",
                 "public_propose",
+                "create_filtered_deck",
+                "rebuild_filtered_decks",
+                "move_cards",
             },
             set(SCRIPTS),
         )
@@ -62,6 +65,22 @@ class FixtureScriptsTest(unittest.TestCase):
         self.assertIs(SCRIPTS["tool"], select_script("please run a TOOL demo"))
         self.assertIs(SCRIPTS["long"], select_script("give me the long version"))
         self.assertIs(SCRIPTS["propose"], select_script("PROPOSE a note for this"))
+        self.assertIs(
+            SCRIPTS["create_filtered_deck"],
+            select_script("Create a filtered deck for Spanish pronunciation"),
+        )
+        self.assertIs(
+            SCRIPTS["rebuild_filtered_decks"],
+            select_script("Rebuild all filtered decks under Focus"),
+        )
+        self.assertIs(
+            SCRIPTS["move_cards"],
+            select_script("Move cards from the inbox deck to the course deck"),
+        )
+        self.assertIs(
+            SCRIPTS["tool"],
+            select_script("Look for cards related to compactness"),
+        )
         self.assertIs(SCRIPTS["default"], select_script("explain this card"))
 
     def test_tool_script_opens_with_a_thinking_phase(self) -> None:

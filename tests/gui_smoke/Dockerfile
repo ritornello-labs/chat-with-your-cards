@@ -43,6 +43,8 @@ RUN apt-get update \
         libxshmfence1 \
         libxtst6 \
         libxslt1.1 \
+        nodejs \
+        npm \
         python3 \
         python3-pip \
         python3-xlib \
@@ -62,16 +64,22 @@ RUN curl -fsSL "${ANKI_LAUNCHER_URL}" -o /tmp/anki-launcher.tar.zst \
     && ln -sf /usr/local/share/anki/anki /usr/local/bin/anki \
     && rm -f /tmp/anki-launcher.tar.zst
 
-RUN printf '\n' | /usr/local/bin/anki >/tmp/anki-launcher-install.log 2>/tmp/anki-launcher-install.err \
+ARG ANKI_VERSION=25.09
+
+RUN if ! printf '2\n%s\n' "${ANKI_VERSION}" | /usr/local/bin/anki >/tmp/anki-launcher-install.log 2>/tmp/anki-launcher-install.err; then \
+        cat /tmp/anki-launcher-install.log /tmp/anki-launcher-install.err; \
+        exit 1; \
+    fi \
     && test -x /root/.local/share/AnkiProgramFiles/.venv/bin/anki \
     && rm -rf /root/.cache/uv
 
-ARG ANKI_ADDON_WORKBENCH_SPEC="anki-addon-workbench[gui]"
+ARG ANKI_ADDON_WORKBENCH_SPEC="anki-addon-workbench[gui]==0.4.2"
 
 # The workbench runs in the system interpreter. Anki itself still runs from the
 # launcher-managed venv below; keep those worlds separate so GUI primitives do
 # not depend on Anki's bundled Python.
-RUN pip3 install --break-system-packages --no-cache-dir "${ANKI_ADDON_WORKBENCH_SPEC}"
+RUN npm install -g sfw \
+    && sfw pip3 install --break-system-packages --no-cache-dir "${ANKI_ADDON_WORKBENCH_SPEC}"
 
 ENV QT_QPA_PLATFORM=xcb
 ENV QTWEBENGINE_CHROMIUM_FLAGS=--no-sandbox

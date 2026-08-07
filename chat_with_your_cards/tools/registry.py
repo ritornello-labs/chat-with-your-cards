@@ -1,7 +1,7 @@
 """Backend-neutral tool registry.
 
 Tools are plain functions with JSON-schema signatures. The MCP server
-(CLI backends) and the future in-process BYOK tool loop are thin
+(CLI backends) are thin
 adapters over this one registry (DESIGN.md section 5). No aqt imports.
 """
 
