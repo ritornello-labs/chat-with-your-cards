@@ -54,11 +54,13 @@ adapters are planned. CWYC does not accept or store API keys.
 - [Claude Code](https://claude.com/claude-code) 2.1.220 or newer, installed and
   signed in through its official CLI.
 
-Download [chat-with-your-cards.ankiaddon](https://github.com/ritornello-labs/chat-with-your-cards/releases/download/v0.1.0/chat-with-your-cards.ankiaddon),
-open it with Anki, and restart Anki when prompted. Open the dock with
-`Ctrl+J` (`Cmd+J` on macOS). If Claude Code is not available, CWYC opens in a
-built-in demonstration mode and shows setup instructions; **Re-check** switches
-to the real backend without restarting Anki.
+Install [Chat With Your Cards from AnkiWeb](https://ankiweb.net/shared/info/1873801775)
+for automatic updates, or download the exact
+[v0.1.0 `.ankiaddon`](https://github.com/ritornello-labs/chat-with-your-cards/releases/download/v0.1.0/chat-with-your-cards.ankiaddon)
+from GitHub. Restart Anki when prompted, then open the dock with `Ctrl+J`
+(`Cmd+J` on macOS). If Claude Code is not available, CWYC opens in a built-in
+demonstration mode and shows setup instructions; **Re-check** switches to the
+real backend without restarting Anki.
 
 Read [PRIVACY.md](PRIVACY.md) before use. CWYC sends the prompts and collection
 context needed for a chat through your installed Claude Code CLI. CWYC itself

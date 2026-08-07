@@ -31,6 +31,7 @@ include = ["*.py", "manifest.json", "config.json", "config.md", "_vendor", "back
 exclude = ["__pycache__", "*.pyc", "user_files"]
 
 [tool.anki-addon-release.ankiweb]
+addon_id = "1873801775"
 listing_file = "release/ankiweb.md"
 changelog_file = "CHANGELOG.md"
 login_email_env = "ANKIWEB_EMAIL"
