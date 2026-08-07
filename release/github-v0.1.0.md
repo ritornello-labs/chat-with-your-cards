@@ -12,6 +12,6 @@ Highlights:
 
 Requirements: Anki 25.09 and Claude Code 2.1.220 or newer. macOS and Linux are the supported platforms for this preview; Windows support is experimental. CWYC uses Claude Code's official login and does not accept API keys.
 
-Install the attached `chat-with-your-cards.ankiaddon` from Anki's add-on installer. Files installed from GitHub releases do not receive Anki's automatic add-on updates; install from AnkiWeb once that listing is available if you want automatic updates.
+Install from [AnkiWeb](https://ankiweb.net/shared/info/1873801775) for automatic updates, or install the attached `chat-with-your-cards.ankiaddon` from Anki's add-on installer. Files installed from GitHub releases do not receive Anki's automatic add-on updates.
 
 See [PRIVACY.md](https://github.com/ritornello-labs/chat-with-your-cards/blob/v0.1.0/PRIVACY.md) and [SECURITY.md](https://github.com/ritornello-labs/chat-with-your-cards/blob/v0.1.0/SECURITY.md) before enabling broader computer or MCP access.
