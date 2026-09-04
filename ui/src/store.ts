@@ -1865,12 +1865,18 @@ export class ChatStore {
     this.isRunning = false;
     this.hasUnread = false;
     this.usage = null;
-    if (this.ui.learning?.automationNudge) {
-      this.ui = {
-        ...this.ui,
-        learning: { ...this.ui.learning, automationNudge: false },
-      };
-    }
+    this.pendingSupersedeId = null;
+    this.ui = {
+      ...this.ui,
+      ledger: { sessionTag: "", entries: [] },
+      notice: null,
+      activeProposalId: null,
+      attachments: [],
+      pendingProposals: [],
+      learning: this.ui.learning
+        ? { ...this.ui.learning, automationNudge: false }
+        : null,
+    };
     this.emit();
   }
 

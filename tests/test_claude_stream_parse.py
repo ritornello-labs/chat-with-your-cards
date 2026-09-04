@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from chat_with_your_cards.backends import (  # noqa: E402
     Done,
     ErrorEvent,
+    NoticeEvent,
     TextDelta,
     ThinkingDelta,
     ToolCallFinished,
@@ -32,6 +33,12 @@ class ParseStreamLineTest(unittest.TestCase):
         )
         self.assertEqual([], events)
         self.assertEqual("abc-123", self.state.session_id)
+
+    def test_compact_boundary_surfaces_confirmation(self) -> None:
+        events = parse_stream_line(
+            {"type": "system", "subtype": "compact_boundary"}, self.state
+        )
+        self.assertEqual([NoticeEvent("Conversation compacted.")], events)
 
     def test_text_delta(self) -> None:
         events = parse_stream_line(

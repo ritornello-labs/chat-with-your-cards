@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -22,6 +23,14 @@ from .backends.claude_cli import ClaudeCliBackend, find_claude_cli
 from .context import build_card_block, extract_card_info, wrap_user_message
 
 BACKEND_ENV = "CWYC_BACKEND"
+
+# These SDK-dispatchable session commands operate on Claude's conversation,
+# not on the current Anki card. Sending card or proposal context with them is
+# wasteful and can change their argument parsing. Other slash-prefixed input
+# may be a user skill; it still receives context, but the slash command must
+# remain the first bytes of the message for Claude Code to recognize it.
+CONTEXT_FREE_SLASH_COMMANDS = {"/compact", "/context", "/cost", "/stats", "/usage"}
+MAX_PENDING_DECISION_CONTEXT_CHARS = 16_000
 
 
 def _setup_platform() -> str:
@@ -88,6 +97,7 @@ class ChatController:
         self._transcripts = transcripts
         self._assistant_buffer = ""
         self._pending_resume: str | None = None
+        self._pending_proposal_decisions: list[dict[str, Any]] = []
         self._backend: Any = None
         self._backend_notice_sent = False
         self._session: Any = None
@@ -222,17 +232,80 @@ class ChatController:
         self.ensure_ready()
         if self._transcripts is not None:
             self._transcripts.record({"type": "user_message", "text": text})
-        card_block, label = self._context_for_send()
+        slash_command = text.split(maxsplit=1)[0].lower() if text.startswith("/") else ""
+        context_free_command = slash_command in CONTEXT_FREE_SLASH_COMMANDS
+        if context_free_command:
+            card_block, label = None, "session command"
+        else:
+            card_block, label = self._context_for_send()
         self._push({"type": "context", "label": label})
         # The collection overview is NOT injected here anymore (design change
         # 2026-07-14): it cost ~8k tokens on the first message of EVERY
         # session whether or not the conversation needed collection
         # structure. The agent now fetches it on demand via the
         # get_collection_overview tool (see context.build_system_prompt).
-        self._session.send(
-            wrap_user_message(text, card_block),
-            self._on_event,
-            extra_blocks=extra_blocks,
+        if context_free_command:
+            outbound = text
+        elif slash_command:
+            # Claude Code only dispatches commands/skills at the start of the
+            # message. Keep the invocation first and pass Anki context as its
+            # following argument material.
+            outbound = text if card_block is None else f"{text}\n\n{card_block}"
+        else:
+            outbound = wrap_user_message(text, card_block)
+        if not context_free_command:
+            decision_context = self._take_proposal_decision_context()
+            if decision_context:
+                outbound = f"{outbound}\n\n{decision_context}"
+        self._session.send(outbound, self._on_event, extra_blocks=extra_blocks)
+
+    def note_proposal_decision(self, decision: dict[str, Any]) -> None:
+        """Queue a manual dock decision for the agent's next real turn.
+
+        Accepting or rejecting a review card is a UI action, not a Claude
+        message. Queueing it avoids an unsolicited assistant response while
+        ensuring the next user message carries the result and any partial
+        field selection the user made.
+        """
+        self._pending_proposal_decisions.append(dict(decision))
+        if len(self._pending_proposal_decisions) > 100:
+            self._pending_proposal_decisions = self._pending_proposal_decisions[-100:]
+
+    def _take_proposal_decision_context(self) -> str:
+        if not self._pending_proposal_decisions:
+            return ""
+        decisions = self._pending_proposal_decisions
+        encoded = json.dumps(decisions, ensure_ascii=False, separators=(",", ":"))
+        if len(encoded) > MAX_PENDING_DECISION_CONTEXT_CHARS:
+            compact = [
+                {
+                    k: (
+                        v[:240]
+                        if isinstance(v, str)
+                        else v[:50]
+                        if isinstance(v, list)
+                        else v
+                    )
+                    for k, v in item.items()
+                    if k != "field_values"
+                }
+                for item in decisions
+            ]
+            encoded = json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
+            while len(encoded) > MAX_PENDING_DECISION_CONTEXT_CHARS and len(compact) > 1:
+                compact.pop(0)
+                encoded = json.dumps(
+                    compact, ensure_ascii=False, separators=(",", ":")
+                )
+        encoded = encoded.replace("</", "<\\/")
+        self._pending_proposal_decisions = []
+        return (
+            "<proposal-decisions>\n"
+            "The user reviewed these proposals in the dock after your previous "
+            "response. They are already resolved; use the outcomes as context "
+            "and do not propose the same changes again.\n"
+            f"{encoded}\n"
+            "</proposal-decisions>"
         )
 
     def send_background_message(self, text: str) -> None:
@@ -306,6 +379,7 @@ class ChatController:
         self._backend = None
         self._last_card_id_sent = None
         self._pending_resume = None
+        self._pending_proposal_decisions = []
         self._assistant_buffer = ""
         self.event_log.clear()
         if self._transcripts is not None:
@@ -353,6 +427,7 @@ class ChatController:
         self._pending_resume = self._transcripts.backend_session_id
         self._assistant_buffer = ""
         self._last_card_id_sent = None
+        self._pending_proposal_decisions = []
         self.event_log.clear()
         if self._proposals is not None:
             self._proposals.new_session()

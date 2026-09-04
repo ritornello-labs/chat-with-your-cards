@@ -4047,10 +4047,10 @@ class ProposalManager:
 
     # ---- user-facing decisions (bridge entry points) ----
 
-    def accept(self, msg: dict[str, Any]) -> None:
+    def accept(self, msg: dict[str, Any]) -> dict[str, Any] | None:
         proposal = self._proposals.get(str(msg.get("id", "")))
         if proposal is None or proposal.status != PENDING:
-            return
+            return None
         if "revision" in msg:
             try:
                 accepted_revision = int(msg.get("revision", 0))
@@ -4064,7 +4064,7 @@ class ProposalManager:
                         "message": f"stale proposal revision {msg.get('revision')}; current revision is {proposal.revision}",
                     }
                 )
-                return
+                return None
         if proposal.kind == "change_set" and proposal.open:
             self._push(
                 {
@@ -4073,7 +4073,7 @@ class ProposalManager:
                     "message": "the assistant is still adding to this change set",
                 }
             )
-            return
+            return None
         direct = bool(msg.get("_direct"))
         # The user may have edited values / narrowed the accepted field set
         # in the proposal card before accepting.
@@ -4103,7 +4103,7 @@ class ProposalManager:
                         "instead if none of it should apply",
                     }
                 )
-                return
+                return None
             removed = len(proposal.items) - len(kept)
             if removed:
                 proposal.items = kept
@@ -4161,12 +4161,12 @@ class ProposalManager:
             self._push(
                 {"type": "proposal_error", "id": proposal.id, "message": str(exc)}
             )
-            return
+            return None
         except Exception as exc:  # backend error outside the chokepoint's reach
             self._push(
                 {"type": "proposal_error", "id": proposal.id, "message": str(exc)}
             )
-            return
+            return None
         self._push(
             {
                 "type": "proposal_resolved",
@@ -4180,6 +4180,33 @@ class ProposalManager:
         self._push_ledger()
         if touched:
             self._after_write(touched)
+        decision: dict[str, Any] = {
+            "proposal_id": proposal.id,
+            "decision": proposal.status,
+            "proposal_kind": proposal.kind,
+            "note_id": proposal.note_id,
+        }
+        if proposal.title:
+            decision["title"] = proposal.title
+        if proposal.op:
+            decision["operation"] = proposal.op
+        if proposal.kind in ("create", "edit"):
+            accepted = msg.get("accepted_fields")
+            names = (
+                [str(name) for name in accepted]
+                if accepted is not None
+                else list(final_fields)
+            )
+            decision["field_values"] = {
+                name: final_fields[name] for name in names if name in final_fields
+            }
+            skipped = [name for name in final_fields if name not in names]
+            if skipped:
+                decision["skipped_fields"] = skipped
+        excluded_items = msg.get("excluded_items")
+        if isinstance(excluded_items, list) and excluded_items:
+            decision["excluded_item_count"] = len(excluded_items)
+        return decision
 
     def _accept_bulk(self, proposal: Proposal) -> list[int]:
         if proposal.op == "rename_tag":
@@ -5625,14 +5652,25 @@ class ProposalManager:
             }
         )
 
-    def reject(self, msg: dict[str, Any]) -> None:
+    def reject(self, msg: dict[str, Any]) -> dict[str, Any] | None:
         proposal = self._proposals.get(str(msg.get("id", "")))
         if proposal is None or proposal.status != PENDING:
-            return
+            return None
         proposal.status = REJECTED
         self._push(
             {"type": "proposal_resolved", "id": proposal.id, "status": REJECTED}
         )
+        decision: dict[str, Any] = {
+            "proposal_id": proposal.id,
+            "decision": REJECTED,
+            "proposal_kind": proposal.kind,
+            "note_id": proposal.note_id,
+        }
+        if proposal.title:
+            decision["title"] = proposal.title
+        if proposal.op:
+            decision["operation"] = proposal.op
+        return decision
 
     def restore(self, msg: dict[str, Any]) -> None:
         """Reactivate a superseded or rejected proposal back to pending review."""

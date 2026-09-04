@@ -1179,8 +1179,11 @@ class CreateFlowTests(unittest.TestCase):
     def test_reject_and_double_decision_ignored(self) -> None:
         manager, col, pushed = make_manager()
         result = manager.submit_create(dict(CREATE_ARGS))
-        manager.reject({"id": result["proposal_id"]})
-        manager.accept({"id": result["proposal_id"]})  # already rejected: no-op
+        decision = manager.reject({"id": result["proposal_id"]})
+        second = manager.accept({"id": result["proposal_id"]})  # already rejected: no-op
+        self.assertEqual("rejected", decision["decision"])
+        self.assertEqual(result["proposal_id"], decision["proposal_id"])
+        self.assertIsNone(second)
         (resolved,) = pushes_of(pushed, "proposal_resolved")
         self.assertEqual(resolved["status"], "rejected")
         self.assertEqual(col._notes, {})
@@ -1394,13 +1397,16 @@ class EditFlowTests(unittest.TestCase):
                 "remove_tags": ["analysis"],
             }
         )
-        manager.accept(
+        decision = manager.accept(
             {
                 "id": result["proposal_id"],
                 "fields": {"Front": "New Q?", "Back": "New A."},
                 "accepted_fields": ["Front"],  # per-field acceptance
             }
         )
+        self.assertEqual("accepted", decision["decision"])
+        self.assertEqual({"Front": "New Q?"}, decision["field_values"])
+        self.assertEqual(["Back"], decision["skipped_fields"])
         note = col.get_note(nid)
         self.assertEqual(note["Front"], "New Q?")
         self.assertEqual(note["Back"], "A.")  # not accepted

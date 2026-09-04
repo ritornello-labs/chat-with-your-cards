@@ -1134,9 +1134,20 @@ def _wire_bridge() -> None:
 
     proposals = state.proposals
     assert proposals is not None
-    bridge.on("proposal_accept", proposals.accept)
+
+    def _accept_proposal(msg: dict[str, Any]) -> None:
+        decision = proposals.accept(msg)
+        if decision is not None:
+            controller.note_proposal_decision(decision)
+
+    def _reject_proposal(msg: dict[str, Any]) -> None:
+        decision = proposals.reject(msg)
+        if decision is not None:
+            controller.note_proposal_decision(decision)
+
+    bridge.on("proposal_accept", _accept_proposal)
     bridge.on("proposal_revise", proposals.revise)
-    bridge.on("proposal_reject", proposals.reject)
+    bridge.on("proposal_reject", _reject_proposal)
     bridge.on("proposal_supersede", proposals.supersede)
     bridge.on("proposal_revert", proposals.revert)
     bridge.on("proposal_readd", proposals.readd)

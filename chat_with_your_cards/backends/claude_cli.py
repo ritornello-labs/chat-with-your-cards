@@ -27,6 +27,7 @@ from .base import (
     Done,
     ErrorEvent,
     EventCallback,
+    NoticeEvent,
     PermissionDenied,
     TextDelta,
     ThinkingDelta,
@@ -213,6 +214,8 @@ def parse_stream_line(obj: dict[str, Any], state: ParserState) -> list[ChatEvent
     if kind == "system":
         if obj.get("subtype") == "init":
             state.session_id = obj.get("session_id") or state.session_id
+        if obj.get("subtype") == "compact_boundary":
+            return [NoticeEvent("Conversation compacted.")]
         return []
 
     if kind == "stream_event":

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Preserve slash-command and skill invocation at the start of outbound Claude
+  messages, and show a confirmation when `/compact` completes.
+- Carry manual proposal accept/reject outcomes into the agent's next real turn,
+  including partial field decisions, without generating an unsolicited reply.
+- Clear the old chat's change ledger and other chat-scoped review state when a
+  new chat starts.
+
 ## 0.1.0 — 2026-08-06
 
 Initial public preview.

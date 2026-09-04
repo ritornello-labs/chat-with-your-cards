@@ -94,6 +94,13 @@ class UsageUpdate:
 
 
 @dataclass(frozen=True)
+class NoticeEvent:
+    """Transient, non-conversational feedback from the backend harness."""
+
+    text: str
+
+
+@dataclass(frozen=True)
 class Done:
     pass
 
@@ -125,6 +132,7 @@ ChatEvent = Union[
     ToolCallFinished,
     ProposalRequest,
     UsageUpdate,
+    NoticeEvent,
     Done,
     ErrorEvent,
     PermissionDenied,
@@ -171,6 +179,8 @@ def event_to_dict(event: ChatEvent) -> dict[str, Any]:
             "context_window": event.context_window,
             "fast_mode_state": event.fast_mode_state,
         }
+    if isinstance(event, NoticeEvent):
+        return {"type": "notice", "text": event.text}
     if isinstance(event, Done):
         return {"type": "done"}
     if isinstance(event, ErrorEvent):

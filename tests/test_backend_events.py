@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from chat_with_your_cards.backends import (  # noqa: E402
     Done,
     ErrorEvent,
+    NoticeEvent,
     PermissionDenied,
     TextDelta,
     ThinkingDelta,
@@ -106,6 +107,12 @@ class EventToDictTest(unittest.TestCase):
             event_to_dict(ErrorEvent("backend exploded")),
         )
 
+    def test_notice(self) -> None:
+        self.assertEqual(
+            {"type": "notice", "text": "Conversation compacted."},
+            event_to_dict(NoticeEvent("Conversation compacted.")),
+        )
+
     def test_permission_denied(self) -> None:
         self.assertEqual(
             {
@@ -127,6 +134,7 @@ class EventToDictTest(unittest.TestCase):
             ToolCallFinished("call-1", False, "boom"),
             Done(),
             ErrorEvent("nope"),
+            NoticeEvent("done"),
         ]
         for event in events:
             with self.subTest(event=event):
