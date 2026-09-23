@@ -6,11 +6,19 @@ support_url: https://github.com/ritornello-labs/chat-with-your-cards
 
 Chat With Your Cards adds a review-aware AI assistant beside Anki. Ask about the current card, search your collection for prerequisites and related notes, inspect study history, and review proposed changes before anything is applied.
 
-![Request a focused companion card beside the reviewer](https://ritornello.dev/media/ankiweb/2026-08-06-v4/chat-with-your-cards/gallery-01.png)
+![Request a focused companion card beside the reviewer](https://ritornello.dev/media/ankiweb/2026-09-23-v5/chat-with-your-cards/gallery-01.png)
 
-![Review the proposed front, back, deck, and tags](https://ritornello.dev/media/ankiweb/2026-08-06-v4/chat-with-your-cards/gallery-02.png)
+![Review the proposed front, back, deck, and tags](https://ritornello.dev/media/ankiweb/2026-09-23-v5/chat-with-your-cards/gallery-02.png)
 
-[3.4-second full-resolution workflow MP4](https://ritornello.dev/media/ankiweb/2026-08-06-v4/chat-with-your-cards/demo.mp4)
+![Create a filtered deck from a request](https://ritornello.dev/media/ankiweb/2026-09-23-v5/chat-with-your-cards/gallery-03.png)
+
+![Rebuild the filtered decks in your collection](https://ritornello.dev/media/ankiweb/2026-09-23-v5/chat-with-your-cards/gallery-04.png)
+
+![Move cards to another deck with a reviewable action](https://ritornello.dev/media/ankiweb/2026-09-23-v5/chat-with-your-cards/gallery-05.png)
+
+![Find cards related to a topic](https://ritornello.dev/media/ankiweb/2026-09-23-v5/chat-with-your-cards/gallery-06.png)
+
+[3.4-second workflow MP4](https://ritornello.dev/media/ankiweb/2026-09-23-v5/chat-with-your-cards/demo.mp4)
 
 ## Requirements
 
