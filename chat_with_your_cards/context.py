@@ -171,7 +171,7 @@ def build_system_prompt(
     ]
     if permission_mode == "read-only":
         parts.append(
-            "\nThis session is read-only: do not attempt any modification."
+            "\nCollection is read-only; add-on settings still need review."
         )
     else:
         parts.append(

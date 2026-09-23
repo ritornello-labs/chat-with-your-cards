@@ -21,6 +21,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Callable
 
 from . import contract, invariants
+from .addon_settings import NEW_CHAT_KEYS, normalize_changes
 
 AI_TAG = "ai-created"
 AI_EDIT_TAG = "ai-edited"
@@ -399,7 +400,7 @@ class _WriteResult:
 @dataclass
 class Proposal:
     id: str
-    kind: str  # "create" | "edit" | "bulk" | "delete" | "change_set" | "deck_op" | "note_type_op" | "skill_update" | "skill_create"
+    kind: str  # "create" | "edit" | "bulk" | "delete" | "change_set" | "deck_op" | "note_type_op" | "skill_update" | "skill_create" | "addon_settings"
     note_type: str
     deck: str
     tags: list[str]
@@ -580,6 +581,7 @@ class ProposalManager:
         apply_skill: Callable[["Proposal"], list[str]] | None = None,
         after_deck_change: Callable[[], None] | None = None,
         apply_skill_create: Callable[["Proposal"], list[str]] | None = None,
+        write_addon_settings: Callable[[dict[str, Any], dict[str, Any]], None] | None = None,
         list_skill_names: Callable[[], set[str]] | None = None,
         media_staging: Any | None = None,
         sync_now: Any | None = None,
@@ -634,6 +636,9 @@ class ProposalManager:
         # note - this only ever runs from an accepted proposal). Returns
         # warnings/notes to show on the resolved card.
         self._apply_skill_create = apply_skill_create
+        # Persists an accepted/reverted add-on setting change after checking
+        # that the values still match the proposal's expected state.
+        self._write_addon_settings = write_addon_settings
         # Lists the names of skills that already exist under agent-home, so
         # submit_skill_create can reject a colliding name before a proposal
         # card is even shown. None (e.g. in tests that don't care) means no
@@ -3610,6 +3615,73 @@ class ProposalManager:
             "every future session.",
         }
 
+    def submit_set_addon_settings(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Stage validated self-configuration for explicit human review.
+
+        Collection access modes, including Full collection, never auto-apply
+        this operation: changing the agent's own power is a separate decision.
+        """
+        try:
+            changes = normalize_changes(args.get("settings"), self._config)
+        except ValueError as exc:
+            raise ProposalError(str(exc)) from None
+        priors = {name: copy.deepcopy(self._config.get(name)) for name in changes}
+        warnings = []
+        if NEW_CHAT_KEYS.intersection(changes):
+            warnings.append("Web access and MCP server scope take effect in the next new chat")
+        if changes.get("agent_tools") in {"acceptEdits", "auto", "full"}:
+            warnings.append(
+                "This enables the assistant's shell/file tools; untrusted card "
+                "content could influence commands run on this computer"
+            )
+        if changes.get("permission_mode") in {
+            "auto-accept", "trusted-writes", "full-collection"
+        }:
+            warnings.append(
+                "This permits some Anki collection changes without individual "
+                "review; Full collection includes destructive changes"
+            )
+        if (
+            self._config.get("permission_mode") == "read-only"
+            and changes.get("permission_mode") not in {None, "read-only"}
+        ):
+            warnings.append(
+                "Restart Anki to advertise newly available collection-write "
+                "tools; server-side permissions change immediately"
+            )
+        if changes.get("skill_update_policy") == "automatic":
+            warnings.append("Future learned-skill updates may apply without review")
+        if changes.get("mcp_inherit_user") is True:
+            warnings.append("Future chats may access user-configured MCP servers")
+        proposal = Proposal(
+            id=self._next_id(),
+            kind="addon_settings",
+            note_type="",
+            deck="",
+            tags=[],
+            fields={},
+            title="Change Chat With Your Cards settings",
+            rationale=str(args.get("rationale", "")),
+            op="set_addon_settings",
+            op_args={"changes": changes, "priors": priors},
+            count=len(changes),
+            samples=[
+                {"label": name, "old": repr(priors[name]), "new": repr(value)}
+                for name, value in changes.items()
+            ],
+            warnings=warnings,
+            requires_confirmation=True,
+            revertible=True,
+        )
+        self._proposals[proposal.id] = proposal
+        self._push({"type": "proposal", "proposal": proposal.to_payload()})
+        return {
+            "status": "pending_user_review",
+            "proposal_id": proposal.id,
+            "affected": len(changes),
+            "warnings": warnings,
+        }
+
     # ---- change sets: many small edits reviewed as one unit ----
 
     def open_change_set(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -4153,6 +4225,22 @@ class ProposalManager:
                 if self._apply_skill_create is None:
                     raise ProposalError("creating new skills is not available")
                 proposal.warnings = self._apply_skill_create(proposal)
+                proposal.status = ACCEPTED
+            elif proposal.kind == "addon_settings":
+                if self._write_addon_settings is None:
+                    raise ProposalError("add-on settings are not available")
+                changes = proposal.op_args["changes"]
+                priors = proposal.op_args["priors"]
+                self._write_addon_settings(changes, priors)
+                self._ledger.append(
+                    LedgerEntry(
+                        id=proposal.id,
+                        kind="addon_settings",
+                        note_id=0,
+                        label=f"change {len(changes)} add-on setting(s)",
+                        data={"priors": priors, "written": changes},
+                    )
+                )
                 proposal.status = ACCEPTED
             else:
                 raise ProposalError(f"unknown proposal kind {proposal.kind!r}")
@@ -5882,7 +5970,8 @@ class ProposalManager:
                 {"type": "proposal_resolved", "id": proposal.id, "status": UNDONE}
             )
         self._push_ledger()
-        self._after_write([entry.note_id])
+        if entry.note_id:
+            self._after_write([entry.note_id])
 
     def undo_session(self) -> None:
         errors = 0
@@ -5917,7 +6006,9 @@ class ProposalManager:
                 }
             )
         self._push_ledger()
-        self._after_write([e.note_id for e in self._ledger])
+        note_ids = [e.note_id for e in self._ledger if e.note_id]
+        if note_ids:
+            self._after_write(note_ids)
 
     @staticmethod
     def _diverged(
@@ -5966,6 +6057,19 @@ class ProposalManager:
         )
 
     def _revert_entry(self, entry: LedgerEntry, force: bool = False) -> None:
+        if entry.kind == "addon_settings":
+            if self._write_addon_settings is None:
+                raise ProposalError("add-on settings are not available")
+            try:
+                self._write_addon_settings(entry.data["priors"], entry.data["written"])
+            except ProposalError as exc:
+                if not force:
+                    raise StaleRevert(str(exc)) from None
+                # A later settings change may be intentional. The user can
+                # explicitly choose Undo anyway from the conflict card.
+                self._write_addon_settings(entry.data["priors"], {})
+            entry.undone = True
+            return
         col = self._col()
         if not entry.revertible:
             raise ProposalError(

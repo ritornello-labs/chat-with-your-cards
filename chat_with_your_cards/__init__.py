@@ -777,6 +777,7 @@ def _setup() -> None:
         apply_skill=_apply_skill_update,
         after_deck_change=_refresh_deck_ui,
         apply_skill_create=_apply_new_skill,
+        write_addon_settings=_write_addon_settings,
         list_skill_names=_agent_skill_names,
         media_staging=_build_media_staging(),
         sync_now=lambda: mw.onSync(),
@@ -926,7 +927,12 @@ def _ensure_mcp() -> tuple[str, str]:
             # This is what makes runtime mode switching sound.
             spec = specs_by_name.get(name)
             live_mode = str(state.config.get("permission_mode", "default"))
-            if spec is not None and spec.writes and live_mode == "read-only":
+            if (
+                spec is not None
+                and spec.writes
+                and not spec.available_read_only
+                and live_mode == "read-only"
+            ):
                 raise PermissionError(
                     "this session is read-only; the user must switch the "
                     "permission mode to allow writes"
@@ -1420,6 +1426,45 @@ def _set_setting(msg: dict[str, Any]) -> None:
     _push_settings()
     if key.startswith("learning_") or key == "skill_update_policy":
         _push_learning_state()
+
+
+def _write_addon_settings(
+    changes: dict[str, Any], expected: dict[str, Any]
+) -> None:
+    """Persist an accepted chat proposal and refresh the running add-on.
+
+    The expected values guard against accepting an old card after settings
+    changed through the UI or Anki's Config editor. An empty expected dict is
+    used only by the review card's explicit Undo anyway action.
+    """
+    from .proposals import ProposalError
+
+    persisted = mw.addonManager.getConfig(__name__) or {}
+    merged = {**DEFAULT_CONFIG, **persisted}
+    stale = [name for name, old in expected.items() if merged.get(name) != old]
+    if stale:
+        raise ProposalError(
+            f"{', '.join(stale)} changed since this proposal was made; "
+            "review the current setting before overwriting it"
+        )
+    updated = {**persisted, **changes}
+    controller = state.controller
+    if controller is not None:
+        # Match the dock's own settings handlers: switch the live session
+        # before writeConfig can trigger Anki's config-updated callback and
+        # replace state.config, which would hide the change from the controller.
+        if {"model", "effort", "fast_mode", "agent_tools"}.intersection(changes):
+            next_config = {**merged, **changes}
+            controller.set_agent_config(
+                str(next_config.get("model", "")),
+                str(next_config.get("effort", "")),
+                bool(next_config.get("fast_mode", False)),
+                str(next_config.get("agent_tools", "sandbox")),
+            )
+        if "permission_mode" in changes:
+            controller.set_permission_mode(str(changes["permission_mode"]))
+    mw.addonManager.writeConfig(__name__, updated)
+    _on_config_updated()
 
 
 def _on_config_updated(*_args: Any) -> None:

@@ -54,6 +54,7 @@ const OP_LABELS: Record<string, string> = {
   change_note_type: "Change note type",
   remove_empty_cards: "Empty cards",
   set_preferences: "Preferences",
+  set_addon_settings: "Chat settings",
   import_csv: "CSV import",
 };
 
@@ -79,6 +80,7 @@ const COUNT_NOUNS: Record<string, [string, string]> = {
   change_note_type: ["note", "notes"],
   remove_empty_cards: ["card", "cards"],
   set_preferences: ["setting", "settings"],
+  set_addon_settings: ["setting", "settings"],
   find_replace: ["note", "notes"],
   rename_tag: ["note", "notes"],
   // skill_update counts the OBSERVED EDITS behind the suggestion, not notes.

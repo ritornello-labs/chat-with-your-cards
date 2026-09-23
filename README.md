@@ -75,6 +75,8 @@ does not collect telemetry.
   collection into every prompt.
 - Fetch card images as actual visual inputs rather than passing filenames.
 - Propose new notes and edits with deck, tag, note-type, and field constraints.
+- Read and change this add-on's own common settings through chat; every change
+  needs approval in the dock, including in trusted collection modes.
 - Render the note's real card templates before a proposed change is accepted.
 - Show per-field diffs, detect stale edits, and support per-change or
   whole-session rollback.

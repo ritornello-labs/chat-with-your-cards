@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add `get_addon_settings` and proposal-gated `set_addon_settings` so chat can
+  configure common add-on preferences without opening the JSON editor. The
+  tools remain available when collection writes are disabled; sensitive and
+  advanced configuration stays outside the chat-editable allowlist.
 - Preserve slash-command and skill invocation at the start of outbound Claude
   messages, and show a confirmation when `/compact` completes.
 - Carry manual proposal accept/reject outcomes into the agent's next real turn,

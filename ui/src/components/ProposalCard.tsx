@@ -83,6 +83,7 @@ const KIND_LABELS: Record<string, string> = {
   deck_op: "Deck change",
   note_type_op: "Note type change",
   skill_update: "Skill update",
+  addon_settings: "Add-on settings",
 };
 
 const STATUS_LABELS: Record<string, string> = {

@@ -48,6 +48,7 @@ class ToolSpec:
     input_schema: dict[str, Any]
     func: ToolFunc
     writes: bool = False
+    available_read_only: bool = False  # non-collection changes with separate review
     trusted_only: bool = False  # advertised only in direct-write collection modes
     # Accepted but deliberately NOT advertised in input_schema - aliases kept
     # working for compatibility without inviting their use (propose_note_edit
@@ -80,7 +81,7 @@ class ToolRegistry:
         return [
             spec
             for spec in self._specs.values()
-            if (include_writes or not spec.writes)
+            if (include_writes or not spec.writes or spec.available_read_only)
             and (include_trusted or not spec.trusted_only)
         ]
 

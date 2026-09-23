@@ -227,6 +227,23 @@ Guards (both ignore-and-log, never a hard error): a user-supplied `mcp_servers["
 - Implementation notes (2026-07-04; policy extended 2026-08-05): `rename_tag` / `find_replace` / `move_cards` / `delete_notes` (direct-write tiers only; delete is non-ledger-revertible and requires a backup; Trusted writes confirms it, Full collection applies it) plus `open_change_set` / `add_to_change_set` / `close_change_set`. Change-set accept ports the workspace's AnkiConnect safety patterns: per-item staleness snapshots (the `pushedHash` idea — changed notes are skipped and reported, never overwritten blind) and a before/after note/card-count comparison that surfaces unexpected drift (e.g. conditional-card activation) as warnings on the resolved card. Bulk applies force `col.create_backup` first. Both direct-write tiers consume a per-session `write_budget` (default 200 notes); exhaustion falls back to gated proposals with a notice.
 - Rationale vs. raw AnkiConnect / third-party Anki MCP proxies: a power user can always bypass us, so the top sanctioned tier must be strictly better — undo/ledger integration, session grouping, backup checkpoints, injection-aware gating — leaving no reason to route around the add-on.
 
+### Self-configuration through chat (2026-09-22)
+
+`get_addon_settings` exposes only a documented allowlist of ordinary add-on
+preferences. `set_addon_settings` validates types and ranges and creates an
+`addon_settings` proposal with old/new values. Its apply callback compares the
+persisted current values before writing Anki's add-on config, refreshes live
+preferences, and uses the controller's existing next-message model/tool-mode
+switching path. The ledger can revert an accepted change with the same stale
+check. This path never calls the Anki collection, and never auto-applies under
+Trusted writes or Full collection: changing the assistant's own access is a
+separate human decision. It is advertised in Read-only collection mode through
+`ToolSpec.available_read_only`, while other collection writes remain gated.
+Secrets, custom instructions, paths, arbitrary MCP definitions, and shortcut
+maps are excluded. Web access/MCP inheritance requires a new chat; expanding
+out of Read-only may need an Anki restart for the CLI's advertised tool list
+to refresh, although the server checks every call against the live mode.
+
 ## 6. Stats cache
 
 - Background job every N minutes (default 30, configurable) and on demand (manual refresh button; debounced hooks on sync/deck changes).

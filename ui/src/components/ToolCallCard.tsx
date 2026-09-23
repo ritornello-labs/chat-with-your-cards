@@ -94,6 +94,8 @@ const TOOL_LABELS: Record<string, string> = {
   fsrs_optimal_retention: "Computed optimal retention",
   get_preferences: "Read your Anki preferences",
   set_preferences: "Proposed preference changes",
+  get_addon_settings: "Read chat settings",
+  set_addon_settings: "Proposed chat setting changes",
   defer_card: "Buried a card",
   undefer_card: "Unburied a card",
 };

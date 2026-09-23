@@ -1,5 +1,16 @@
 # Chat With Your Cards — configuration
 
+The assistant can read and propose changes to common add-on preferences with
+`get_addon_settings` and `set_addon_settings`. Every proposed change is shown
+as a diff and requires your approval in the dock, even in Trusted writes or
+Full collection mode. The settings tool also works when collection access is
+Read-only. It covers appearance, reviewing controls, model/effort, access modes,
+web access, and a few learning/budget options. Secrets, custom instructions,
+shortcuts, paths, and arbitrary MCP server definitions stay in Anki's add-on
+Config editor. Web access and inherited MCP scope take effect in a new chat;
+switching out of Read-only mode may require restarting Anki before newly
+available collection-write tools appear in the assistant's tool list.
+
 - `toggle_shortcut` (default `Ctrl+J`, shown as Cmd+J on macOS): context-aware chord
   that cycles the dock. If the dock is collapsed to its side rail, expands it and
   focuses the message box. If focus is in the chat, collapses the dock back to the
