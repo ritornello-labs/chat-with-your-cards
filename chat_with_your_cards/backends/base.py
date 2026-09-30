@@ -70,7 +70,9 @@ class UsageUpdate:
     ``cache_read_tokens``/``cache_creation_tokens`` mirror the Anthropic API's
     ``cache_read_input_tokens``/``cache_creation_input_tokens`` usage fields
     (see claude_cli.py's ``result`` handling). Together with ``input_tokens``
-    they approximate the size of the context sent on the last turn.
+    they are aggregate request totals, not context occupancy.
+    ``context_tokens`` is the latest main assistant request input, including
+    cache reads and writes; None means occupancy is unavailable.
 
     ``context_window`` is the real per-turn window size the CLI reports in the
     result's ``modelUsage`` map (dogfood 2026-07-13: the stream DOES carry it,
@@ -90,6 +92,7 @@ class UsageUpdate:
     cache_read_tokens: int | None = None
     cache_creation_tokens: int | None = None
     context_window: int | None = None
+    context_tokens: int | None = None
     fast_mode_state: str | None = None
 
 
@@ -177,6 +180,7 @@ def event_to_dict(event: ChatEvent) -> dict[str, Any]:
             "cache_read_tokens": event.cache_read_tokens,
             "cache_creation_tokens": event.cache_creation_tokens,
             "context_window": event.context_window,
+            "context_tokens": event.context_tokens,
             "fast_mode_state": event.fast_mode_state,
         }
     if isinstance(event, NoticeEvent):

@@ -185,6 +185,8 @@ class ParserState:
     # result handler turns it into a clean Done instead of a red ErrorEvent
     # (dogfood 2026-07-15). Consumed (cleared) by that result.
     interrupt_pending: bool = False
+    context_tokens: int | None = None
+    context_model: str | None = None
 
 
 def _text_separator(state: ParserState, index: Any) -> str:
@@ -267,6 +269,14 @@ def parse_stream_line(obj: dict[str, Any], state: ParserState) -> list[ChatEvent
     if kind == "assistant":
         events: list[ChatEvent] = []
         message = obj.get("message") or {}
+        # Result usage sums repeated requests (including tools/subagents).
+        # Only a main assistant message reports one request's occupancy.
+        request_usage = message.get("usage")
+        if not obj.get("parent_tool_use_id") and isinstance(request_usage, dict):
+            keys = ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+            if any(key in request_usage for key in keys):
+                state.context_tokens = sum(request_usage.get(key) or 0 for key in keys)
+                state.context_model = message.get("model")
         unstreamed_text: list[str] = []
         for block in message.get("content") or []:
             if not isinstance(block, dict):
@@ -329,7 +339,7 @@ def parse_stream_line(obj: dict[str, Any], state: ParserState) -> list[ChatEvent
         result_events: list[ChatEvent] = []
         usage = obj.get("usage") or {}
         cost = obj.get("total_cost_usd")
-        window = _context_window_from_result(obj)
+        window = _context_window_from_result(obj, state.context_model)
         fast_state = obj.get("fast_mode_state")
         if cost is not None or usage or window or fast_state:
             result_events.append(
@@ -338,18 +348,19 @@ def parse_stream_line(obj: dict[str, Any], state: ParserState) -> list[ChatEvent
                     input_tokens=usage.get("input_tokens"),
                     output_tokens=usage.get("output_tokens"),
                     # Anthropic API usage field names, not our own invention -
-                    # together with input_tokens these approximate the size of
-                    # the context sent on this turn (base.py's UsageUpdate
-                    # docstring; DESIGN.md section 9).
+                    # These are aggregate totals across requests, not occupancy.
                     cache_read_tokens=usage.get("cache_read_input_tokens"),
                     cache_creation_tokens=usage.get("cache_creation_input_tokens"),
                     # Real per-turn window + effective fast state, straight from
                     # the CLI (dogfood 2026-07-13). window supersedes the
                     # hardcoded table; fast_state verifies fast mode engaged.
                     context_window=window,
+                    context_tokens=state.context_tokens,
                     fast_mode_state=str(fast_state) if fast_state else None,
                 )
             )
+        state.context_tokens = None
+        state.context_model = None
         denials = _permission_denials(obj)
         if denials:
             result_events.append(PermissionDenied(denials=tuple(denials)))
@@ -414,7 +425,7 @@ def context_window_for(model: str) -> int:
     return _CONTEXT_WINDOW_200K
 
 
-def _context_window_from_result(obj: dict[str, Any]) -> int | None:
+def _context_window_from_result(obj: dict[str, Any], model: str | None = None) -> int | None:
     """Pull the real context-window size out of a result's ``modelUsage`` map.
 
     ``modelUsage`` is keyed by resolved model id, each value carrying a
@@ -427,6 +438,13 @@ def _context_window_from_result(obj: dict[str, Any]) -> int | None:
     model_usage = obj.get("modelUsage")
     if not isinstance(model_usage, dict) or not model_usage:
         return None
+    if model:
+        entry = model_usage.get(model)
+        window = entry.get("contextWindow") if isinstance(entry, dict) else None
+        if isinstance(window, int) and window > 0:
+            return window
+        # Never choose another model's window for a known main model.
+        return context_window_for(model)
     best_window: int | None = None
     best_tokens = -1
     for entry in model_usage.values():

@@ -76,6 +76,7 @@ class EventToDictTest(unittest.TestCase):
                 "cache_read_tokens": 500_000,
                 "cache_creation_tokens": 12_000,
                 "context_window": 1_000_000,
+                "context_tokens": None,
                 "fast_mode_state": "on",
             },
             event_to_dict(

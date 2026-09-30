@@ -440,6 +440,41 @@ class ParseStreamLineTest(unittest.TestCase):
         self.assertIsNone(usage.cache_creation_tokens)
         self.assertIsInstance(events[1], Done)
 
+    def test_context_uses_latest_main_request_not_aggregate_or_subagent(self) -> None:
+        from chat_with_your_cards.backends import UsageUpdate
+
+        for cached in (100000, 120000):
+            parse_stream_line({
+                "type": "assistant",
+                "message": {"model": "claude-opus-4-8", "content": [],
+                            "usage": {"input_tokens": 1000,
+                                      "cache_read_input_tokens": cached,
+                                      "cache_creation_input_tokens": 2000}},
+            }, self.state)
+        parse_stream_line({
+            "type": "assistant", "parent_tool_use_id": "subagent",
+            "message": {"model": "claude-haiku-4-5", "content": [],
+                        "usage": {"input_tokens": 190000}},
+        }, self.state)
+        events = parse_stream_line({
+            "type": "result", "subtype": "success",
+            "usage": {"input_tokens": 4000, "cache_read_input_tokens": 534000},
+            "modelUsage": {
+                "claude-haiku-4-5": {"contextWindow": 200000, "inputTokens": 900000},
+                "claude-opus-4-8": {"contextWindow": 1000000, "inputTokens": 1000},
+            },
+        }, self.state)
+        usage = events[0]
+        assert isinstance(usage, UsageUpdate)
+        self.assertEqual(123000, usage.context_tokens)
+        self.assertEqual(1000000, usage.context_window)
+        self.assertEqual(4000, usage.input_tokens)
+        self.assertIsNone(self.state.context_tokens)
+        next_usage = parse_stream_line({
+            "type": "result", "subtype": "success", "usage": {"input_tokens": 10},
+        }, self.state)[0]
+        self.assertIsNone(next_usage.context_tokens)
+
     def test_result_usage_surfaces_cache_token_fields(self) -> None:
         from chat_with_your_cards.backends import UsageUpdate
 

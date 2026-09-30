@@ -1170,6 +1170,7 @@ export function installDevReplayer(): void {
               output_tokens: 260,
               cache_read_tokens: 612_000,
               cache_creation_tokens: 15_000,
+              context_tokens: 628_840,
               // Real per-turn window straight from the CLI (dogfood 2026-07-13):
               // ~629k used / 1M window ~= 63%, not the 100% the 200k default
               // table would falsely show for the unpinned model.

@@ -218,6 +218,7 @@ export interface UsageSnapshot {
   // footer prefers it over the hardcoded contextWindow.ts table. null on
   // scripted/older backends that don't report it.
   readonly contextWindow: number | null;
+  readonly contextTokens?: number | null;
   // CLI's ground-truth "on"/"off": whether fast mode actually engaged.
   readonly fastState: string | null;
 }
@@ -1840,6 +1841,7 @@ export class ChatStore {
       cacheReadTokens: event.cache_read_tokens ?? null,
       cacheCreationTokens: event.cache_creation_tokens ?? null,
       contextWindow: event.context_window ?? null,
+      contextTokens: event.context_tokens ?? null,
       fastState: event.fast_mode_state ?? null,
     };
     this.emit();

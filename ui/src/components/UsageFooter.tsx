@@ -30,13 +30,9 @@ export function UsageFooter({ usage, model }: { usage: UsageSnapshot | null; mod
     parts.push(tokens >= 1000 ? Math.round(tokens / 1000) + "k tokens" : tokens + " tokens");
   }
 
-  // Context used ~= the size of the last turn's request context: input plus
-  // whatever it read from/wrote to the prompt cache (base.py's UsageUpdate
-  // docstring). There is no cumulative summing across turns here - each
-  // turn's own input_tokens already reflects the full, growing conversation
-  // sent as that call's input.
-  const contextUsed =
-    (usage.inputTokens ?? 0) + (usage.cacheReadTokens ?? 0) + (usage.cacheCreationTokens ?? 0);
+  // Aggregate result totals include repeated requests, so never use them
+  // as occupancy. Older backends without a request snapshot omit the bar.
+  const contextUsed = usage.contextTokens ?? 0;
   // Prefer the CLI's real reported window; fall back to the per-model table.
   const window =
     usage.contextWindow && usage.contextWindow > 0 ? usage.contextWindow : contextWindowFor(model);

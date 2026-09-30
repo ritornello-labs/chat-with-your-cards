@@ -297,8 +297,8 @@ export interface GradingEvent {
  * cache_read_tokens/cache_creation_tokens mirror the Anthropic API's
  * cache_read_input_tokens/cache_creation_input_tokens usage fields
  * (backends/claude_cli.py's result handling; backends/base.py's
- * UsageUpdate). Together with input_tokens they approximate the size of
- * the context sent on the last turn.
+ * UsageUpdate). These are aggregate request totals. context_tokens is
+ * the latest main request occupancy, including cache reads and writes.
  *
  * context_window is the real per-turn window the CLI reports (modelUsage);
  * when present the footer prefers it over the hardcoded contextWindow.ts
@@ -313,6 +313,7 @@ export interface UsageEvent {
   cache_read_tokens?: number | null;
   cache_creation_tokens?: number | null;
   context_window?: number | null;
+  context_tokens?: number | null;
   fast_mode_state?: string | null;
 }
 
