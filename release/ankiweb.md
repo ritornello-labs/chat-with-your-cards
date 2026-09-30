@@ -35,3 +35,5 @@ Collection changes use reviewable proposals by default. Destructive operations h
 Messages and collection context needed for a request are processed through your installed Claude Code CLI. CWYC itself collects no telemetry. Read the full [privacy statement](https://github.com/ritornello-labs/chat-with-your-cards/blob/main/PRIVACY.md) and [security model](https://github.com/ritornello-labs/chat-with-your-cards/blob/main/SECURITY.md).
 
 GitHub: [https://github.com/ritornello-labs/chat-with-your-cards](https://github.com/ritornello-labs/chat-with-your-cards)
+
+Support continued development: [ritornello.dev/support](https://ritornello.dev/support).
