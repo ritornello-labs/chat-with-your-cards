@@ -4,6 +4,10 @@ tags: anki addon ai assistant collection study
 support_url: https://github.com/ritornello-labs/chat-with-your-cards
 ---
 
+<img src="https://ritornello.dev/media/brand/listing-banner-v1.png" alt="Ritornello" width="700">
+
+[Explore all Ritornello decks and add-ons](https://ritornello.dev/).
+
 Chat With Your Cards adds a review-aware AI assistant beside Anki. Ask about the current card, search your collection for prerequisites and related notes, inspect study history, and review proposed changes before anything is applied.
 
 ![Request a focused companion card beside the reviewer](https://ritornello.dev/media/ankiweb/2026-09-23-v5/chat-with-your-cards/gallery-01.png)
