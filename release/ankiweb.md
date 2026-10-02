@@ -22,8 +22,6 @@ Chat With Your Cards adds a review-aware AI assistant beside Anki. Ask about the
 
 ![Find cards related to a topic](https://ritornello.dev/media/ankiweb/2026-09-23-v5/chat-with-your-cards/gallery-06.png)
 
-[3.4-second workflow MP4](https://ritornello.dev/media/ankiweb/2026-09-23-v5/chat-with-your-cards/demo.mp4)
-
 ## Requirements
 
 - Anki 25.09.
