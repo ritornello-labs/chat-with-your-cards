@@ -12,11 +12,19 @@ Chat With Your Cards adds a review-aware AI assistant beside Anki. Ask about the
 
 ## See it in Anki
 
-![Find prerequisites and review a proposed companion note in native Anki](https://ritornello.dev/media/ankiweb/2026-10-07-v7/chat-with-your-cards/conversation.gif)
+### Understand a card, then improve its question
 
-![Review and apply an indigo theme change without altering collection notes](https://ritornello.dev/media/ankiweb/2026-10-07-v7/chat-with-your-cards/settings.gif)
+![Type a question, watch the explanation stream, and accept an edit that updates the card front](https://ritornello.dev/media/ankiweb/2026-10-07-v7/chat-with-your-cards/explain-and-edit.gif)
 
-These demonstration conversations run inside real Anki. The assistant can connect a difficult card to related notes and propose a focused companion card for you to review.
+Ask for context on a simple photosynthesis card, then review a more specific question. Accepting the edit immediately updates the card front. The existing note and card are retained.
+
+### Build a focused practice deck
+
+![Type a filtered-deck request, review the streamed reply and proposal, then accept to gather five cards](https://ritornello.dev/media/ankiweb/2026-10-07-v7/chat-with-your-cards/filtered-deck.gif)
+
+Ask for five photosynthesis cards in a filtered deck. Review the search, card limit, and scheduling behaviour before accepting; the new practice deck appears with all five cards gathered and normal rescheduling disabled.
+
+Recorded in real Anki using the built-in demo backend and a disposable collection. Replies stream through the actual chat UI; accepting each proposal applies the real edit or deck action. Typing is sped up and excess still time is trimmed for readability.
 
 ## New in 0.1.1
 

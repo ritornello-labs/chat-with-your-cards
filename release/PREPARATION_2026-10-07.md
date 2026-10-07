@@ -11,11 +11,12 @@ Every listing includes the Ritornello banner, gallery invitation, stable support
 ### Chat With Your Cards
 
 - Listing: `release/ankiweb.md`
-- Copy SHA-256: `adbd13df78816f2ccb47191bb672508781a848001c19c698aee12dae20dbf566`
+- Copy SHA-256: `4b7af4998821c37a78a7170039103305f91093c6f39c4dc62ed093f16c0ce6e2`
 - Candidate SHA-256: `01ae609b58ff4259db3476e6038c58fda06748246d84303b9ada03be2e6b87bb`
 - Approval: awaiting approval
-- GIF `chat-with-your-cards/conversation.gif`: `70ee9a0d9f501e73d0bbdbb1f2354c756dc3a96463b13b48081cd67eb3b77b68`
-- GIF `chat-with-your-cards/settings.gif`: `eeb32c9f1d1c38f4e41edb87e954bfaf2288586cdb667a2cb19087d79df8e27a`
+
+- GIF `chat-with-your-cards/explain-and-edit.gif`: `f27ee89b8c2132bdfbef0ad1226966356783360b38a66dfc8eab67e3413f084f`
+- GIF `chat-with-your-cards/filtered-deck.gif`: `62f3bddeb5db271d07b0601bde430e8e2978678b2585bb4ebb72b55e8bfe4784`
 
 ## Upload procedure
 
@@ -30,3 +31,7 @@ For add-ons installed directly from GitHub release files, release notes must exp
 ## CWYC 0.1.1 verification
 
 48 focused settings/stream/message-context tests and 192 proposal tests passed. Native Anki smoke passed; a separate real settings proposal waited for review, its Accept button applied the indigo theme, and note/card counts remained unchanged. Manifest/package version is 0.1.1; packaged manifest and archive hygiene passed.
+
+## Revised native motion demonstrations
+
+The earlier static-frame conversation and settings examples were rejected. Their replacements show visible native typing, streamed replies, pending review, actual Accept clicks, and the resulting collection UI: a clearer photosynthesis question immediately replaces the card front; a non-rescheduling filtered deck gathers five photosynthesis cards. The built-in demo backend supplies the replies, as disclosed in the listing. All five existing cards and notes remain, with no reviews recorded. Only disposable fixture data was used. Typing is accelerated and excess static time trimmed; streaming remains visible. Fresh approval is required for this exact batch.
