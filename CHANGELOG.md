@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.1 — 2026-10-07
 
 - Add `get_addon_settings` and proposal-gated `set_addon_settings` so chat can
   configure common add-on preferences without opening the JSON editor. The
@@ -12,6 +12,8 @@
   including partial field decisions, without generating an unsolicited reply.
 - Clear the old chat's change ledger and other chat-scoped review state when a
   new chat starts.
+
+- Correct the context-occupancy meter to avoid showing stale session usage.
 
 ## 0.1.0 — 2026-08-06
 

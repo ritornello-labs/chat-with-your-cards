@@ -8,33 +8,37 @@ support_url: https://github.com/ritornello-labs/chat-with-your-cards
 
 [Explore all Ritornello decks and add-ons](https://ritornello.dev/).
 
-Chat With Your Cards adds a review-aware AI assistant beside Anki. Ask about the current card, search your collection for prerequisites and related notes, inspect study history, and review proposed changes before anything is applied.
+Chat With Your Cards adds a review-aware AI assistant beside Anki. Ask about the current card, find prerequisites in your collection, inspect study history, and review proposed changes before applying them.
 
-![Request a focused companion card beside the reviewer](https://ritornello.dev/media/ankiweb/2026-09-23-v5/chat-with-your-cards/gallery-01.png)
+## See it in Anki
 
-![Review the proposed front, back, deck, and tags](https://ritornello.dev/media/ankiweb/2026-09-23-v5/chat-with-your-cards/gallery-02.png)
+![Find prerequisites and review a proposed companion note in native Anki](https://ritornello.dev/media/ankiweb/2026-10-07-v7/chat-with-your-cards/conversation.gif)
 
-![Create a filtered deck from a request](https://ritornello.dev/media/ankiweb/2026-09-23-v5/chat-with-your-cards/gallery-03.png)
+![Review and apply an indigo theme change without altering collection notes](https://ritornello.dev/media/ankiweb/2026-10-07-v7/chat-with-your-cards/settings.gif)
 
-![Rebuild the filtered decks in your collection](https://ritornello.dev/media/ankiweb/2026-09-23-v5/chat-with-your-cards/gallery-04.png)
+These demonstration conversations run inside real Anki. The assistant can connect a difficult card to related notes and propose a focused companion card for you to review.
 
-![Move cards to another deck with a reviewable action](https://ritornello.dev/media/ankiweb/2026-09-23-v5/chat-with-your-cards/gallery-05.png)
+## New in 0.1.1
 
-![Find cards related to a topic](https://ritornello.dev/media/ankiweb/2026-09-23-v5/chat-with-your-cards/gallery-06.png)
+- Ask chat to change common CWYC settings; each settings change waits for your review, even when collection writes are allowed.
+- Slash commands and skill invocations reach Claude Code correctly; `/compact` reports completion.
+- Your accepted, rejected, and partial proposal decisions reach the assistant on your next message.
+- Starting a new chat clears the previous chat's review state.
+- The context meter reports current session occupancy correctly.
 
 ## Requirements
 
-- Anki 25.09.
-- The official [Claude Code](https://claude.com/claude-code) CLI version 2.1.220 or newer, installed and signed in. Claude Code is the only supported AI backend in v0.1.0; Codex and Pi support are planned.
-- macOS or Linux. Windows support is experimental in this preview.
+- Anki 25.09 or newer.
+- The official [Claude Code](https://claude.com/claude-code) CLI, version 2.1.220 or newer, installed and signed in. Claude Code is the supported AI backend in 0.1.1.
+- macOS or Linux. Windows support is experimental.
 
-CWYC does not accept or store API keys. If Claude Code is missing, the add-on opens in a built-in demonstration mode and provides setup instructions plus a no-restart Re-check action.
+If Claude Code is missing, the add-on offers a built-in demonstration mode, setup instructions, and a Re-check action. CWYC does not accept or store API keys.
 
 ## Safety and privacy
 
-Collection changes use reviewable proposals by default. Destructive operations have additional confirmation and backup safeguards. The collection tool server is loopback-only and protected by a random per-session token; shell and file-writing tools are disabled by default.
+Collection changes use reviewable proposals by default. Destructive operations have confirmation and backup safeguards. Shell and file-writing tools are disabled by default.
 
-Messages and collection context needed for a request are processed through your installed Claude Code CLI. CWYC itself collects no telemetry. Read the full [privacy statement](https://github.com/ritornello-labs/chat-with-your-cards/blob/main/PRIVACY.md) and [security model](https://github.com/ritornello-labs/chat-with-your-cards/blob/main/SECURITY.md).
+Messages and collection context needed for a request are processed through your installed Claude Code CLI. CWYC itself collects no telemetry. See the [privacy statement](https://github.com/ritornello-labs/chat-with-your-cards/blob/main/PRIVACY.md) and [security model](https://github.com/ritornello-labs/chat-with-your-cards/blob/main/SECURITY.md).
 
 GitHub: [https://github.com/ritornello-labs/chat-with-your-cards](https://github.com/ritornello-labs/chat-with-your-cards)
 

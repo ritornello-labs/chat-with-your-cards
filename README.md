@@ -44,6 +44,10 @@ safe application/revert path, and real-Anki GUI tests are working. This first
 release is intentionally for technically comfortable users while the supported
 backend set and installation experience broaden.
 
+Version 0.1.1 is prepared for the next release: reviewable chat settings,
+command dispatch and proposal-feedback fixes, clean new-chat state, and a
+corrected context meter. See [the release preparation](release/PREPARATION_2026-10-07.md).
+
 The supported backend is a locally installed, officially authenticated Claude
 Code CLI, connected to the add-on through a loopback MCP server. Codex and Pi
 adapters are planned. CWYC does not accept or store API keys.
