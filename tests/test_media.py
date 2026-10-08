@@ -128,14 +128,14 @@ class SourceExtractionTests(unittest.TestCase):
 
         fields = {
             "Extra": '<a href="https://en.wikipedia.org/wiki/Limit">Wikipedia</a> '
-            "and see /home/example/books/analysis.pdf p.212",
+            "and see /books/analysis.pdf p.212",
             "Text": "plain https://example.com/spec. Also "
             '<img src="data:image/png;base64,AAAA">',
         }
         sources = extract_sources(fields)
         uris = {s["uri"]: s for s in sources}
         self.assertIn("https://en.wikipedia.org/wiki/Limit", uris)
-        self.assertEqual("pdf", uris["/home/example/books/analysis.pdf"]["kind"])
+        self.assertEqual("pdf", uris["/books/analysis.pdf"]["kind"])
         self.assertIn("https://example.com/spec", uris)  # trailing dot stripped
         self.assertFalse(any(u.startswith("data:") for u in uris))
 

@@ -17,3 +17,9 @@ These instructions apply to the `chat-with-your-cards` repository: "Chat With Yo
 - All Anki collection access happens on the main thread (`mw.taskman.run_on_main`); subprocess and MCP I/O stay on background threads.
 - Never write to the collection directly from agent tools; all writes go through the proposal flow. Tag AI-created notes `ai-created`.
 - Sign commits with GPG (`git commit -S`), commit and push regularly.
+
+## Publication safety
+
+Follow `docs/PUBLICATION_PROCESS.md`. Install the shared local hooks before
+public pushes, keep live artifacts outside Git, and check exact release bytes.
+The required hosted publication check emits no private diagnostics.
