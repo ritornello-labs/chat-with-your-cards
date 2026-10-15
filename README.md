@@ -1,11 +1,15 @@
 # Chat With Your Cards
 
+[Explore all Ritornello decks and add-ons](https://ritornello.dev/).
+
 An AI chat dock inside Anki, with the card you are reviewing and the structure
 of your collection available as context.
 
-![Requesting a proposed companion card beside Anki](https://ritornello.dev/media/ankiweb/2026-10-07-v7/chat-with-your-cards/explain-and-edit.gif)
+![Ask for context, watch the reply stream, then approve an edit to the card front](https://ritornello.dev/media/ankiweb/2026-10-07-v7/chat-with-your-cards/explain-and-edit.gif)
 
-[Browse the development-preview gallery](https://ritornello.dev/#chat-with-your-cards).
+![Create a filtered deck through a reviewed proposal](https://ritornello.dev/media/ankiweb/2026-10-07-v7/chat-with-your-cards/filtered-deck.gif)
+
+[Browse the full gallery](https://ritornello.dev/#chat-with-your-cards).
 
 Chat With Your Cards is built for questions that arise while studying: explain
 this card, find related material, inspect the surrounding topic, or propose a
@@ -39,12 +43,12 @@ their product intent.
 
 ## Status
 
-**Public preview, v0.1.0.** The core chat, collection tools, note proposals,
+**Public preview, v0.1.1.** The core chat, collection tools, note proposals,
 safe application/revert path, and real-Anki GUI tests are working. This first
 release is intentionally for technically comfortable users while the supported
 backend set and installation experience broaden.
 
-Version 0.1.1 is prepared for the next release: reviewable chat settings,
+Version 0.1.1 adds reviewable chat settings,
 command dispatch and proposal-feedback fixes, clean new-chat state, and a
 corrected context meter. See [the release preparation](release/PREPARATION_2026-10-07.md).
 
@@ -60,8 +64,8 @@ adapters are planned. CWYC does not accept or store API keys.
 
 Install [Chat With Your Cards from AnkiWeb](https://ankiweb.net/shared/info/1873801775)
 for automatic updates, or download the exact
-[v0.1.0 `.ankiaddon`](https://github.com/ritornello-labs/chat-with-your-cards/releases/download/v0.1.0/chat-with-your-cards.ankiaddon)
-from GitHub. Restart Anki when prompted, then open the dock with `Ctrl+J`
+[v0.1.1 `.ankiaddon`](https://github.com/ritornello-labs/chat-with-your-cards/releases/download/v0.1.1/chat-with-your-cards.ankiaddon)
+from GitHub. File installs do not receive AnkiWeb automatic updates. Restart Anki when prompted, then open the dock with `Ctrl+J`
 (`Cmd+J` on macOS). If Claude Code is not available, CWYC opens in a built-in
 demonstration mode and shows setup instructions; **Re-check** switches to the
 real backend without restarting Anki.
