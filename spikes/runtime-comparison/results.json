@@ -1,0 +1,64 @@
+{
+  "date": "2026-11-02",
+  "fixture": "loopback-only scripted model and synthetic read-only MCP tool",
+  "results": [
+    {
+      "runtime": "claude",
+      "version": "2.1.316",
+      "checks": {
+        "completed_turn": true,
+        "skill_discovery": true,
+        "streaming": true,
+        "mcp_tool_execution": true,
+        "interrupt_acknowledged": true,
+        "head_fork": true
+      },
+      "synthetic_model_requests": 5,
+      "mcp_calls": [
+        "search_notes"
+      ]
+    },
+    {
+      "runtime": "codex",
+      "version": "0.159.0",
+      "checks": {
+        "startup": true,
+        "skill_discovery": true,
+        "completed_turn": true,
+        "streaming": true,
+        "head_fork": true,
+        "resume": true,
+        "historical_fork": true,
+        "mcp_tool_execution": true,
+        "force_reload_skills": true,
+        "interrupt": true
+      },
+      "synthetic_model_requests": 5,
+      "mcp_calls": [
+        "search_notes"
+      ]
+    },
+    {
+      "runtime": "pi",
+      "version": "1.4.0",
+      "checks": {
+        "startup": true,
+        "skill_discovery": true,
+        "streaming": true,
+        "native_history": true,
+        "head_fork": true,
+        "historical_fork": true,
+        "mcp_tool_execution": true,
+        "interrupt": true,
+        "new_session_clears_history": true,
+        "new_session_refreshes_skill_metadata": true,
+        "restart_resume": true,
+        "restart_refreshes_skills": true
+      },
+      "synthetic_model_requests": 4,
+      "mcp_calls": [
+        "search_notes"
+      ]
+    }
+  ]
+}

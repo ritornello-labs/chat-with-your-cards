@@ -1,6 +1,7 @@
 # Backend and conversation plan — 2026-11-02
 
-Status: revised product requirements and implementation recommendation; not implemented.
+Status: revised product requirements; isolated runtime comparison completed;
+production backend changes not implemented.
 The MCP settings manager and agent-facing Anki profile-setting tools are
 implemented in the current source PR. The MCP screen manages external
 connections; get/set_anki_settings manage Anki, and get/set_addon_settings
@@ -15,6 +16,11 @@ Pi is neither a requirement nor a committed milestone. A harness, SDK or direct
 API loop is an implementation choice to evaluate against the product needs.
 This supersedes the August harness-only/API-exclusion decision and the earlier
 November recommendation to build Pi as a required adapter.
+
+The [completed comparison](RUNTIME_COMPARISON_2026-11-02.md) recommends keeping
+Claude Code and adding Codex app-server, with subscription and API access through
+each official runtime. Pi passed its protocol tests; defer it until additional
+API providers justify the extra runtime. Do not build a custom API loop now.
 
 The core product should make studying better: useful current-card explanations,
 accurate prerequisite search, reliable reviewable note changes, and consistent
@@ -116,15 +122,13 @@ different operations; customized template upgrades require a reviewable diff.
 
 ## Implementation order and completion criteria
 
-1. **Bounded architecture comparison.** Test candidate runtimes against one
-   subscription route and one API route using synthetic data and a separately
-   agreed model-spend budget. Codex app-server is a strong candidate for an
-   OpenAI route; current Claude Code remains the shipped baseline. Pi is an
-   optional candidate if it improves the product. Compare supported auth,
-   install burden, skills/tool execution, streaming, images, cancellation,
-   history/branching and recovery. Reuse an existing loop when it passes; choose
-   direct API integration if its UX benefit justifies owning that loop. Deliver
-   a choice with evidence before committing to the runtime architecture.
+1. **Architecture comparison — completed with bounded evidence.** The
+   [report and reproducible probe](RUNTIME_COMPARISON_2026-11-02.md) cover setup,
+   documented access methods and 28 passing synthetic compatibility checks on
+   actual Claude, Codex and Pi processes. Recommend Claude Code plus Codex
+   app-server first; defer Pi and a CWYC-owned API loop. No paid model calls or
+   real-account trials were run. Authenticated subscription/API qualification,
+   images, skill execution and study quality remain release criteria below.
 2. **One complete subscription path and one complete API path.** Build simple
    connection setup and normalized events over shared Anki tools/proposals.
    Qualify current-card explanation, prerequisite search and reviewed note
@@ -144,9 +148,10 @@ different operations; customized template upgrades require a reviewable diff.
    and recovery. Dogfood before expanding provider/runtime breadth. Keep private
    transcripts outside Git. A connection that merely launches is not a release.
 
-No schedule or model-spend budget is inferred. This is planning only; no new
-provider account, credential, billing change, model turn or runtime installation
-is authorized by this clarification.
+No schedule or model-spend budget is inferred. The authorized comparison used
+isolated local synthetic model endpoints and a temporary pinned Pi installation;
+it did not change global installations, accounts, credentials or billing. No
+production adapter implementation is included.
 
 ## Agent configuration of Anki — implemented in source
 
@@ -177,20 +182,22 @@ implementation; validation uses synthetic profiles and disposable Anki.
   The current history API is `thread/revert`; `thread/rollback` is removed.
   Revert affects conversation history, not file changes. Our edit/retry design
   still prefers preserving the original by branching. Exact installed-version
-  schemas and permission behavior need a synthetic integration probe.
+  schemas, streaming, native MCP, historical fork and interruption passed the
+  synthetic probe; full permission mapping remains integration work.
 - [Claude CLI reference](https://code.claude.com/docs/en/cli-reference) documents
   `--resume --fork-session`. This establishes head branching, not arbitrary
   historical boundaries in the current subprocess adapter. Verify a supported
-  interface before enabling historical editing on Claude.
+  interface before enabling historical editing on Claude. The new-process head
+  fork passed the comparison probe; historical Claude boundaries remain open.
 - [Pi RPC](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md)
   and [session commands](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc-commands.md)
   document a persistent subprocess and native fork/clone operations.
   [Pi MCP](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/mcp.md)
   documents native transports and project/user configuration, superseding the
   July "no built-in MCP" assumption for current upstream.
-- Read-only local checks found Claude Code 2.1.284, Codex 0.159.0 and Pi 0.80.3.
-  No model turns, account changes or upgrades were run. Current upstream docs
-  are not proof of capability in these exact installed binaries.
+- The subsequent isolated comparison exercised Claude Code 2.1.316, Codex
+  0.159.0 and temporary Pi 1.4.0. The global Pi 0.80.3 was unchanged. Current
+  upstream docs are not proof of capability in an arbitrary installed version.
 
 - [OpenAI authentication](https://learn.chatgpt.com/docs/auth) documents subscription
   and API-key access for local Codex clients. This supports evaluating one runtime
@@ -199,4 +206,5 @@ implementation; validation uses synthetic profiles and disposable Anki.
 - [Anki self-hosted sync](https://docs.ankiweb.net/manual/sync-server) documents
   setting a custom server URL in Preferences. In the inspected Anki source,
   `ProfileManager.custom_sync_url()` / `set_custom_sync_url()` serve this setting;
-  CWYC's existing preference tools only wrap collection preferences.
+  the new profile-setting tools wrap those native APIs separately from collection
+  preferences.

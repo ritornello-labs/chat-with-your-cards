@@ -6,7 +6,7 @@ These instructions apply to the `chat-with-your-cards` repository: "Chat With Yo
 
 ## Source of truth
 
-- `DESIGN.md` is the authoritative design document: architecture, access methods, tools, permission modes, note proposals, milestones, and known issues. The current shipped backend is Claude Code. The user clarified on 2026-11-02 that the roadmap must support both subscription and API access; Pi is optional, and the earlier harness-only/API-exclusion decision is superseded. Runtime selection must serve product quality; see `docs/BACKEND_AND_CHAT_PLAN.md`. API access remains unimplemented, not prohibited.
+- `DESIGN.md` is the authoritative design document: architecture, access methods, tools, permission modes, note proposals, milestones, and known issues. The current shipped backend is Claude Code. The user clarified on 2026-11-02 that the roadmap must support both subscription and API access; Pi is optional, and the earlier harness-only/API-exclusion decision is superseded. Runtime selection must serve product quality; see `docs/BACKEND_AND_CHAT_PLAN.md` and the completed `docs/RUNTIME_COMPARISON_2026-11-02.md`. The comparison recommends Claude Code plus Codex app-server first; Pi is deferred for additional provider needs. API access remains unimplemented, not prohibited.
 - Keep `DESIGN.md` updated when decisions change; record resolved open questions instead of deleting them.
 
 ## Working rules

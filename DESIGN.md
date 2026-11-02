@@ -1,6 +1,6 @@
 # anki-chat-dock — Design
 
-Status: implemented; v0.1.0 public-preview release candidate. Last updated: 2026-08-06.
+Status: implemented; v0.1.0 public-preview release candidate. Last updated: 2026-11-02.
 
 An Anki add-on that presents a collapsible, gorgeous chat dock/sidebar where the user talks to an AI agent. The agent's context prominently features the card currently under review, it can query the collection through tools, and it can propose new notes that follow the user's conventions.
 
@@ -26,21 +26,27 @@ not a required product feature. Evaluate mature runtimes and direct API
 integration against setup ease, study quality, skills/tools, conversation
 controls and maintainability. Reusing an agent loop and offering API access are
 compatible; authentication and runtime are separate concerns. See the revised
-[product plan](docs/BACKEND_AND_CHAT_PLAN.md).
+[product plan](docs/BACKEND_AND_CHAT_PLAN.md). The completed
+[runtime comparison](docs/RUNTIME_COMPARISON_2026-11-02.md) recommends Claude Code
+plus Codex app-server first, each supporting subscription and API access. Pi
+passed the isolated protocol checks; defer it until additional API providers
+justify another runtime. Defer a custom API agent loop.
 
 **Historical decision (2026-08-06, now superseded for the roadmap):** the add-on
 was harness-only and excluded API keys. The released implementation still uses
 the user's installed, authenticated Claude Code CLI and does not accept API keys;
 this clarification updates the design, not the runtime or current credentials.
 
-Per-harness adapter facts (researched + locally probed 2026-07-05):
+Per-runtime facts (updated by isolated probes on 2026-11-02):
 
-- **Claude Code** (shipped): headless stream-json, MCP over our localhost HTTP server. Web access now allowed by default (`web_access` config; WebSearch/WebFetch in allowedTools, off switches them to disallowed) and the `Skill` tool is allowed so system-wide user skills and our template skill work.
-- **Codex** (M3): `codex exec --json` with MCP config. Local probe found the volta-installed codex broken (missing platform vendor binary, spawn ENOENT) — exactly the class of environment failure the doctor panel must diagnose.
-- **Pi** (future): modes `-p`, `--mode json` (event stream: `agent_start/turn_*/message_update{text_delta,toolcall_delta}/tool_execution_*/agent_end`), `--mode rpc` (JSONL over stdio with session resume/fork). **No built-in MCP in the original probe** — re-check before implementation; otherwise the adapter needs a small pi extension bridging tool calls to the add-on's MCP HTTP endpoint. Authentication remains the harness's responsibility.
-- **Distribution (decided 2026-07-05): the add-on does not concern itself with agent installation at all.** No auto-install of anything (even Pi assumes npm, which users may not have). The doctor panel simply reports what is and isn't installed and links to each harness's own install page.
+- **Claude Code** (shipped): persistent headless stream-json and localhost HTTP MCP. Version 2.1.316 passed synthetic streaming, skills discovery, native MCP execution, interrupt acknowledgement and head fork in a new process. API-mode setup is still implementation work; historical branching is not yet qualified.
+- **Codex app-server** (recommended next): version 0.159.0 passed streaming, MCP execution, skills discovery/reload, resume, head/historical fork and interruption. Use its persistent protocol rather than the originally proposed `codex exec` adapter. Resolve native executables in the Anki process environment; a shell wrapper may depend on the user's home or version manager.
+- **Pi RPC** (optional later): isolated version 1.4.0 passed streaming, native HTTP MCP, skills discovery/refresh, head/historical fork, interrupt, new session and restart/resume. The July no-built-in-MCP observation is obsolete for this version. The global 0.80.3 was not upgraded. OAuth availability does not establish included subscription billing.
+- **Distribution (decided 2026-07-05): no automatic runtime installation.** The doctor panel reports installed versions and links to each runtime's install page. The temporary Pi evaluation fixture is developer tooling, not an add-on dependency or installer.
 
-The prior rejection of a direct-provider API backend is reopened by the 2026-11-02 clarification. Duplicating an agent loop, skill execution and credential/billing handling remain tradeoffs to evaluate, not grounds to exclude API access. API support may reuse a runtime or use a direct adapter; no implementation has been selected.
+The comparison recommends reusing official agent loops for both access methods.
+Direct API integration remains possible if later installation evidence justifies
+owning the extra runtime machinery. No new production adapter is implemented.
 
 ### Why harnesses were preferred (historical rationale; evaluate alongside API routes)
 
@@ -69,7 +75,7 @@ The prior rejection of a direct-provider API backend is reopened by the 2026-11-
 - System prompt injection via `--append-system-prompt` (card context, collection overview, conventions). Model and reasoning effort are per-session CLI flags (`--model <alias|id>`, `--effort low|medium|high|xhigh|max`), surfaced as a header picker in the dock and persisted per-profile. Switching mid-chat keeps the conversation: the session tracks the model/effort its live process spawned with, and on the next send respawns the CLI with `--resume <session-id>` plus the new flags (applied lazily so an in-flight response is never interrupted) — the same "switch model mid-conversation" behavior the CLI apps have.
 - Tools via `--mcp-config` pointing at the add-on's MCP endpoint, `--allowedTools` / permission flags mapped from the add-on's permission mode. Restrict the CLI's own file/bash tools by default — the agent should live in collection-land, not the user's filesystem, unless the user opts in.
 - Skills: the add-on materializes the user's convention skill into a temp skills dir and points the CLI at it.
-- Codex: same shape via `codex exec` with its JSON output mode and MCP config. Abstracted behind the same `CLIBackend` with a per-CLI adapter table (binary discovery, flags, event parsing). **Validation task for the Codex milestone**: confirm whether `codex exec --json` exposes token-level message deltas; if not, Codex degrades gracefully to paragraph-at-a-time rendering.
+- Codex: use app-server with a thin adapter over the same normalized event/capability contract. The 0.159.0 synthetic probe confirmed streamed text, native MCP, session controls and skill reload. Full Anki permission/proposal integration and account qualification remain implementation work.
 
 ### MCP transport
 
@@ -686,7 +692,7 @@ budgets vs the existing 8 MB inline cap; and how attachments interact with
 **Document reading (researched + decided 2026-07-05).** The Claude Code `Read` tool opens **PDFs natively** — page ranges, pages rendered visually, **figures included** — so no bespoke PDF tool is needed (the "script" previously observed was the separate pdf-manipulation skill, not reading). Bespoke tools are reserved for formats the harness can't read: **`read_epub`** (pure stdlib — EPUB is a zip of XHTML: container→OPF→spine parsing, chapter listing with titles/sizes, per-chapter text extraction capped at 60k chars, chapter figures returned as MCP image blocks). **MOBI/AZW deliberately unsupported** (proprietary binary); the tool's error tells the agent to have the user convert via Calibre. "Agent-powered parsing tools" (a sub-agent inside the tool) rejected as overkill: the agent itself reading the right pages *is* the agent-powered parser.
 
 **Source position metadata (v2, user direction "a JSON of sorts").** Two conventions, both parsed by `get_card_sources` into a `meta` object: the standard `#page=N` URI fragment, and a `data-source='{...}'` JSON attribute on the anchor (chapter, section, quote, anything). The system prompt and the card-authoring skills instruct the agent to *write* rich anchors when creating source-grounded cards — `<a href="URI#page=N" data-source='{"chapter": "…"}'>title, p.N</a>` — so future sessions jump straight to the right spot. Renamed/moved files still just fail to resolve (accepted).
-- **M-later — Access choices and conversation quality**: the revised [2026-11-02 product plan](docs/BACKEND_AND_CHAT_PLAN.md) requires subscription and API access with consistent Anki tools/proposals, dependable sessions, branching/edit-retry and current skills. Choose runtimes after a bounded comparison; Pi is optional. Planning only; no API implementation or new auth is present.
+- **M-later — Access choices and conversation quality**: the revised [2026-11-02 product plan](docs/BACKEND_AND_CHAT_PLAN.md) requires subscription and API access with consistent Anki tools/proposals, dependable sessions, branching/edit-retry and current skills. The completed comparison recommends Claude Code plus Codex app-server first; Pi remains optional for provider breadth. No API implementation or new auth is present.
 - **M4 — Distribution & polish** *(v0.1.0, 2026-08-06)*: deterministic `.ankiaddon` packaging, GitHub and AnkiWeb release metadata, Claude Code setup guidance, privacy/security disclosure, compatibility QA, and public-preview positioning.
 - **Card sources — decided + v1 shipped 2026-07-05** (design by user): **any URI in any field is a potential source**; an optional per-note-type restriction (`source_fields` config, e.g. `{"0 Cloze": ["Extra"]}`) narrows where to look, but the default (and the user's own choice) is all fields. `get_card_sources` extracts hrefs, bare URLs, `file://` links, and absolute `.pdf` paths; the agent's intelligence decides how to parse each source — web pages via WebFetch, local files (PDFs included) via the CLI's `Read` tool, which is now in allowedTools. A renamed/moved PDF simply fails to resolve (accepted; not our problem for now). **Recorded risk**: Read + WebFetch + untrusted card content is a potential exfiltration triad (a malicious deck could try to steer the agent into reading a local file and leaking it through a fetch URL); accepted for now because writes stay gated and web/read are user-disableable — revisit before AnkiWeb publication.
 
@@ -724,7 +730,7 @@ budgets vs the existing 8 MB inline cap; and how attachments interact with
      - https://github.com/anthropics/claude-code/issues/50891 (Desktop lists/resumes CLI sessions from ~/.claude/projects; closed as not planned)
    - Docs to re-verify: https://code.claude.com/docs/en/deep-links, https://code.claude.com/docs/en/desktop and https://support.claude.com/en/articles/14729294-open-claude-desktop-with-a-link (deep-link scheme + `/desktop` command).
 2. **Historical Pi MCP limitation, superseded upstream.** Current upstream documentation describes native MCP. Pi itself is optional, not a committed adapter; if selected after evaluation, verify installed-version support before choosing a transport or bridge.
-3. **Codex local install was broken** during the 2026-07-05 probe (volta package missing the platform vendor binary → spawn ENOENT). Re-check before building the Codex adapter; also a live test case for the doctor panel.
+3. **Codex local install was broken** during the 2026-07-05 probe (volta package missing the platform vendor binary → spawn ENOENT). The 2026-11-02 probe successfully exercised the installed 0.159.0 native executable. HOME-dependent wrappers still require doctor diagnostics.
 
 ## 15. Learning from the user's edits (skill reflection loop)
 
