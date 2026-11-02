@@ -609,6 +609,7 @@ def write_mcp_config(
     token: str,
     *,
     extra_servers: dict[str, Any] | None = None,
+    disabled_servers: list[str] | None = None,
     log: Callable[[str], None] | None = None,
 ) -> Path:
     """Write the CLI's --mcp-config JSON: our built-in ``anki`` server plus
@@ -630,6 +631,10 @@ def write_mcp_config(
                     "mcp_servers config: ignoring a user-supplied server "
                     "named 'anki' - it cannot override the built-in one"
                 )
+            continue
+        if name in (disabled_servers or []):
+            # A disabled custom stdio server must not even be spawned. The
+            # disallowedTools rules also block same-name inherited tools.
             continue
         servers[name] = spec
     servers["anki"] = {
@@ -691,6 +696,7 @@ class ClaudeCliSession:
             mcp_url,
             mcp_token,
             extra_servers=mcp_servers,
+            disabled_servers=self._mcp_disabled,
             log=self._log.write,
         )
         self._stderr_tail: deque[str] = deque(maxlen=40)

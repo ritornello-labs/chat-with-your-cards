@@ -171,7 +171,7 @@ def build_system_prompt(
     ]
     if permission_mode == "read-only":
         parts.append(
-            "\nCollection is read-only; add-on settings still need review."
+            "\nCollection is read-only; add-on and Anki profile settings still need review."
         )
     else:
         parts.append(

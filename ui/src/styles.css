@@ -3361,6 +3361,35 @@ body {
 
 /* ---- settings panel ------------------------------------------------------ */
 
+.cwyc-mcp { padding: 0 2px; }
+.cwyc-mcp-controls { border: 0; margin: 0; padding: 0; min-width: 0; }
+.cwyc-mcp-server { border-bottom: 1px solid var(--cwyc-border-subtle); padding: 5px 0; }
+.cwyc-mcp-server strong, .cwyc-mcp-name { overflow-wrap: anywhere; }
+.cwyc-mcp-server small { display: block; color: var(--cwyc-fg-subtle); font-size: 10.5px; padding-top: 3px; }
+.cwyc-mcp-server .cwyc-mcp-name { flex: 1; min-width: 0; }
+.cwyc-mcp-badge { color: var(--cwyc-accent-ink); font-size: 11px; }
+.cwyc-mcp-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 8px; }
+.cwyc-mcp-confirm { font-size: 12px; padding: 0 8px 6px; color: var(--cwyc-fg); }
+.cwyc-mcp-feedback { padding: 6px 8px; font-size: 12px; color: var(--cwyc-fg); overflow-wrap: anywhere; }
+.cwyc-mcp-feedback[role=alert] { border-left: 2px solid var(--cwyc-warn); background: var(--cwyc-warn-soft); }
+.cwyc-mcp-values { margin: 8px; font-size: 12px; color: var(--cwyc-fg); }
+.cwyc-mcp-values summary { cursor: pointer; padding: 3px 0 7px; }
+.cwyc-mcp-editor { border: 1px solid var(--cwyc-border); border-radius: 8px; padding: 6px; margin: 8px 0; background: var(--cwyc-surface); }
+.cwyc-mcp-editor label, .cwyc-mcp-block label { display: block; margin: 7px 8px; font-size: 12px; color: var(--cwyc-fg); }
+#cwyc-root .cwyc-mcp input:not([type=checkbox]),
+#cwyc-root .cwyc-mcp textarea, #cwyc-root .cwyc-mcp select {
+  display: block; box-sizing: border-box; width: 100%; min-width: 0; margin-top: 5px;
+  border: 1px solid var(--cwyc-border); border-radius: 5px; padding: 6px;
+  font: 12px var(--cwyc-mono); background: var(--cwyc-bg); color: var(--cwyc-fg);
+}
+#cwyc-root .cwyc-mcp textarea { resize: vertical; }
+#cwyc-root .cwyc-mcp input:focus, #cwyc-root .cwyc-mcp textarea:focus,
+#cwyc-root .cwyc-mcp select:focus { outline: 2px solid var(--cwyc-accent); outline-offset: 1px; }
+#cwyc-root .cwyc-mcp input[readonly] { color: var(--cwyc-fg-subtle); }
+#cwyc-root .cwyc-mcp-controls:disabled { opacity: .6; }
+.cwyc-mcp-block .cwyc-chip { margin-left: 8px; }
+.cwyc-mcp-value { border-top: 1px solid var(--cwyc-border-subtle); padding: 4px 0 8px; }
+
 .cwyc-panel-settings {
   min-width: 252px;
   /* Settings is now the complete user-facing control surface, including the

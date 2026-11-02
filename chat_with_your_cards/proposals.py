@@ -22,6 +22,7 @@ from typing import Any, Callable
 
 from . import contract, invariants
 from .addon_settings import NEW_CHAT_KEYS, normalize_changes
+from . import anki_settings
 
 AI_TAG = "ai-created"
 AI_EDIT_TAG = "ai-edited"
@@ -582,6 +583,8 @@ class ProposalManager:
         after_deck_change: Callable[[], None] | None = None,
         apply_skill_create: Callable[["Proposal"], list[str]] | None = None,
         write_addon_settings: Callable[[dict[str, Any], dict[str, Any]], None] | None = None,
+        read_anki_settings: Callable[[], dict[str, Any]] | None = None,
+        write_anki_settings: Callable[[dict[str, Any], dict[str, Any], str], None] | None = None,
         list_skill_names: Callable[[], set[str]] | None = None,
         media_staging: Any | None = None,
         sync_now: Any | None = None,
@@ -639,6 +642,8 @@ class ProposalManager:
         # Persists an accepted/reverted add-on setting change after checking
         # that the values still match the proposal's expected state.
         self._write_addon_settings = write_addon_settings
+        self._read_anki_settings = read_anki_settings
+        self._write_anki_settings = write_anki_settings
         # Lists the names of skills that already exist under agent-home, so
         # submit_skill_create can reject a colliding name before a proposal
         # card is even shown. None (e.g. in tests that don't care) means no
@@ -3682,6 +3687,72 @@ class ProposalManager:
             "warnings": warnings,
         }
 
+    def get_anki_settings(self) -> dict[str, Any]:
+        if self._read_anki_settings is None:
+            raise ProposalError("Anki profile settings require the running Anki app")
+        try:
+            return self._read_anki_settings()
+        except anki_settings.SettingsError as exc:
+            raise ProposalError(str(exc)) from None
+
+    def submit_set_anki_settings(self, args: dict[str, Any]) -> dict[str, Any]:
+        if self._write_anki_settings is None:
+            raise ProposalError("Anki profile settings require the running Anki app")
+        current = self.get_anki_settings()
+        try:
+            changes = anki_settings.normalize(args.get("settings"), current)
+        except anki_settings.SettingsError as exc:
+            raise ProposalError(str(exc)) from None
+        priors = {name: current["settings"][name] for name in changes}
+        note = "Applies to this profile's future syncs; no sync starts now."
+        if "custom_sync_url" in changes:
+            note += " Sign in to the chosen server through Anki Preferences."
+        if changes.get("auto_sync") is True:
+            note += " Automatic sync will run when the profile opens or closes."
+        warnings = [note]
+
+        def display(name: str, value: Any) -> str:
+            if name == "custom_sync_url" and not value:
+                return "AnkiWeb (default)"
+            if isinstance(value, bool):
+                return "On" if value else "Off"
+            if name == "network_timeout_seconds":
+                return f"{value} seconds"
+            if name == "periodic_media_sync_minutes":
+                return f"Every {value} minutes" if value else "Off"
+            return str(value)
+
+        proposal = Proposal(
+            id=self._next_id(),
+            kind="anki_settings",
+            note_type="",
+            deck="",
+            tags=[],
+            fields={},
+            title="Change Anki profile settings",
+            rationale=str(args.get("rationale", "")),
+            op="set_anki_settings",
+            count=len(changes),
+            op_args={"changes": changes, "priors": priors, "profile_id": current["profile_id"]},
+            samples=[
+                {"label": anki_settings.SPECS[name]["title"], "old": display(name, priors[name]), "new": display(name, value)}
+                for name, value in changes.items()
+            ],
+            warnings=warnings,
+            requires_confirmation=True,
+            revertible=True,
+        )
+        # Like assistant self-settings, these never use collection auto-apply
+        # modes. A changed data destination is a separate explicit decision.
+        self._proposals[proposal.id] = proposal
+        self._push({"type": "proposal", "proposal": proposal.to_payload()})
+        return {
+            "status": "pending_user_review",
+            "proposal_id": proposal.id,
+            "affected": len(changes),
+            "warnings": warnings,
+        }
+
     # ---- change sets: many small edits reviewed as one unit ----
 
     def open_change_set(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -4225,6 +4296,20 @@ class ProposalManager:
                 if self._apply_skill_create is None:
                     raise ProposalError("creating new skills is not available")
                 proposal.warnings = self._apply_skill_create(proposal)
+                proposal.status = ACCEPTED
+            elif proposal.kind == "anki_settings":
+                if self._write_anki_settings is None:
+                    raise ProposalError("Anki profile settings are not available")
+                changes, priors = proposal.op_args["changes"], proposal.op_args["priors"]
+                try:
+                    self._write_anki_settings(changes, priors, proposal.op_args["profile_id"])
+                except anki_settings.SettingsError as exc:
+                    raise ProposalError(str(exc)) from None
+                self._ledger.append(LedgerEntry(
+                    id=proposal.id, kind="anki_settings", note_id=0,
+                    label=f"change {len(changes)} Anki profile setting(s)",
+                    data={"priors": priors, "written": changes, "profile_id": proposal.op_args["profile_id"]},
+                ))
                 proposal.status = ACCEPTED
             elif proposal.kind == "addon_settings":
                 if self._write_addon_settings is None:
@@ -6057,6 +6142,19 @@ class ProposalManager:
         )
 
     def _revert_entry(self, entry: LedgerEntry, force: bool = False) -> None:
+        if entry.kind == "anki_settings":
+            if self._write_anki_settings is None:
+                raise ProposalError("Anki profile settings are not available")
+            try:
+                self._write_anki_settings(entry.data["priors"], {} if force else entry.data["written"], entry.data["profile_id"])
+            except anki_settings.SettingsConflict as exc:
+                raise StaleRevert(str(exc)) from None
+            except anki_settings.SettingsError as exc:
+                # Force never bypasses profile identity, sync-in-progress or
+                # signed-in destination protections.
+                raise ProposalError(str(exc)) from None
+            entry.undone = True
+            return
         if entry.kind == "addon_settings":
             if self._write_addon_settings is None:
                 raise ProposalError("add-on settings are not available")
