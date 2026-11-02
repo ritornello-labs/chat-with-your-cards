@@ -53,8 +53,10 @@ command dispatch and proposal-feedback fixes, clean new-chat state, and a
 corrected context meter. See [the release preparation](release/PREPARATION_2026-10-07.md).
 
 The supported backend is a locally installed, officially authenticated Claude
-Code CLI, connected to the add-on through a loopback MCP server. Codex and Pi
-adapters are planned. CWYC does not accept or store API keys.
+Code CLI, connected to the add-on through a loopback MCP server. The
+[roadmap](docs/BACKEND_AND_CHAT_PLAN.md) calls for subscription and API access;
+runtime choices are under evaluation. The current release does not accept or
+store API keys.
 
 ## Requirements and installation
 

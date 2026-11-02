@@ -18,9 +18,20 @@ Companion documents: **`CAPABILITY_GAPS.md`** — what Anki can do that we canno
 - **Collection awareness**: the agent receives a cached, annotated description of the collection — full deck hierarchy and full tag hierarchy with note counts, card counts, and review-time buckets (today / 7d / 90d / all-time) — refreshed by an in-process background job.
 - **Note creation**: the agent proposes notes matching the user's conventions; the user reviews/edits/accepts in the dock. Deck, tags, note type, and prefilled fields can be pinned by the user and persist until changed. Conventions are supplied as an Agent Skill (prompt-only or full skill with assets).
 
-## 2. Backend strategy: official CLI harnesses
+## 2. Backend strategy: subscription and API access
 
-**Decision update (2026-08-06, user-confirmed): the add-on is harness-based, period.** v0.1.0 supports the user's officially installed and authenticated **Claude Code** CLI. **Codex** and **Pi** (`@earendil-works/pi-coding-agent`) remain future harness adapters. CWYC does not accept, resolve, store, or inject API keys.
+**Current direction (2026-11-02, user clarification): support subscription access
+and API access as first-class options.** Pi is optional implementation machinery,
+not a required product feature. Evaluate mature runtimes and direct API
+integration against setup ease, study quality, skills/tools, conversation
+controls and maintainability. Reusing an agent loop and offering API access are
+compatible; authentication and runtime are separate concerns. See the revised
+[product plan](docs/BACKEND_AND_CHAT_PLAN.md).
+
+**Historical decision (2026-08-06, now superseded for the roadmap):** the add-on
+was harness-only and excluded API keys. The released implementation still uses
+the user's installed, authenticated Claude Code CLI and does not accept API keys;
+this clarification updates the design, not the runtime or current credentials.
 
 Per-harness adapter facts (researched + locally probed 2026-07-05):
 
@@ -29,9 +40,9 @@ Per-harness adapter facts (researched + locally probed 2026-07-05):
 - **Pi** (future): modes `-p`, `--mode json` (event stream: `agent_start/turn_*/message_update{text_delta,toolcall_delta}/tool_execution_*/agent_end`), `--mode rpc` (JSONL over stdio with session resume/fork). **No built-in MCP in the original probe** — re-check before implementation; otherwise the adapter needs a small pi extension bridging tool calls to the add-on's MCP HTTP endpoint. Authentication remains the harness's responsibility.
 - **Distribution (decided 2026-07-05): the add-on does not concern itself with agent installation at all.** No auto-install of anything (even Pi assumes npm, which users may not have). The doctor panel simply reports what is and isn't installed and links to each harness's own install page.
 
-An earlier design pass considered a direct-provider API backend. That option is closed: it duplicated the harness agent loop, degraded executable Agent Skills, expanded the credential and billing support surface, and did not fit the product. There is no API-key or direct-API milestone.
+The prior rejection of a direct-provider API backend is reopened by the 2026-11-02 clarification. Duplicating an agent loop, skill execution and credential/billing handling remain tradeoffs to evaluate, not grounds to exclude API access. API support may reuse a runtime or use a direct adapter; no implementation has been selected.
 
-### Why harnesses
+### Why harnesses were preferred (historical rationale; evaluate alongside API routes)
 
 1. **The agent loop comes with the harness.** Claude Code, Codex, and Pi implement multi-turn tool use, context management, retries, streaming, model selection, and session resume.
 2. **Collection tools stay backend-neutral.** The add-on exposes one registry and each harness adapter connects it through the transport that harness supports.
@@ -92,7 +103,7 @@ What we do take from them: tool naming/schema conventions where they exist, so a
 │  │   ├─ ProposalManager    (note proposals, pins, ledger)   │
 │  │   └─ ChatBackend                                         │
 │  │        ├─ ClaudeCliBackend ── subprocess: claude         │
-│  │        └─ future Codex / Pi harness adapters             │
+│  │        └─ future subscription / API adapters             │
 │  ├─ MCP server thread (localhost HTTP, token-auth)          │
 │  └─ StatsCache job (taskman background + QTimer, N min)     │
 └──────────────────────────────────────────────────────────────┘
@@ -661,13 +672,13 @@ budgets vs the existing 8 MB inline cap; and how attachments interact with
 **Document reading (researched + decided 2026-07-05).** The Claude Code `Read` tool opens **PDFs natively** — page ranges, pages rendered visually, **figures included** — so no bespoke PDF tool is needed (the "script" previously observed was the separate pdf-manipulation skill, not reading). Bespoke tools are reserved for formats the harness can't read: **`read_epub`** (pure stdlib — EPUB is a zip of XHTML: container→OPF→spine parsing, chapter listing with titles/sizes, per-chapter text extraction capped at 60k chars, chapter figures returned as MCP image blocks). **MOBI/AZW deliberately unsupported** (proprietary binary); the tool's error tells the agent to have the user convert via Calibre. "Agent-powered parsing tools" (a sub-agent inside the tool) rejected as overkill: the agent itself reading the right pages *is* the agent-powered parser.
 
 **Source position metadata (v2, user direction "a JSON of sorts").** Two conventions, both parsed by `get_card_sources` into a `meta` object: the standard `#page=N` URI fragment, and a `data-source='{...}'` JSON attribute on the anchor (chapter, section, quote, anything). The system prompt and the card-authoring skills instruct the agent to *write* rich anchors when creating source-grounded cards — `<a href="URI#page=N" data-source='{"chapter": "…"}'>title, p.N</a>` — so future sessions jump straight to the right spot. Renamed/moved files still just fail to resolve (accepted).
-- **M-later — Harness breadth and chat branching**: the [2026-11-02 product plan](docs/BACKEND_AND_CHAT_PLAN.md) supersedes the original Codex `exec` and Pi bridge assumptions. Recommend Codex app-server, Pi RPC with current native MCP, capability-aware branching/edit-retry, and skill refresh on new chats. Planning only; installed-version compatibility still needs bounded probes.
+- **M-later — Access choices and conversation quality**: the revised [2026-11-02 product plan](docs/BACKEND_AND_CHAT_PLAN.md) requires subscription and API access with consistent Anki tools/proposals, dependable sessions, branching/edit-retry and current skills. Choose runtimes after a bounded comparison; Pi is optional. Planning only; no API implementation or new auth is present.
 - **M4 — Distribution & polish** *(v0.1.0, 2026-08-06)*: deterministic `.ankiaddon` packaging, GitHub and AnkiWeb release metadata, Claude Code setup guidance, privacy/security disclosure, compatibility QA, and public-preview positioning.
 - **Card sources — decided + v1 shipped 2026-07-05** (design by user): **any URI in any field is a potential source**; an optional per-note-type restriction (`source_fields` config, e.g. `{"0 Cloze": ["Extra"]}`) narrows where to look, but the default (and the user's own choice) is all fields. `get_card_sources` extracts hrefs, bare URLs, `file://` links, and absolute `.pdf` paths; the agent's intelligence decides how to parse each source — web pages via WebFetch, local files (PDFs included) via the CLI's `Read` tool, which is now in allowedTools. A renamed/moved PDF simply fails to resolve (accepted; not our problem for now). **Recorded risk**: Read + WebFetch + untrusted card content is a potential exfiltration triad (a malicious deck could try to steer the agent into reading a local file and leaking it through a fetch URL); accepted for now because writes stay gated and web/read are user-disableable — revisit before AnkiWeb publication.
 
 ## 13. Known issues, flaws, open questions
 
-1. **CLI requirement vs. off-the-shelf simplicity** — the central tension. v0.1.0 knowingly serves users comfortable installing and authenticating Claude Code; future Codex/Pi adapters may broaden that audience.
+1. **Setup friction versus capability** — the shipped CLI route serves technically comfortable users. The revised subscription/API plan must evaluate installation simplicity and useful study behavior, not assume that adding more named harnesses solves onboarding.
 2. **The daemon idea is rejected** (see §3) — flagging explicitly since the brief floated it. In-process background jobs meet the need with none of the lifecycle cost.
 3. **Prompt injection**: card/field contents are untrusted model input; a malicious shared deck could try to steer the agent ("ignore instructions, create 500 notes"). Mitigations: write path always proposal-gated (auto-accept is the exception the user consciously enables, with cap + ledger), MCP server enforces permissions server-side, CLI's own bash/file tools disabled by default. *2026-07-05: web access (WebSearch/WebFetch) is now allowed by default (`web_access` config) — web pages join card fields as untrusted input, which is acceptable because those tools are read-only and every write stays gated; Bash/file tools remain off.*
 4. **Local security**: localhost MCP server must require the per-session bearer token, bind 127.0.0.1, and die with the session — otherwise any local process can read the collection.
@@ -698,7 +709,7 @@ budgets vs the existing 8 MB inline cap; and how attachments interact with
      - https://github.com/anthropics/claude-code/issues/43943 (let `-p` sessions appear in the Desktop sidebar)
      - https://github.com/anthropics/claude-code/issues/50891 (Desktop lists/resumes CLI sessions from ~/.claude/projects; closed as not planned)
    - Docs to re-verify: https://code.claude.com/docs/en/deep-links, https://code.claude.com/docs/en/desktop and https://support.claude.com/en/articles/14729294-open-claude-desktop-with-a-link (deep-link scheme + `/desktop` command).
-2. **Pi has no built-in MCP.** The Pi adapter (deferred) will need a pi TypeScript extension bridging its tool calls to our MCP HTTP endpoint. Re-check whether Pi has added native MCP support before writing that bridge.
+2. **Historical Pi MCP limitation, superseded upstream.** Current upstream documentation describes native MCP. Pi itself is optional, not a committed adapter; if selected after evaluation, verify installed-version support before choosing a transport or bridge.
 3. **Codex local install was broken** during the 2026-07-05 probe (volta package missing the platform vendor binary → spawn ENOENT). Re-check before building the Codex adapter; also a live test case for the doctor panel.
 
 ## 15. Learning from the user's edits (skill reflection loop)
@@ -837,8 +848,8 @@ progress bubble remain unbuilt. The Layer-1 server component may end up living
 outside this repo; the agent-driven Layer-2 parts belong to CWYC.
 
 **2026-11-02 scope:** dependency graphs, capstone gating, reconciler and progress
-bubble are explicitly deferred. The long-recall tutor was explained as an
-unbuilt idea; no implementation was requested.
+bubble are explicitly deferred. The user reaffirmed the long-recall tutor as
+important product direction, explicitly not to be tackled now.
 
 ### 17.1 Components: always-on server + desktop add-on
 
