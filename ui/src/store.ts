@@ -48,6 +48,7 @@ import type { ThreadMessageLike } from "@assistant-ui/react";
 import { postCommand } from "./bridge";
 import { dismissAllPopovers } from "./hooks/useDismiss";
 import { openSettingsSection } from "./settingsNavigation";
+import type { McpResponse } from "./mcpSettings";
 import type {
   BridgeCommand,
   ChatEvent,
@@ -368,6 +369,7 @@ export interface UiState {
   readonly notice: { text: string; seq: number } | null;
   readonly dock: DockUiState | null; // null = host has not reported yet
   readonly settings: SettingsState | null; // null = not pushed yet
+  readonly mcp: McpResponse | null;
   readonly setup: SetupState | null; // null = no onboarding needed (or resolved)
   /** Which pending proposal the keyboard acts on. A shortcut that accepts a
    *  card must be visibly aimed at one, or Cmd+Enter is a blind write. */
@@ -449,6 +451,7 @@ const DEFAULT_UI_STATE: UiState = {
   notice: null,
   dock: null,
   settings: null,
+  mcp: null,
   setup: null,
   activeProposalId: null,
   reviewing: false,
@@ -958,6 +961,14 @@ export class ChatStore {
     postCommand({ type: "set_setting", key, value });
   }
 
+  private mcpRequestSeq = 0;
+
+  mcpSettings(action: string, data: Record<string, unknown> = {}): string {
+    const requestId = `mcp-${Date.now()}-${++this.mcpRequestSeq}`;
+    postCommand({ type: "mcp_settings", action, ...data, request_id: requestId });
+    return requestId;
+  }
+
   /** Open Anki's add-on config (vim_mappings and other advanced options). */
   openAddonConfig(): void {
     postCommand({ type: "open_addon_config" });
@@ -1318,6 +1329,11 @@ export class ChatStore {
         // (e.g. Settings) survives the collapse and reappears on re-expand
         // (dogfood 2026-07-14). Fire on the expanded->collapsed edge only.
         if (wasExpanded && !nowExpanded) dismissAllPopovers();
+        break;
+      }
+      case "mcp_settings": {
+        this.ui = { ...this.ui, mcp: event as unknown as McpResponse };
+        this.emit();
         break;
       }
       case "settings": {

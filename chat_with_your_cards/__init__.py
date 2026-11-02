@@ -1212,6 +1212,7 @@ def _wire_bridge() -> None:
         else None,
     )
     bridge.on("set_setting", _set_setting)
+    bridge.on("mcp_settings", _mcp_settings)
     bridge.on("open_addon_config", lambda _msg: _open_addon_config())
     # Saving the add-on's config in Anki's built-in editor re-pushes the live
     # preferences (vim mode/mappings, theme, dock side, ...) so an edit applies
@@ -1314,6 +1315,21 @@ def _open_addon_config() -> None:
             "Couldn't open the config editor - use Tools > Add-ons > "
             '"Chat With Your Cards" > Config instead.'
         )
+
+
+def _mcp_settings(msg: dict[str, Any]) -> None:
+    from .mcp_settings import handle
+
+    def read() -> dict[str, Any]:
+        return {**DEFAULT_CONFIG, **(mw.addonManager.getConfig(__name__) or {})}
+
+    def write(changes: dict[str, Any]) -> None:
+        persisted = mw.addonManager.getConfig(__name__) or {}
+        mw.addonManager.writeConfig(__name__, {**persisted, **changes})
+        state.config.update(changes)
+
+    if state.dock is not None:
+        handle(msg, read=read, write=write, push=state.dock.bridge.push)
 
 
 def _push_settings() -> None:

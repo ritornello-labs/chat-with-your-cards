@@ -22,6 +22,7 @@
  * exercising the Reasoning primitive's no-text rotating-indicator path.
  */
 import type { ChatEvent, GradingPayload, ProposalPayload } from "../events";
+import type { McpEditor, McpSnapshot } from "../mcpSettings";
 
 type Step =
   | { kind: "think" | "text"; text: string }
@@ -1002,6 +1003,44 @@ const devSettings: Record<string, unknown> = {
   skill_update_policy: "review",
 };
 
+// Synthetic connections only. This preview never starts a server or connects.
+const devMcpServers: Record<string, McpEditor> = {};
+const devMcp: McpSnapshot = { revision: "0", inherit: false, servers: [], blocked: [] };
+
+function mcpSettingsPreview(msg: Record<string, unknown>): void {
+  const name = String(msg.name ?? "");
+  let editor: McpEditor | undefined;
+  let error: string | undefined;
+  if (name === "anki") error = "The built-in Anki server is always enabled.";
+  else if (msg.action === "edit") editor = structuredClone(devMcpServers[name]);
+  else if (msg.action !== "read" && msg.revision !== devMcp.revision) error = "Settings changed. Reopen the server.";
+  else if (msg.action === "save") {
+    const draft = structuredClone(msg.server as McpEditor);
+    for (const key of ["env", "headers"] as const) {
+      draft[key] = draft[key].map((row) => row.keep
+        ? { ...row, value: devMcpServers[name]?.[key].find((old) => old.key === row.key)?.value ?? "" }
+        : row);
+    }
+    devMcpServers[name] = draft;
+  }
+  else if (msg.action === "inherit") devMcp.inherit = Boolean(msg.enabled);
+  else if (msg.action === "remove" || msg.action === "toggle") {
+    devMcp.blocked = devMcp.blocked.filter((n) => n !== name);
+    if (msg.action === "remove") delete devMcpServers[name];
+    if (msg.action === "remove" || !msg.enabled) devMcp.blocked.push(name);
+  }
+  if (msg.action !== "read" && msg.action !== "edit" && !error) devMcp.revision = String(Number(devMcp.revision) + 1);
+  devMcp.servers = Object.entries(devMcpServers).map(([name, spec]) => ({
+    name, transport: spec.transport, enabled: !devMcp.blocked.includes(name),
+  }));
+  if (editor) {
+    editor.env = editor.env.map((r) => ({ key: r.key, value: "", keep: true }));
+    editor.headers = editor.headers.map((r) => ({ key: r.key, value: "", keep: true }));
+  }
+  window.chatUI?.dispatch({ type: "mcp_settings", request_id: msg.request_id,
+    snapshot: { ...structuredClone(devMcp), blocked: devMcp.blocked.filter((n) => !devMcpServers[n]) }, editor, error });
+}
+
 export function installDevReplayer(): void {
   let generation = 0;
   let pendingTimers: number[] = [];
@@ -1294,6 +1333,9 @@ export function installDevReplayer(): void {
         }, 280);
         break;
       }
+      case "mcp_settings":
+        mcpSettingsPreview(msg);
+        break;
       case "set_setting": {
         // Persist-and-echo, like __init__.py's _set_setting.
         devSettings[String(msg.key)] = msg.value;

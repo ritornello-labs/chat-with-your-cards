@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Manage custom MCP servers in Settings with connection forms, per-server
+  toggles, inheritance and blocked-name controls. Keep saved credentials hidden,
+  preserve unchanged advanced options and reject stale edits. Changes apply to
+  new chats; disabled custom commands are not launched.
+- Record the revised backend, branching/edit-retry and skill-refresh product
+  plan. These remain planned; dependency graphs and capstone gating are deferred.
+
 ## 0.1.1 — 2026-10-07
 
 - Add `get_addon_settings` and proposal-gated `set_addon_settings` so chat can

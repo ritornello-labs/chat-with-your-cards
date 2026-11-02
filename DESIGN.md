@@ -208,7 +208,19 @@ Widening is now implemented as a **config-file-only tier** (`chat_with_your_card
 - `mcp_inherit_user` (default `false`): drops `--strict-mcp-config` so the user's own Claude Code MCP servers load too.
 - `mcp_disabled` (default `[]`): server names (ours or inherited) added to `--disallowedTools` as `mcp__<name>`, individually turning any of them back off.
 
-Guards (both ignore-and-log, never a hard error): a user-supplied `mcp_servers["anki"]` entry can never shadow the built-in server (`write_mcp_config` drops it and assigns the real one last); `"anki"` in `mcp_disabled` is dropped rather than honored, since disabling it would silently break every `propose_*`/collection tool. A GUI for this (discoverable toggles in the settings panel, replacing hand-editing `config.json`) is still a later milestone.
+Guards (both ignore-and-log, never a hard error): a user-supplied `mcp_servers["anki"]` entry can never shadow the built-in server (`write_mcp_config` drops it and assigns the real one last); `"anki"` in `mcp_disabled` is dropped rather than honored, since disabling it would silently break every `propose_*`/collection tool.
+
+**MCP settings manager (2026-11-02).** Settings now adds, edits, enables,
+disables and removes custom HTTP/SSE/stdio servers without JSON, controls
+inheritance, and blocks inherited tool namespaces by name. Anki is always on.
+Saved header/environment values never return to the editor; unchanged values
+and advanced options are preserved. Mutations check a revision against persisted
+settings. Disabled custom servers are omitted from the next subprocess config
+so they do not launch; inherited names remain tool-deny rules and may still
+connect in Claude Code. Removal keeps a name blocked so a same-name inherited
+server does not become callable. These are private dock commands, never agent
+tools or transcript events, and start no process or network connection. Changes
+apply on New chat. Advanced OAuth/timeout options remain in the Config editor.
 
 **Graduated power tiers and bulk actions (proposed and confirmed 2026-07-04; implemented same day except the unrestricted tier, which stays deliberately unshipped):**
 
@@ -649,7 +661,7 @@ budgets vs the existing 8 MB inline cap; and how attachments interact with
 **Document reading (researched + decided 2026-07-05).** The Claude Code `Read` tool opens **PDFs natively** — page ranges, pages rendered visually, **figures included** — so no bespoke PDF tool is needed (the "script" previously observed was the separate pdf-manipulation skill, not reading). Bespoke tools are reserved for formats the harness can't read: **`read_epub`** (pure stdlib — EPUB is a zip of XHTML: container→OPF→spine parsing, chapter listing with titles/sizes, per-chapter text extraction capped at 60k chars, chapter figures returned as MCP image blocks). **MOBI/AZW deliberately unsupported** (proprietary binary); the tool's error tells the agent to have the user convert via Calibre. "Agent-powered parsing tools" (a sub-agent inside the tool) rejected as overkill: the agent itself reading the right pages *is* the agent-powered parser.
 
 **Source position metadata (v2, user direction "a JSON of sorts").** Two conventions, both parsed by `get_card_sources` into a `meta` object: the standard `#page=N` URI fragment, and a `data-source='{...}'` JSON attribute on the anchor (chapter, section, quote, anything). The system prompt and the card-authoring skills instruct the agent to *write* rich anchors when creating source-grounded cards — `<a href="URI#page=N" data-source='{"chapter": "…"}'>title, p.N</a>` — so future sessions jump straight to the right spot. Renamed/moved files still just fail to resolve (accepted).
-- **M-later — Harness breadth**: Codex adapter (`codex exec --json` + MCP config; note the locally probed volta-install breakage for the doctor) and Pi adapter (`--mode json`/RPC + a pi tool-bridge extension proxying to our MCP server — the main new engineering).
+- **M-later — Harness breadth and chat branching**: the [2026-11-02 product plan](docs/BACKEND_AND_CHAT_PLAN.md) supersedes the original Codex `exec` and Pi bridge assumptions. Recommend Codex app-server, Pi RPC with current native MCP, capability-aware branching/edit-retry, and skill refresh on new chats. Planning only; installed-version compatibility still needs bounded probes.
 - **M4 — Distribution & polish** *(v0.1.0, 2026-08-06)*: deterministic `.ankiaddon` packaging, GitHub and AnkiWeb release metadata, Claude Code setup guidance, privacy/security disclosure, compatibility QA, and public-preview positioning.
 - **Card sources — decided + v1 shipped 2026-07-05** (design by user): **any URI in any field is a potential source**; an optional per-note-type restriction (`source_fields` config, e.g. `{"0 Cloze": ["Extra"]}`) narrows where to look, but the default (and the user's own choice) is all fields. `get_card_sources` extracts hrefs, bare URLs, `file://` links, and absolute `.pdf` paths; the agent's intelligence decides how to parse each source — web pages via WebFetch, local files (PDFs included) via the CLI's `Read` tool, which is now in allowedTools. A renamed/moved PDF simply fails to resolve (accepted; not our problem for now). **Recorded risk**: Read + WebFetch + untrusted card content is a potential exfiltration triad (a malicious deck could try to steer the agent into reading a local file and leaking it through a fetch URL); accepted for now because writes stay gated and web/read are user-disableable — revisit before AnkiWeb publication.
 
@@ -823,6 +835,10 @@ make-available operations are shipped in CWYC (§17.6). The server tutor,
 server-event ingestion, dependency graph, capstone gating, reconciler, and
 progress bubble remain unbuilt. The Layer-1 server component may end up living
 outside this repo; the agent-driven Layer-2 parts belong to CWYC.
+
+**2026-11-02 scope:** dependency graphs, capstone gating, reconciler and progress
+bubble are explicitly deferred. The long-recall tutor was explained as an
+unbuilt idea; no implementation was requested.
 
 ### 17.1 Components: always-on server + desktop add-on
 
