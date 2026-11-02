@@ -778,6 +778,8 @@ def _setup() -> None:
         after_deck_change=_refresh_deck_ui,
         apply_skill_create=_apply_new_skill,
         write_addon_settings=_write_addon_settings,
+        read_anki_settings=_read_anki_settings,
+        write_anki_settings=_write_anki_settings,
         list_skill_names=_agent_skill_names,
         media_staging=_build_media_staging(),
         sync_now=lambda: mw.onSync(),
@@ -1442,6 +1444,23 @@ def _set_setting(msg: dict[str, Any]) -> None:
     _push_settings()
     if key.startswith("learning_") or key == "skill_update_policy":
         _push_learning_state()
+
+
+def _read_anki_settings() -> dict[str, Any]:
+    from .anki_settings import read
+
+    return read(mw.pm)
+
+
+def _write_anki_settings(changes: dict[str, Any], expected: dict[str, Any], profile_id: str) -> None:
+    from .anki_settings import write
+
+    busy = (
+        mw.media_syncer.is_syncing()
+        or mw.progress.busy()
+        or bool(getattr(mw, "_background_op_count", 0))
+    )
+    write(mw.pm, changes, expected, profile_id, busy=busy)
 
 
 def _write_addon_settings(

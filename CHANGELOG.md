@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add reviewed agent configuration of Anki profile settings: sync server URL,
+  automatic/media sync, background media interval and network timeout. Include
+  native persistence and undo, profile/staleness checks, and protected account
+  handling. Applying settings never starts a sync.
+
 - Manage custom MCP servers in Settings with connection forms, per-server
   toggles, inheritance and blocked-name controls. Keep saved credentials hidden,
   preserve unchanged advanced options and reject stale edits. Changes apply to

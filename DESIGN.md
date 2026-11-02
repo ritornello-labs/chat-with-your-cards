@@ -267,6 +267,20 @@ maps are excluded. Web access/MCP inheritance requires a new chat; expanding
 out of Read-only may need an Anki restart for the CLI's advertised tool list
 to refresh, although the server checks every call against the live mode.
 
+### Anki profile configuration through chat (2026-11-02)
+
+`get_anki_settings` reads the current profile's sync URL, automatic sync, media
+sync, background media interval and network timeout; `set_anki_settings` proposes
+an allowlisted change with readable old/new values. These are separate from
+collection preferences and CWYC self-settings. They always require review,
+including Full collection, and remain available in Read-only collection mode.
+The callback uses Anki's native profile manager and persistence, never a direct
+collection/database write. Apply/undo check profile identity, staleness and active
+sync/background work. Changing servers requires signing out in Preferences first;
+credentials and sensitive URL components never enter tool responses or proposals.
+Undo anyway cannot bypass those profile/account checks. No setting change starts
+sync or chooses a full-sync direction. Account login stays in Anki Preferences.
+
 ## 6. Stats cache
 
 - Background job every N minutes (default 30, configurable) and on demand (manual refresh button; debounced hooks on sync/deck changes).

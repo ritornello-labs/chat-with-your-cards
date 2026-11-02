@@ -84,6 +84,7 @@ const KIND_LABELS: Record<string, string> = {
   note_type_op: "Note type change",
   skill_update: "Skill update",
   addon_settings: "Add-on settings",
+  anki_settings: "Anki profile settings",
 };
 
 const STATUS_LABELS: Record<string, string> = {

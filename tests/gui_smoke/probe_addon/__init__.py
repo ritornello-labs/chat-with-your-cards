@@ -2687,6 +2687,13 @@ def _run_checks() -> dict[str, Any]:
 
     check("MCP settings form round-trip", _mcp_settings_round_trip)
 
+    def _anki_settings_round_trip() -> dict[str, Any]:
+        from .anki_settings_probe import run
+
+        return run(mw, dock, addon, _eval_js, _wait_until)
+
+    check("Anki profile settings reviewed apply and undo", _anki_settings_round_trip)
+
     def _vim_mode_round_trip() -> dict[str, Any]:
         """The Settings vim toggle swaps the composer textarea for the
         CodeMirror vim editor and back - exercised inside real Anki's

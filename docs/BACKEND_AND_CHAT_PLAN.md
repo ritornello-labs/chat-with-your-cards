@@ -1,9 +1,10 @@
 # Backend and conversation plan — 2026-11-02
 
 Status: revised product requirements and implementation recommendation; not implemented.
-The MCP settings manager is implemented in the current source PR. It is a human
-connection-management screen, separate from the existing agent self-settings
-and Anki preference tools. Dependency graphs and capstone gating remain deferred.
+The MCP settings manager and agent-facing Anki profile-setting tools are
+implemented in the current source PR. The MCP screen manages external
+connections; get/set_anki_settings manage Anki, and get/set_addon_settings
+manage ordinary CWYC preferences. Dependency graphs and capstone gating remain deferred.
 The long-recall tutor is important retained product direction, explicitly for
 later; no tutor implementation is authorized in the current work.
 
@@ -147,27 +148,27 @@ No schedule or model-spend budget is inferred. This is planning only; no new
 provider account, credential, billing change, model turn or runtime installation
 is authorized by this clarification.
 
-## Agent configuration of Anki — proposed, separate work
+## Agent configuration of Anki — implemented in source
 
-Current tools already cover deck options and an allowlisted set of collection
-review/edit/scheduling preferences. The MCP manager configures the assistant's
-external tool connections; `get_addon_settings`/`set_addon_settings` separately
-cover ordinary CWYC preferences through reviewable proposals.
+`get_anki_settings` and `set_anki_settings` expose the current Anki profile's
+custom sync URL, automatic sync on open/close, media sync, background media
+interval and network timeout. Existing collection preference/deck-option tools
+remain separate, as do CWYC's own settings and external MCP connections.
 
-Profile/global Anki settings such as custom sync URL are not currently exposed
-by those collection preference tools. A useful next family would inspect and
-propose supported Anki settings with a plain old/new comparison and exact scope
-(current profile versus collection versus application). Candidates include the
-custom sync URL, auto-sync/media-sync preferences and network timeout; these are
-recommendations, not implemented or newly committed scope.
+Every profile-setting write is a human-reviewed proposal with readable old/new
+values, including in Full collection and Read-only collection modes. Apply and
+undo use Anki's profile APIs and save mechanism. They verify the active profile,
+check for later edits and refuse changes during sync/background operations.
+Undo anyway can override a value conflict but never a different profile, active
+sync, or account/destination protection. Setting changes do not start sync or
+choose a full-upload/full-download direction.
 
-For a sync-destination change, show the old/new destination and require review
-because it determines where collection data goes. Use Anki's profile APIs and
-persist through its supported mechanism; do not edit a database directly. Keep
-account secrets out of model-visible reads. Changing a URL does not authorize
-syncing, migrating accounts, or choosing full-upload/full-download direction.
-Test persistence, staleness, scope and absence of implicit sync in a disposable
-profile before exposing the tool. No live settings were changed in this review.
+Changing the destination requires signing out of sync in Anki Preferences first,
+so the old server's credentials cannot be sent to a new destination. Account
+secrets are never exposed; stored URLs with embedded credentials/query data are
+excluded from agent-readable settings. New custom URLs use a trailing slash for
+reverse-proxy compatibility. No live profile settings were changed during
+implementation; validation uses synthetic profiles and disposable Anki.
 
 ## Evidence and bounded unknowns
 

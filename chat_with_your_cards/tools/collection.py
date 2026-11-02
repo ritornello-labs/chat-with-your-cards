@@ -702,6 +702,7 @@ def build_registry() -> ToolRegistry:
     from .proposals import register_proposal_tools
     from .authoring import register_authoring_tools
     from .addon_settings import register_addon_setting_tools
+    from .anki_settings import register_anki_setting_tools
     from .gui import register_gui_tools
     from .maintenance import register_maintenance_tools
     from .note_types import register_note_type_tools
@@ -724,4 +725,5 @@ def build_registry() -> ToolRegistry:
     register_fsrs_tools(registry)
     register_authoring_tools(registry)
     register_addon_setting_tools(registry)
+    register_anki_setting_tools(registry)
     return registry
