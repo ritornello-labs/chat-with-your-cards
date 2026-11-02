@@ -13,6 +13,10 @@ KEYS = ("mcp_servers", "mcp_disabled", "mcp_inherit_user")
 NAME = re.compile(r"[A-Za-z0-9_-]{1,100}\Z")
 
 
+class McpSettingsError(ValueError):
+    """A validation message safe to show in the settings form."""
+
+
 def _servers(config: dict[str, Any]) -> dict[str, Any]:
     value = config.get("mcp_servers")
     return value if isinstance(value, dict) else {}
@@ -49,36 +53,36 @@ def snapshot(config: dict[str, Any]) -> dict[str, Any]:
 
 def _name(value: Any) -> str:
     if not isinstance(value, str) or not NAME.fullmatch(value):
-        raise ValueError(
+        raise McpSettingsError(
             "Use a server name with letters, numbers, underscores or hyphens (up to 100)."
         )
     if value == "anki":
-        raise ValueError("The built-in Anki server is always enabled and cannot be replaced.")
+        raise McpSettingsError("The built-in Anki server is always enabled and cannot be replaced.")
     return value
 
 
 def _pairs(value: Any, previous: Any, *, env: bool) -> dict[str, str]:
     if not isinstance(value, list) or len(value) > 100:
-        raise ValueError("Provide at most 100 named values.")
+        raise McpSettingsError("Provide at most 100 named values.")
     old = previous if isinstance(previous, dict) else {}
     result: dict[str, str] = {}
     for row in value:
         if not isinstance(row, dict) or not isinstance(row.get("key"), str):
-            raise ValueError("Each value needs a name.")
+            raise McpSettingsError("Each value needs a name.")
         key = row["key"].strip()
         pattern = r"[A-Za-z_][A-Za-z0-9_]*" if env else r"[!#$%&'*+.^_`|~0-9A-Za-z-]+"
         if not re.fullmatch(pattern, key) or key.lower() in {k.lower() for k in result}:
-            raise ValueError("Use valid, distinct names for environment variables and headers.")
+            raise McpSettingsError("Use valid, distinct names for environment variables and headers.")
         if row.get("keep") is True:
             if key not in old or not isinstance(old[key], str):
-                raise ValueError("A saved value changed. Reopen the server and try again.")
+                raise McpSettingsError("A saved value changed. Reopen the server and try again.")
             result[key] = old[key]
         else:
             text = row.get("value")
             if not isinstance(text, str) or len(text) > 16_384 or "\x00" in text:
-                raise ValueError("Values must be text, up to 16,384 characters.")
+                raise McpSettingsError("Values must be text, up to 16,384 characters.")
             if not env and ("\r" in text or "\n" in text):
-                raise ValueError("Header values cannot contain line breaks.")
+                raise McpSettingsError("Header values cannot contain line breaks.")
             result[key] = text
     return result
 
@@ -86,7 +90,7 @@ def _pairs(value: Any, previous: Any, *, env: bool) -> dict[str, str]:
 def editor(config: dict[str, Any], name: str) -> dict[str, Any]:
     spec = _servers(config).get(name)
     if not isinstance(spec, dict) or _transport(spec) not in ("http", "sse", "stdio"):
-        raise ValueError(
+        raise McpSettingsError(
             "This server uses an unsupported format. Use Anki's Config editor to edit it."
         )
     return {
@@ -104,26 +108,26 @@ def editor(config: dict[str, Any], name: str) -> dict[str, Any]:
 def mutate(config: dict[str, Any], msg: dict[str, Any]) -> dict[str, Any]:
     """Validate the whole edit before returning an isolated new config."""
     if msg.get("revision") != snapshot(config)["revision"]:
-        raise ValueError("MCP settings changed elsewhere. Reopen the server and try again.")
+        raise McpSettingsError("MCP settings changed elsewhere. Reopen the server and try again.")
     updated = copy.deepcopy(config)
     servers = copy.deepcopy(_servers(config))
     disabled = _disabled(config)
     action = msg.get("action")
     if action == "inherit":
         if not isinstance(msg.get("enabled"), bool):
-            raise ValueError("Choose whether to use your Claude Code servers.")
+            raise McpSettingsError("Choose whether to use your Claude Code servers.")
         updated["mcp_inherit_user"] = msg["enabled"]
         return updated
     name = _name(msg.get("name"))
     if action == "toggle":
         if not isinstance(msg.get("enabled"), bool):
-            raise ValueError("Choose whether to enable the server.")
+            raise McpSettingsError("Choose whether to enable the server.")
         disabled = [v for v in disabled if v != name]
         if not msg["enabled"]:
             disabled.append(name)
     elif action == "remove":
         if name not in servers:
-            raise ValueError("The server no longer exists. Refresh settings and try again.")
+            raise McpSettingsError("The server no longer exists. Refresh settings and try again.")
         del servers[name]
         # Keep it blocked: a same-name inherited server must not become active.
         if name not in disabled:
@@ -131,10 +135,10 @@ def mutate(config: dict[str, Any], msg: dict[str, Any]) -> dict[str, Any]:
     elif action == "save":
         replacing = msg.get("existing") is True
         if (name in servers) != replacing:
-            raise ValueError("That server name already exists or was removed. Reopen settings.")
+            raise McpSettingsError("That server name already exists or was removed. Reopen settings.")
         draft = msg.get("server")
         if not isinstance(draft, dict) or draft.get("transport") not in ("stdio", "http", "sse"):
-            raise ValueError("Choose HTTP, SSE or a local command.")
+            raise McpSettingsError("Choose HTTP, SSE or a local command.")
         transport = draft["transport"]
         previous = servers.get(name, {})
         previous = previous if isinstance(previous, dict) else {}
@@ -150,31 +154,31 @@ def mutate(config: dict[str, Any], msg: dict[str, Any]) -> dict[str, Any]:
                 or len(command) > 4096
                 or "\x00" in command
             ):
-                raise ValueError("Enter a command or executable path.")
+                raise McpSettingsError("Enter a command or executable path.")
             if (
                 not isinstance(args, list)
                 or len(args) > 200
                 or any(not isinstance(v, str) or len(v) > 16_384 or "\x00" in v for v in args)
             ):
-                raise ValueError("Enter arguments as text, one per line (up to 200).")
+                raise McpSettingsError("Enter arguments as text, one per line (up to 200).")
             spec.update(command=command.strip(), args=args)
             spec["env"] = _pairs(draft.get("env", []), previous.get("env"), env=True)
         else:
             url = draft.get("url")
             if not isinstance(url, str):
-                raise ValueError("Enter a complete HTTP or HTTPS server URL.")
+                raise McpSettingsError("Enter a complete HTTP or HTTPS server URL.")
             try:
                 parsed = urlsplit(url)
                 valid = parsed.scheme in ("http", "https") and bool(parsed.hostname)
             except ValueError:
                 valid = False
             if not valid or len(url) > 8192 or any(c.isspace() for c in url):
-                raise ValueError("Enter a complete HTTP or HTTPS server URL.")
+                raise McpSettingsError("Enter a complete HTTP or HTTPS server URL.")
             spec["url"] = url
             spec["headers"] = _pairs(draft.get("headers", []), previous.get("headers"), env=False)
         servers[name] = spec
     else:
-        raise ValueError("Unknown MCP settings action.")
+        raise McpSettingsError("Unknown MCP settings action.")
     updated["mcp_servers"] = servers
     updated["mcp_disabled"] = sorted(set(disabled))
     return updated
@@ -189,15 +193,16 @@ def handle(
 ) -> None:
     """Private dock bridge only; no collection access, process spawn or network."""
     response: dict[str, Any] = {"type": "mcp_settings", "request_id": msg.get("request_id")}
-    config = read()
+    config: dict[str, Any] = {}
     try:
+        config = read()
         if msg.get("action") == "edit":
             response["editor"] = editor(config, _name(msg.get("name")))
         elif msg.get("action") != "read":
             updated = mutate(config, msg)
             write({key: updated[key] for key in KEYS if updated.get(key) != config.get(key)})
             config = updated
-    except ValueError as exc:
+    except McpSettingsError as exc:
         response["error"] = str(exc)
     except Exception:
         # Config values and write errors may contain credentials. Never echo.

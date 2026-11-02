@@ -158,7 +158,7 @@ class McpSettingsTests(unittest.TestCase):
         self.assertEqual("request", pushed[-1]["request_id"])
 
         def failed_write(_changes: Any) -> None:
-            raise OSError("synthetic-private-header")
+            raise ValueError("synthetic-private-header")
 
         handle(message, read=lambda: self.config, write=failed_write, push=pushed.append)
         self.assertNotIn("synthetic-private-header", json.dumps(pushed))
