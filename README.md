@@ -79,6 +79,8 @@ does not collect telemetry.
 ## What it can do
 
 - Keep the current reviewer card prominently in context.
+- Reply to a selected passage in an answer (unreleased) with a compact **Reply** action
+  (or Alt+Enter), keeping the quote beside your question and in chat history.
 - Search with Anki syntax and inspect notes, cards, decks, tags, and study
   statistics.
 - Build a cached, annotated map of the collection without stuffing the entire

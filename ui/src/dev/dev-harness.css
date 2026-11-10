@@ -44,6 +44,7 @@ body.night-mode #dev-toolbar button {
 /* Typical dock width, capped by the actual viewport so responsive checks can
    exercise dock.py's 360px floor instead of merely clipping this fixed frame. */
 #dev-frame {
+  box-sizing: border-box;
   width: min(420px, 100vw);
   height: calc(100vh - 40px);
   margin: 0 auto;

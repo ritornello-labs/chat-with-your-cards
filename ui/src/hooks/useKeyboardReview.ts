@@ -45,7 +45,7 @@ function inVimEditor(target: EventTarget | null): boolean {
 
 /** A popover/dropdown is open and Escape belongs to it, not to Anki. */
 function popoverOpen(): boolean {
-  return !!document.querySelector(".cwyc-panel, .cwyc-combo-list");
+  return !!document.querySelector(".cwyc-panel, .cwyc-combo-list, .cwyc-selection-reply");
 }
 
 export function useKeyboardReview(store: ChatStore): void {

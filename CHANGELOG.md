@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Reply to selected answer text with a floating Reply action or Alt+Enter.
+  Attach multiple removable quotes without replacing the draft, and preserve
+  them in sent messages, agent context and saved history. Supports both the
+  plain and Vim composers.
+
 - Add reviewed agent configuration of Anki profile settings: sync server URL,
   automatic/media sync, background media interval and network timeout. Include
   native persistence and undo, profile/staleness checks, and protected account

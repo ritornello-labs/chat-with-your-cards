@@ -1111,7 +1111,10 @@ def _wire_bridge() -> None:
             extra_blocks = _context_blocks(state.attachments)
             text = text + "\n\n" + _attachment_message_block(state.attachments)
             _clear_composer_attachments(discard_files=False)
-        controller.send_user_message(text, extra_blocks=extra_blocks or None)
+        controller.send_user_message(
+            text, extra_blocks=extra_blocks or None,
+            reply_quotes=msg.get("reply_quotes"),
+        )
 
     bridge.on("send", _on_send)
     bridge.on("pick_attachments", lambda _msg: _pick_composer_attachments())

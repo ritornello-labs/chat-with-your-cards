@@ -23,18 +23,22 @@ import { WidgetCard, WidgetOfferChip } from "./components/WidgetCard";
 import { SetupCard } from "./components/SetupCard";
 import { ToolApprovalChip } from "./components/ToolApprovalChip";
 import { GradingCard } from "./components/GradingCard";
+import { ReplyQuotes } from "./components/ReplyQuotes";
+import { SelectionReply } from "./components/SelectionReply";
+import { readReplyQuotes, type ReplyQuote } from "./replyQuotes";
 
-function UserMessage() {
+function UserMessage({ quotes }: { quotes: readonly ReplyQuote[] }) {
   return (
     <MessagePrimitive.Root className="cwyc-row cwyc-row-user" data-testid="user-message">
       <div className="cwyc-msg cwyc-msg-user">
+        <ReplyQuotes quotes={quotes} />
         <MessagePrimitive.Parts />
       </div>
     </MessagePrimitive.Root>
   );
 }
 
-function AssistantMessage({ store }: { store: ChatStore }) {
+function AssistantMessage({ store, messageId }: { store: ChatStore; messageId: string }) {
   // MUST be memoized on a stable key. assistant-ui uses each entry below as a
   // JSX element TYPE, so a fresh arrow identity is a different component type
   // and React UNMOUNTS + remounts the whole part subtree instead of updating
@@ -110,7 +114,7 @@ function AssistantMessage({ store }: { store: ChatStore }) {
   );
 
   return (
-    <MessagePrimitive.Root className="cwyc-row cwyc-row-assistant" data-testid="assistant-message">
+    <MessagePrimitive.Root className="cwyc-row cwyc-row-assistant" data-testid="assistant-message" data-reply-message={messageId}>
       <div className="cwyc-msg cwyc-msg-assistant">
         <MessagePrimitive.Parts components={components} />
       </div>
@@ -329,6 +333,7 @@ function Composer({ store }: { store: ChatStore }) {
       <BulkProposalBar store={store} />
       <DeferredUndoChip store={store} />
       <LearningNudgeBar store={store} />
+      <ReplyQuotes quotes={ui.replyQuotes} onRemove={(index) => store.removeReplyQuote(index)} />
       {ui.settings?.vimMode ? (
         <VimComposer store={store} />
       ) : (
@@ -440,9 +445,12 @@ export function Thread({ store }: { store: ChatStore }) {
           )}
         </ThreadPrimitive.Empty>
         <ThreadPrimitive.Messages>
-          {({ message }) => (message.role === "user" ? <UserMessage /> : <AssistantMessage store={store} />)}
+          {({ message }) => (message.role === "user"
+            ? <UserMessage quotes={readReplyQuotes(message.metadata.custom.replyQuotes)} />
+            : <AssistantMessage store={store} messageId={message.id} />)}
         </ThreadPrimitive.Messages>
       </ThreadPrimitive.Viewport>
+      <SelectionReply store={store} />
       <Composer store={store} />
     </ThreadPrimitive.Root>
   );

@@ -49,6 +49,7 @@ import { postCommand } from "./bridge";
 import { dismissAllPopovers } from "./hooks/useDismiss";
 import { openSettingsSection } from "./settingsNavigation";
 import type { McpResponse } from "./mcpSettings";
+import { MAX_REPLY_QUOTES, MAX_REPLY_QUOTE_CHARS, readReplyQuotes, type ReplyQuote } from "./replyQuotes";
 import type {
   BridgeCommand,
   ChatEvent,
@@ -207,6 +208,7 @@ interface StoreMessage {
   readonly content: readonly AssistantPart[];
   readonly status?: MessageStatus;
   readonly createdAt: Date;
+  readonly replyQuotes?: readonly ReplyQuote[];
 }
 
 export interface UsageSnapshot {
@@ -359,6 +361,7 @@ export interface SetAsideEntry {
 }
 
 export interface UiState {
+  readonly replyQuotes: readonly ReplyQuote[];
   readonly agent: AgentState;
   readonly openTarget: "terminal" | "desktop";
   readonly meta: CollectionMeta;
@@ -441,6 +444,7 @@ export const PERMISSION_MODES: readonly { id: string; label: string; hint: strin
 const EMPTY_PINS: PinsState = { deck: "", note_type: "", tags: [], fields: {} };
 
 const DEFAULT_UI_STATE: UiState = {
+  replyQuotes: [],
   agent: { backend: "auto", model: "", effort: "", mode: "default", fast: false, tools: "sandbox" },
   openTarget: "terminal",
   meta: { decks: [], noteTypes: [], tags: [] },
@@ -498,6 +502,7 @@ function toThreadMessageLike(msg: StoreMessage): ThreadMessageLike {
     role: msg.role,
     content: msg.content,
     createdAt: msg.createdAt,
+    metadata: { custom: { replyQuotes: msg.replyQuotes ?? [] } },
     ...(msg.role === "assistant" ? { status: msg.status } : {}),
   } as ThreadMessageLike;
 }
@@ -543,13 +548,14 @@ export class ChatStore {
 
   // ---- outbound: UI -> Python (postCommand mirrors app.js's post()) ----
 
-  private beginUserTurn(text: string): boolean {
+  private beginUserTurn(text: string, replyQuotes: readonly ReplyQuote[] = []): boolean {
     if (this.isRunning || !text.trim()) return false;
     const userMsg: StoreMessage = {
       id: nextId("u"),
       role: "user",
       content: [{ type: "text", text }],
       createdAt: new Date(),
+      replyQuotes,
     };
     const assistantMsg: StoreMessage = {
       id: nextId("a"),
@@ -565,7 +571,7 @@ export class ChatStore {
     return true;
   }
 
-  sendUserMessage(text: string): void {
+  sendUserMessage(text: string, includeReplyQuotes = false): void {
     if (this.isRunning || !text.trim()) return;
     // The message IS the revision request, so the proposal it replaces stops
     // being the live offer exactly now - not when the button was clicked.
@@ -573,8 +579,32 @@ export class ChatStore {
       postCommand({ type: "proposal_supersede", id: this.pendingSupersedeId });
       this.pendingSupersedeId = null;
     }
-    if (!this.beginUserTurn(text)) return;
-    postCommand({ type: "send", text });
+    const quotes = includeReplyQuotes ? this.ui.replyQuotes : [];
+    if (!this.beginUserTurn(text, quotes)) return;
+    if (includeReplyQuotes) this.ui = { ...this.ui, replyQuotes: [] };
+    postCommand({ type: "send", text, ...(quotes.length ? { reply_quotes: quotes } : {}) });
+    this.emit();
+  }
+
+  addReplyQuote(messageId: string, text: string): boolean {
+    const index = this.messages.findIndex((m) => m.id === messageId && m.role === "assistant");
+    if (index < 0 || !text.trim()) return false;
+    if (text.length > MAX_REPLY_QUOTE_CHARS || this.ui.replyQuotes.length >= MAX_REPLY_QUOTES) {
+      this.dispatch({ type: "notice", text: text.length > MAX_REPLY_QUOTE_CHARS
+        ? "Select a shorter passage (up to 8,000 characters)." : "You can reply to up to 8 selections at once." });
+      return false;
+    }
+    const source_turn = this.messages.slice(0, index).filter((m) => m.role === "user").length;
+    if (!this.ui.replyQuotes.some((q) => q.source_turn === source_turn && q.text === text)) {
+      this.ui = { ...this.ui, replyQuotes: [...this.ui.replyQuotes, { text, source_turn }] };
+      this.emit();
+    }
+    return true;
+  }
+
+  removeReplyQuote(index: number): void {
+    this.ui = { ...this.ui, replyQuotes: this.ui.replyQuotes.filter((_, i) => i !== index) };
+    this.emit();
   }
 
   cancel(): void {
@@ -1225,7 +1255,8 @@ export class ChatStore {
         break;
       }
       case "user_message":
-        this.beginUserTurn(String((event as { text?: string }).text ?? ""));
+        this.beginUserTurn(String((event as { text?: string }).text ?? ""),
+          readReplyQuotes((event as { reply_quotes?: unknown }).reply_quotes));
         break;
       case "learning": {
         const learn = event as {
@@ -1887,6 +1918,7 @@ export class ChatStore {
     this.ui = {
       ...this.ui,
       ledger: { sessionTag: "", entries: [] },
+      replyQuotes: [],
       notice: null,
       activeProposalId: null,
       attachments: [],
@@ -1913,7 +1945,7 @@ export class ChatStore {
   private replayHistory(events: readonly unknown[]): void {
     this.reset();
     for (const raw of events) {
-      const ev = raw as { type?: string; text?: string };
+      const ev = raw as { type?: string; text?: string; reply_quotes?: unknown };
       if (!ev || typeof ev.type !== "string") continue;
       if (ev.type === "user_message") {
         const userMsg: StoreMessage = {
@@ -1921,6 +1953,7 @@ export class ChatStore {
           role: "user",
           content: [{ type: "text", text: String(ev.text ?? "") }],
           createdAt: new Date(),
+          replyQuotes: readReplyQuotes(ev.reply_quotes),
         };
         this.messages = [...this.messages, userMsg];
         this.currentAssistantId = null; // next assistant content opens a fresh bubble
