@@ -268,13 +268,14 @@ export function SelectionReply({ store }: { store: ChatStore }) {
           event.preventDefault(); event.stopPropagation(); save();
         }
       }}>
+      <div className="cwyc-annotation-heading">Comment · selection {editor.index + 1}</div>
       <div className="cwyc-annotation-input-row">
         <textarea ref={inputRef} className="cwyc-annotation-input cwyc-reply-comment"
           data-testid="reply-comment" aria-label={`Comment for annotation ${editor.index + 1}`}
           placeholder="Add an optional comment…" rows={1} maxLength={MAX_REPLY_COMMENT_CHARS}
           value={editor.comment} onChange={(event) => setEditor({ ...editor, comment: event.target.value })} />
         {editor.isNew && <button type="button" className="cwyc-annotation-add" data-testid="save-annotation"
-          aria-label="Add annotation" title="Add annotation" onClick={save}>↑</button>}
+          aria-label="Add annotation" title="Add annotation" onClick={save}>Add</button>}
       </div>
       {!editor.isNew && <div className="cwyc-annotation-actions">
         <button type="button" className="cwyc-annotation-delete" data-testid="delete-annotation"

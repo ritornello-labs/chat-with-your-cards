@@ -18,7 +18,7 @@ export function AnnotationSummary({ store }: { store: ChatStore }) {
     <button type="button" className="cwyc-annotation-summary-button" data-testid="annotation-summary"
       aria-label={`Review ${ui.replyQuotes.length} annotations`} aria-expanded={open}
       onClick={() => ui.replyQuotes.length === 1 ? edit(0) : setOpen(!open)}>
-      <svg width="15" height="15" viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="M4 3h10a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H8l-4 3v-3H3V4a1 1 0 0 1 1-1Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" /></svg>
+      <svg width="15" height="15" viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="M4 2.5h7l3 3v10H4zM11 2.5v3h3M6.5 8h5M6.5 11h4" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" /></svg>
       {ui.replyQuotes.length} annotation{ui.replyQuotes.length === 1 ? "" : "s"}
     </button>
     {open && <div role="menu" aria-label="Annotations" className="cwyc-annotation-list cwyc-panel">

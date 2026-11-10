@@ -5,8 +5,9 @@
 - Add source-anchored annotations: select text, choose Add to chat, and add an
   optional comment in a popover. Numbered markers reopen comments with explicit
   Save, Cancel and Delete. A compact annotation chip replaces stacked draft
-  editors. Preserve the main draft and send saved annotations together, with or
-  without an additional message. Keep final comments in agent context/history.
+  editors. Use CWYC's theme accents, square markers and card/button styling.
+  Preserve the main draft and send saved annotations together, with or without
+  an additional message. Keep final comments in agent context/history.
 
 - Add reviewed agent configuration of Anki profile settings: sync server URL,
   automatic/media sync, background media interval and network timeout. Include

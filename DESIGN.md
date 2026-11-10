@@ -629,10 +629,12 @@ budgets vs the existing 8 MB inline cap; and how attachments interact with
 **Replies to selected answer text (2026-11-09, implemented in source).**
 Selecting a passage in a completed assistant text part offers **Add to chat**
 (Alt+Enter also works). A small popover beside the passage collects an optional
-comment. Adding it leaves a blue numbered marker at the source and a compact
+comment. Adding it leaves a numbered marker at the source and a compact
 **N annotations** chip above the main composer; there are no stacked draft
-editors. The original composer draft stays intact. Source ranges and CSS
-Highlights preserve selection context without rewriting rendered markdown.
+editors. The original composer draft stays intact. The visual treatment uses
+CWYC's active palette, square number tabs, an accent-topped card with a small
+selection caption, rectangular action buttons and a paper-note summary icon.
+Source ranges and CSS Highlights preserve context without rewriting markdown.
 
 Clicking a marker reopens its comment with **Save**, **Cancel** and **Delete**.
 Edits stay local to that editor until Save. Cancel preserves the saved comment;
