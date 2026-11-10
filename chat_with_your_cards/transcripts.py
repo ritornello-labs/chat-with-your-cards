@@ -98,7 +98,14 @@ class TranscriptStore:
         self._events.append(payload)
         self._meta["updated_at"] = self._now()
         if not self._meta["title"] and payload.get("type") == "user_message":
-            self._meta["title"] = _short_title(str(payload.get("text", "")))
+            title = str(payload.get("text", ""))
+            if not title.strip():
+                title = " ".join(
+                    q.get("comment", "")
+                    for q in payload.get("reply_quotes", [])
+                    if isinstance(q, dict) and isinstance(q.get("comment"), str)
+                )
+            self._meta["title"] = _short_title(title)
 
     def set_backend_session(self, session_id: str | None) -> None:
         if session_id:

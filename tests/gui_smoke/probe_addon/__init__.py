@@ -27,6 +27,11 @@ os.environ["CWYC_BACKEND"] = "scripted"
 from aqt import mw
 from aqt.qt import QDockWidget, QKeySequence, QShortcut, QTimer
 
+# This add-on runs only in disposable workbench profiles. An upstream upgrade
+# notice can otherwise open a modal dialog in the middle of a synthetic turn.
+if os.environ.get("ANKI_ADDON_WORKBENCH_RESULT") and mw is not None:
+    mw.pm.set_update_check(False)
+
 try:
     from aqt.qt import QTest
 except ImportError:  # pragma: no cover
@@ -2016,6 +2021,9 @@ def _run_checks() -> dict[str, Any]:
         if isinstance(value, dict):
             entry["detail"] = value
         checks.append(entry)
+        progress = os.environ.get("CWYC_SMOKE_PROGRESS")
+        if progress:
+            Path(progress).write_text(json.dumps([item["name"] for item in checks]))
         return value
 
     addon = check(
@@ -2145,6 +2153,110 @@ def _run_checks() -> dict[str, Any]:
         )
 
     check("toggle expands the rail to the full dock", _toggle_expands_dock)
+
+    def _selection_reply_round_trip() -> dict[str, Any]:
+        controller = state.controller
+        controller.new_chat()
+        _send_message(dock.web, "Explain this card")
+        _wait_until(lambda: not controller.streaming, STREAM_TIMEOUT_MS, "answer for quote")
+
+        def quote_count(selector: str) -> int:
+            return _eval_js(dock.web,
+                f"document.querySelectorAll('{selector}').length",
+                DOM_TIMEOUT_MS, "quote UI count")
+
+        _wait_until(lambda: quote_count("[data-reply-text] p") > 0,
+                    DOM_TIMEOUT_MS, "completed answer text")
+
+        def select_passage() -> str:
+            return _eval_js(dock.web,
+                "(() => {const p=document.querySelector('[data-reply-text] p');"
+                "document.activeElement?.blur();p.scrollIntoView({block:'nearest'});const r=document.createRange();"
+                "r.selectNodeContents(p);const s=getSelection();s.removeAllRanges();"
+                "s.addRange(r);document.dispatchEvent(new Event('selectionchange'));"
+                "return s.toString()})()",
+                DOM_TIMEOUT_MS, "select answer passage")
+
+        def attach_quote() -> None:
+            _wait_until(lambda: quote_count("[data-testid=reply-to-selection]") == 1,
+                        DOM_TIMEOUT_MS, "selection action")
+            _eval_js(dock.web,
+                "document.querySelector('[data-testid=reply-to-selection]').click()",
+                DOM_TIMEOUT_MS, "attach quote")
+            _wait_until(lambda: quote_count("[data-testid=annotation-editor]") == 1,
+                        DOM_TIMEOUT_MS, "inline annotation editor")
+
+        quote = select_passage()
+        if not quote.strip():
+            raise AssertionError("selection was empty")
+        attach_quote()
+        _eval_js(dock.web,
+            "(() => {const e=document.querySelector('[data-testid=reply-comment]');"
+            "Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call("
+            "e,'Explain this in plainer terms');e.dispatchEvent(new Event('input',{bubbles:true}));})()",
+            DOM_TIMEOUT_MS, "edit passage reply")
+        _eval_js(dock.web, "document.querySelector('[data-testid=save-annotation]').click()",
+                 DOM_TIMEOUT_MS, "save annotation")
+        _wait_until(lambda: quote_count("[data-testid=annotation-editor]") == 0,
+                    DOM_TIMEOUT_MS, "saved annotation editor closes")
+        _eval_js(dock.web, "document.querySelector('[data-testid=annotation-summary]').click()",
+                 DOM_TIMEOUT_MS, "reopen saved annotation")
+        _wait_until(lambda: quote_count("[data-testid=annotation-editor]") == 1,
+                    DOM_TIMEOUT_MS, "saved annotation editor")
+        _wait_until(lambda: quote_count("[data-testid=annotation-marker]") == 1,
+                    DOM_TIMEOUT_MS, "numbered source marker")
+        _eval_js(dock.web,
+            "(() => {const e=document.querySelector('[data-testid=reply-comment]');"
+            "Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call("
+            "e,'This edit must be cancelled');e.dispatchEvent(new Event('input',{bubbles:true}));})()",
+            DOM_TIMEOUT_MS, "draft edit before cancel")
+        _eval_js(dock.web, "document.querySelector('[data-testid=cancel-annotation]').click()",
+                 DOM_TIMEOUT_MS, "cancel annotation edit")
+        _wait_until(lambda: quote_count("[data-testid=annotation-editor]") == 0,
+                    DOM_TIMEOUT_MS, "cancelled editor closes")
+        _wait_until(lambda: _eval_js(dock.web,
+            "!document.querySelector('[data-testid=send]').disabled",
+            DOM_TIMEOUT_MS, "comment-only send enabled"), DOM_TIMEOUT_MS, "comment-only send")
+        _eval_js(dock.web, "document.querySelector('[data-testid=send]').click()",
+                 DOM_TIMEOUT_MS, "send passage reply")
+        _wait_until(lambda: not controller.streaming, STREAM_TIMEOUT_MS, "quoted reply")
+        transcript_id = controller._transcripts.current_id
+        controller._transcripts.flush()
+        saved = controller._transcripts.load(transcript_id)
+        users = [e for e in saved["events"] if e.get("type") == "user_message"]
+        if users[-1].get("reply_quotes") != [{
+            "text": quote, "source_turn": 1, "comment": "Explain this in plainer terms"
+        }]:
+            raise AssertionError("quote did not survive native send/transcript boundary")
+        if users[-1]["text"] != "":
+            raise AssertionError("quote polluted the user's visible reply")
+        controller.load_history(transcript_id)
+        _wait_until(lambda: quote_count("[data-testid=sent-reply-quotes] blockquote") == 1,
+                    DOM_TIMEOUT_MS, "reloaded quote")
+        shown = _eval_js(dock.web,
+            "document.querySelector('[data-testid=sent-reply-quotes] blockquote').textContent",
+            DOM_TIMEOUT_MS, "saved quote text")
+        if shown != quote:
+            raise AssertionError("history changed the selected passage")
+        select_passage()
+        attach_quote()
+        shot = os.environ.get("CWYC_SELECTION_SCREENSHOT")
+        if shot:
+            QTest.qWait(100)
+            if not mw.grab().save(shot, "PNG"):
+                raise AssertionError("could not capture the quote UI")
+        controller.new_chat()
+        _wait_until(lambda: quote_count("[data-testid=reply-draft-quotes]") == 0,
+                    DOM_TIMEOUT_MS, "new chat clears quotes")
+        # Later native checks inspect the current session directly. New chat
+        # intentionally starts it lazily; restore that fixture precondition.
+        controller.ensure_ready()
+        return {"native_send": True, "history": True, "new_chat": True}
+
+    if os.environ.get("CWYC_SMOKE_SELECTION_ONLY"):
+        check("reply to selection sends, persists and reloads quoted context",
+              _selection_reply_round_trip)
+        return {"ok": True, "checks": checks, "selection_only": True}
 
     def _scripted_chat() -> dict[str, Any]:
         controller = state.controller
@@ -2679,6 +2791,20 @@ def _run_checks() -> dict[str, Any]:
         return {"rail_round_trip": True, "settings": settings}
 
     check("collapse/expand round-trip + settings panel", _collapse_expand_cycle)
+
+    def _mcp_settings_round_trip() -> dict[str, Any]:
+        from .mcp_probe import run
+
+        return run(mw, dock, addon, _eval_js, _wait_until)
+
+    check("MCP settings form round-trip", _mcp_settings_round_trip)
+
+    def _anki_settings_round_trip() -> dict[str, Any]:
+        from .anki_settings_probe import run
+
+        return run(mw, dock, addon, _eval_js, _wait_until)
+
+    check("Anki profile settings reviewed apply and undo", _anki_settings_round_trip)
 
     def _vim_mode_round_trip() -> dict[str, Any]:
         """The Settings vim toggle swaps the composer textarea for the
@@ -4870,6 +4996,9 @@ def _run_checks() -> dict[str, Any]:
 
     check("the set-aside tray lists, previews, recalls and restores",
           _set_aside_tray_end_to_end)
+
+    check("reply to selection sends, persists and reloads quoted context",
+          _selection_reply_round_trip)
 
     def _hover_geometry_stable() -> dict[str, Any]:
         """Hovering a header button must change ONLY its background - never

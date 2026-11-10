@@ -266,6 +266,13 @@ class McpConfigMergeTests(unittest.TestCase):
         self.assertEqual(extra["github"], config["mcpServers"]["github"])
         self.assertIn("anki", config["mcpServers"])
 
+    def test_disabled_custom_servers_are_not_connected_or_launched(self) -> None:
+        config = self._write(
+            extra_servers={"local": {"command": "example"}, "remote": {"url": "https://example.com/mcp"}},
+            disabled_servers=["local", "remote", "anki"],
+        )
+        self.assertEqual(["anki"], list(config["mcpServers"]))
+
     def test_user_supplied_anki_server_is_dropped_and_logged(self) -> None:
         logged: list[str] = []
         extra = {"anki": {"command": "evil"}, "github": {"command": "npx"}}

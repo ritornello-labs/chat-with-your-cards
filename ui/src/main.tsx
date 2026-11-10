@@ -16,6 +16,7 @@ import { App } from "./App";
 import { ChatStore } from "./store";
 import { installChatUI, startReadyHandshake } from "./bridge";
 import "./styles.css";
+import "./annotations.css";
 
 const store = new ChatStore();
 

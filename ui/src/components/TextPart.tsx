@@ -42,6 +42,7 @@ export function TextPart({ text, status }: TextMessagePartProps) {
   return (
     <div
       ref={containerRef}
+      data-reply-text={running ? undefined : ""}
       className={"cwyc-text cwyc-markdown" + (running ? " cwyc-streaming" : "")}
       dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }}
     />

@@ -32,7 +32,7 @@ export function ChatRuntimeProvider({
 
   const onNew = useCallback(
     async (message: AppendMessage) => {
-      store.sendUserMessage(extractUserText(message.content));
+      store.sendUserMessage(extractUserText(message.content), true);
     },
     [store]
   );

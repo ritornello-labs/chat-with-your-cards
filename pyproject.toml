@@ -57,6 +57,8 @@ include = [
     "doctor.py",
     "transcripts.py",
     "addon_settings.py",
+    "anki_settings.py",
+    "mcp_settings.py",
     "proposals.py",
     "preview_window.py",
     "media_staging.py",

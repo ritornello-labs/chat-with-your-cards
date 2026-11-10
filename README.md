@@ -53,8 +53,10 @@ command dispatch and proposal-feedback fixes, clean new-chat state, and a
 corrected context meter. See [the release preparation](release/PREPARATION_2026-10-07.md).
 
 The supported backend is a locally installed, officially authenticated Claude
-Code CLI, connected to the add-on through a loopback MCP server. Codex and Pi
-adapters are planned. CWYC does not accept or store API keys.
+Code CLI, connected to the add-on through a loopback MCP server. The
+[roadmap](docs/BACKEND_AND_CHAT_PLAN.md) calls for subscription and API access;
+runtime choices are under evaluation. The current release does not accept or
+store API keys.
 
 ## Requirements and installation
 
@@ -77,12 +79,17 @@ does not collect telemetry.
 ## What it can do
 
 - Keep the current reviewer card prominently in context.
+- Annotate selected answer text (unreleased): **Add to chat** opens a comment
+  popover; numbered source markers reopen it with Save, Cancel and Delete.
+  Stage several annotations in a compact chip and retain them in chat history.
 - Search with Anki syntax and inspect notes, cards, decks, tags, and study
   statistics.
 - Build a cached, annotated map of the collection without stuffing the entire
   collection into every prompt.
 - Fetch card images as actual visual inputs rather than passing filenames.
 - Propose new notes and edits with deck, tag, note-type, and field constraints.
+- Propose changes to Anki profile sync settings, with explicit review, native
+  persistence and undo. Changing servers requires signing out in Preferences.
 - Read and change this add-on's own common settings through chat; every change
   needs approval in the dock, including in trusted collection modes.
 - Render the note's real card templates before a proposed change is accepted.

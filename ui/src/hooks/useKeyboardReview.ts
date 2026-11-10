@@ -45,7 +45,7 @@ function inVimEditor(target: EventTarget | null): boolean {
 
 /** A popover/dropdown is open and Escape belongs to it, not to Anki. */
 function popoverOpen(): boolean {
-  return !!document.querySelector(".cwyc-panel, .cwyc-combo-list");
+  return !!document.querySelector(".cwyc-panel, .cwyc-combo-list, .cwyc-selection-reply");
 }
 
 export function useKeyboardReview(store: ChatStore): void {
@@ -72,6 +72,9 @@ export function useKeyboardReview(store: ChatStore): void {
 
       const chord = event.metaKey || event.ctrlKey;
       if (!chord || event.altKey) return;
+      // A selection reply is conversation text, not a proposal field. Never
+      // turn its editing shortcuts into an unrelated collection write.
+      if ((event.target as HTMLElement | null)?.closest(".cwyc-reply-comment")) return;
 
       const pending = store.pendingProposalIds();
       if (!pending.length) return;

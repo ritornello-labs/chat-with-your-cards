@@ -477,3 +477,25 @@ Still open:
   safety. (Invisible proposal tags, the stale edit preview, the read-only deck,
   and the missing kind bodies were closed on 2026-07-27; the strikethroughs
   above mark them.)
+
+
+## Selected-text reply verification
+
+The standalone `scripts/test-selection-reply.mjs` uses Node's built-in WebSocket
+client and a disposable Chrome DevTools endpoint; it installs no test packages.
+Register/start the dev preview and headless Chrome through DevRoster. Chrome must
+use a fresh temporary `--user-data-dir` and `--remote-debugging-port`; never point
+this test at a personal browser profile. Then run:
+
+```sh
+node scripts/test-selection-reply.mjs http://127.0.0.1:5194 http://127.0.0.1:9334 /absolute/temporary/captures
+```
+
+The synthetic replayer checks Add to chat, source markers/highlights, the compact
+annotation chip, Save/Cancel/Delete semantics, long-comment wrapping, independent
+comments, main-draft preservation, history replay, annotation-only sends,
+plain/Vim Enter and narrow/dark layouts. Screenshots and failure captures
+belong outside Git. Stop the managed preview/browser after testing. The native
+Anki smoke separately exercises quote selection, the real bridge, persisted
+transcripts, history reload and new-chat cleanup. `CWYC_SELECTION_SCREENSHOT`
+can point at a temporary path for a native quote-UI capture.

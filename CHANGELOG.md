@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- Add source-anchored annotations: select text, choose Add to chat, and add an
+  optional comment in a popover. Numbered markers reopen comments with explicit
+  Save, Cancel and Delete. A compact annotation chip replaces stacked draft
+  editors. Use CWYC's theme accents, square markers and card/button styling.
+  Preserve the main draft and send saved annotations together, with or without
+  an additional message. Keep final comments in agent context/history.
+
+- Add reviewed agent configuration of Anki profile settings: sync server URL,
+  automatic/media sync, background media interval and network timeout. Include
+  native persistence and undo, profile/staleness checks, and protected account
+  handling. Applying settings never starts a sync.
+
+- Manage custom MCP servers in Settings with connection forms, per-server
+  toggles, inheritance and blocked-name controls. Keep saved credentials hidden,
+  preserve unchanged advanced options and reject stale edits. Changes apply to
+  new chats; disabled custom commands are not launched.
+- Record the revised backend, branching/edit-retry and skill-refresh product
+  plan. These remain planned; dependency graphs and capstone gating are deferred.
+
 ## 0.1.1 — 2026-10-07
 
 - Add `get_addon_settings` and proposal-gated `set_addon_settings` so chat can

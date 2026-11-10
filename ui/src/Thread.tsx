@@ -5,6 +5,7 @@ import {
   MessagePrimitive,
   ThreadPrimitive,
   useComposerRuntime,
+  useComposer,
 } from "@assistant-ui/react";
 import { useChatState } from "./ChatRuntimeProvider";
 import type { ChatStore, GradingCardData, ProposalCardData } from "./store";
@@ -23,18 +24,23 @@ import { WidgetCard, WidgetOfferChip } from "./components/WidgetCard";
 import { SetupCard } from "./components/SetupCard";
 import { ToolApprovalChip } from "./components/ToolApprovalChip";
 import { GradingCard } from "./components/GradingCard";
+import { ReplyQuotes } from "./components/ReplyQuotes";
+import { SelectionReply } from "./components/SelectionReply";
+import { AnnotationSummary } from "./components/AnnotationSummary";
+import { readReplyQuotes, type ReplyQuote } from "./replyQuotes";
 
-function UserMessage() {
+function UserMessage({ quotes }: { quotes: readonly ReplyQuote[] }) {
   return (
     <MessagePrimitive.Root className="cwyc-row cwyc-row-user" data-testid="user-message">
       <div className="cwyc-msg cwyc-msg-user">
+        <ReplyQuotes quotes={quotes} />
         <MessagePrimitive.Parts />
       </div>
     </MessagePrimitive.Root>
   );
 }
 
-function AssistantMessage({ store }: { store: ChatStore }) {
+function AssistantMessage({ store, messageId }: { store: ChatStore; messageId: string }) {
   // MUST be memoized on a stable key. assistant-ui uses each entry below as a
   // JSX element TYPE, so a fresh arrow identity is a different component type
   // and React UNMOUNTS + remounts the whole part subtree instead of updating
@@ -110,7 +116,7 @@ function AssistantMessage({ store }: { store: ChatStore }) {
   );
 
   return (
-    <MessagePrimitive.Root className="cwyc-row cwyc-row-assistant" data-testid="assistant-message">
+    <MessagePrimitive.Root className="cwyc-row cwyc-row-assistant" data-testid="assistant-message" data-reply-message={messageId}>
       <div className="cwyc-msg cwyc-msg-assistant">
         <MessagePrimitive.Parts components={components} />
       </div>
@@ -254,6 +260,11 @@ function LearningNudgeBar({ store }: { store: ChatStore }) {
 function Composer({ store }: { store: ChatStore }) {
   const { isRunning, ui } = useChatState(store);
   const composer = useComposerRuntime();
+  const composerText = useComposer((state) => state.text);
+  const hasComments = ui.replyQuotes.some((quote) => quote.comment?.trim());
+  const sendCommentsOnly = () => {
+    if (!isRunning && hasComments && !ui.replyEditorOpen) store.sendUserMessage("", true);
+  };
 
   // Rotating suggestion for the placeholder (#23b). Pool follows the live
   // context; rotation is time-based and cheap (one state tick).
@@ -277,7 +288,15 @@ function Composer({ store }: { store: ChatStore }) {
   // Make the tooltips true: Esc stops generation while streaming; Shift+Tab
   // cycles permission modes (both classic-UI behaviors, DESIGN.md section 9).
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Escape" && isRunning) {
+    if (e.key === "Enter" && !e.shiftKey && ui.replyEditorOpen) {
+      e.preventDefault();
+      return;
+    }
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing &&
+        !composerText.trim() && hasComments && !isRunning) {
+      e.preventDefault();
+      sendCommentsOnly();
+    } else if (e.key === "Escape" && isRunning) {
       e.preventDefault();
       store.cancel();
     } else if (e.key === "Tab" && e.shiftKey) {
@@ -329,12 +348,13 @@ function Composer({ store }: { store: ChatStore }) {
       <BulkProposalBar store={store} />
       <DeferredUndoChip store={store} />
       <LearningNudgeBar store={store} />
+      <AnnotationSummary store={store} />
       {ui.settings?.vimMode ? (
         <VimComposer store={store} />
       ) : (
         <ComposerPrimitive.Input
           className="cwyc-composer-input"
-          placeholder={placeholder}
+          placeholder={hasComments ? "Add a message (optional)…" : placeholder}
           rows={1}
           data-testid="composer-input"
           onKeyDown={onKeyDown}
@@ -356,14 +376,22 @@ function Composer({ store }: { store: ChatStore }) {
         <div className="cwyc-composer-right">
           <ModelPicker store={store} />
           <ThreadPrimitive.If running={false}>
+            {hasComments && !composerText.trim() ? (
+              <button type="button" className="cwyc-send" aria-label="Send replies"
+                title="Send replies" data-testid="send" disabled={ui.replyEditorOpen} onClick={sendCommentsOnly}>
+                <SendIcon />
+              </button>
+            ) : (
             <ComposerPrimitive.Send
               className="cwyc-send"
               aria-label="Send"
               title="Send (Enter)"
               data-testid="send"
+              disabled={ui.replyEditorOpen}
             >
               <SendIcon />
             </ComposerPrimitive.Send>
+            )}
           </ThreadPrimitive.If>
           <ThreadPrimitive.If running>
             <ComposerPrimitive.Cancel
@@ -418,7 +446,7 @@ function InlineImage({ data }: { data: { src: string; caption: string } }) {
 export function Thread({ store }: { store: ChatStore }) {
   const { ui } = useChatState(store);
   return (
-    <ThreadPrimitive.Root className="cwyc-thread">
+    <ThreadPrimitive.Root className={"cwyc-thread" + (ui.replyQuotes.length ? " cwyc-has-annotations" : "")}>
       {/* Announcements come from here, NOT from a live region over the
           transcript: a reply streams token by token, and a live transcript
           re-announces the growing text on every delta (task #22). */}
@@ -440,9 +468,12 @@ export function Thread({ store }: { store: ChatStore }) {
           )}
         </ThreadPrimitive.Empty>
         <ThreadPrimitive.Messages>
-          {({ message }) => (message.role === "user" ? <UserMessage /> : <AssistantMessage store={store} />)}
+          {({ message }) => (message.role === "user"
+            ? <UserMessage quotes={readReplyQuotes(message.metadata.custom.replyQuotes)} />
+            : <AssistantMessage store={store} messageId={message.id} />)}
         </ThreadPrimitive.Messages>
       </ThreadPrimitive.Viewport>
+      <SelectionReply store={store} />
       <Composer store={store} />
     </ThreadPrimitive.Root>
   );

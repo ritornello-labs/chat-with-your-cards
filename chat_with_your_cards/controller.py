@@ -33,6 +33,33 @@ CONTEXT_FREE_SLASH_COMMANDS = {"/compact", "/context", "/cost", "/stats", "/usag
 MAX_PENDING_DECISION_CONTEXT_CHARS = 16_000
 
 
+def _normalize_reply_quotes(value: Any) -> list[dict[str, Any]]:
+    """Bound bridge input and keep quoted text separate from the user's reply."""
+    if not isinstance(value, list):
+        return []
+    quotes = []
+    for item in value[:8]:
+        if not isinstance(item, dict):
+            continue
+        text, turn = item.get("text"), item.get("source_turn")
+        if (
+            isinstance(text, str)
+            and text.strip()
+            and len(text) <= 8000
+            and type(turn) is int
+            and turn >= 0
+        ):
+            quote = {"text": text, "source_turn": turn}
+            comment = item.get("comment", "")
+            if not isinstance(comment, str) or len(comment) > 4000:
+                continue
+            if comment.strip():
+                quote["comment"] = comment
+            if quote not in quotes:
+                quotes.append(quote)
+    return quotes
+
+
 def _setup_platform() -> str:
     """Coarse platform id for the onboarding setup card (task #19): picks
     which install one-liner the UI shows. sys.platform is "darwin" (macOS),
@@ -224,15 +251,38 @@ class ChatController:
         return getattr(self._session, "session_id", None)
 
     def send_user_message(
-        self, text: str, extra_blocks: list[dict] | None = None
+        self,
+        text: str,
+        extra_blocks: list[dict] | None = None,
+        reply_quotes: Any = None,
     ) -> None:
         text = text.strip()
-        if not text or self.streaming:
+        quotes = _normalize_reply_quotes(reply_quotes)
+        if self.streaming or (not text and not any(q.get("comment", "").strip() for q in quotes)):
             return
         self.ensure_ready()
         if self._transcripts is not None:
-            self._transcripts.record({"type": "user_message", "text": text})
-        slash_command = text.split(maxsplit=1)[0].lower() if text.startswith("/") else ""
+            self._transcripts.record(
+                {
+                    "type": "user_message",
+                    "text": text,
+                    **({"reply_quotes": quotes} if quotes else {}),
+                }
+            )
+        # A quoted reply is a normal conversational turn, including when the
+        # user's reply happens to start with a slash command name.
+        slash_command = (
+            text.split(maxsplit=1)[0].lower() if text.startswith("/") and not quotes else ""
+        )
+        if quotes:
+            encoded = json.dumps(quotes, ensure_ascii=False).replace("<", "\\u003c")
+            text = (
+                f"{text}\n\n<quoted-replies>\n"
+                "Each item pairs a selected excerpt from an earlier assistant "
+                "answer with the user's reply in comment (when present). "
+                "Address those replies individually; text is the quoted reference.\n"
+                f"{encoded}\n</quoted-replies>"
+            )
         context_free_command = slash_command in CONTEXT_FREE_SLASH_COMMANDS
         if context_free_command:
             card_block, label = None, "session command"

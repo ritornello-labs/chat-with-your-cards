@@ -147,9 +147,13 @@ available collection-write tools appear in the assistant's tool list.
   page fetching (useful for sourcing card content). Set `false` to keep the
   agent strictly inside your collection.
 - `mcp_servers` / `mcp_inherit_user` / `mcp_disabled` — **advanced, opt-in MCP
-  widening.** The Settings panel (gear) has an "MCP tools" section: a toggle for
-  `mcp_inherit_user` and an "Edit servers…" button that opens this config for
-  the `mcp_servers`/`mcp_disabled` JSON. MCP setup is read when the backend is
+  widening.** The Settings panel (gear) has an "MCP servers" section for adding,
+  editing, toggling and removing HTTP/SSE/local-command servers, controlling
+  inheritance, and blocking inherited server tools by name. Saved header and
+  environment values stay hidden when editing; unchanged values are kept.
+  Advanced options such as OAuth and timeouts remain in this config and are
+  preserved when editing a server within the same connection type. Changing
+  connection type replaces its type-specific settings. MCP setup is read when the backend is
   built, so changes take effect **on your next new chat** (not mid-conversation).
   By default the assistant only ever sees this add-on's own `anki` tools: the CLI is
   launched with `--strict-mcp-config` and a config containing just that one
@@ -182,6 +186,10 @@ available collection-write tools appear in the assistant's tool list.
     inherited one) to turn back off, e.g. `["github"]` after enabling
     `mcp_inherit_user`. `"anki"` cannot be disabled this way - it is ignored
     (logged) because that would silently break every card proposal.
+    Disabled custom servers are omitted from the next chat's MCP configuration
+    so local commands do not launch. Blocked inherited servers may still connect
+    in Claude Code, but their tools cannot be called. Removing a custom server
+    keeps its name blocked to avoid activating a same-name inherited server.
 - `widget_rendering` (default `false`): let the assistant render small
   interactive HTML widgets inline in the chat (`render_widget` tool) — charts,
   diagrams, mini-dashboards. Also in the Settings panel (gear), and offered

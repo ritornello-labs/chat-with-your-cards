@@ -48,6 +48,8 @@ import type { ThreadMessageLike } from "@assistant-ui/react";
 import { postCommand } from "./bridge";
 import { dismissAllPopovers } from "./hooks/useDismiss";
 import { openSettingsSection } from "./settingsNavigation";
+import type { McpResponse } from "./mcpSettings";
+import { MAX_REPLY_QUOTES, MAX_REPLY_QUOTE_CHARS, MAX_REPLY_COMMENT_CHARS, readReplyQuotes, type ReplyQuote } from "./replyQuotes";
 import type {
   BridgeCommand,
   ChatEvent,
@@ -206,6 +208,7 @@ interface StoreMessage {
   readonly content: readonly AssistantPart[];
   readonly status?: MessageStatus;
   readonly createdAt: Date;
+  readonly replyQuotes?: readonly ReplyQuote[];
 }
 
 export interface UsageSnapshot {
@@ -358,6 +361,8 @@ export interface SetAsideEntry {
 }
 
 export interface UiState {
+  readonly replyQuotes: readonly ReplyQuote[];
+  readonly replyEditorOpen: boolean;
   readonly agent: AgentState;
   readonly openTarget: "terminal" | "desktop";
   readonly meta: CollectionMeta;
@@ -368,6 +373,7 @@ export interface UiState {
   readonly notice: { text: string; seq: number } | null;
   readonly dock: DockUiState | null; // null = host has not reported yet
   readonly settings: SettingsState | null; // null = not pushed yet
+  readonly mcp: McpResponse | null;
   readonly setup: SetupState | null; // null = no onboarding needed (or resolved)
   /** Which pending proposal the keyboard acts on. A shortcut that accepts a
    *  card must be visibly aimed at one, or Cmd+Enter is a blind write. */
@@ -439,6 +445,8 @@ export const PERMISSION_MODES: readonly { id: string; label: string; hint: strin
 const EMPTY_PINS: PinsState = { deck: "", note_type: "", tags: [], fields: {} };
 
 const DEFAULT_UI_STATE: UiState = {
+  replyQuotes: [],
+  replyEditorOpen: false,
   agent: { backend: "auto", model: "", effort: "", mode: "default", fast: false, tools: "sandbox" },
   openTarget: "terminal",
   meta: { decks: [], noteTypes: [], tags: [] },
@@ -449,6 +457,7 @@ const DEFAULT_UI_STATE: UiState = {
   notice: null,
   dock: null,
   settings: null,
+  mcp: null,
   setup: null,
   activeProposalId: null,
   reviewing: false,
@@ -495,6 +504,7 @@ function toThreadMessageLike(msg: StoreMessage): ThreadMessageLike {
     role: msg.role,
     content: msg.content,
     createdAt: msg.createdAt,
+    metadata: { custom: { replyQuotes: msg.replyQuotes ?? [] } },
     ...(msg.role === "assistant" ? { status: msg.status } : {}),
   } as ThreadMessageLike;
 }
@@ -540,13 +550,14 @@ export class ChatStore {
 
   // ---- outbound: UI -> Python (postCommand mirrors app.js's post()) ----
 
-  private beginUserTurn(text: string): boolean {
-    if (this.isRunning || !text.trim()) return false;
+  private beginUserTurn(text: string, replyQuotes: readonly ReplyQuote[] = []): boolean {
+    if (this.isRunning || (!text.trim() && !replyQuotes.some((q) => q.comment?.trim()))) return false;
     const userMsg: StoreMessage = {
       id: nextId("u"),
       role: "user",
       content: [{ type: "text", text }],
       createdAt: new Date(),
+      replyQuotes,
     };
     const assistantMsg: StoreMessage = {
       id: nextId("a"),
@@ -562,16 +573,56 @@ export class ChatStore {
     return true;
   }
 
-  sendUserMessage(text: string): void {
-    if (this.isRunning || !text.trim()) return;
+  sendUserMessage(text: string, includeReplyQuotes = false): void {
+    if (includeReplyQuotes && this.ui.replyEditorOpen) return;
+    const quotes = includeReplyQuotes ? this.ui.replyQuotes : [];
+    if (this.isRunning || (!text.trim() && !quotes.some((q) => q.comment?.trim()))) return;
     // The message IS the revision request, so the proposal it replaces stops
     // being the live offer exactly now - not when the button was clicked.
     if (this.pendingSupersedeId) {
       postCommand({ type: "proposal_supersede", id: this.pendingSupersedeId });
       this.pendingSupersedeId = null;
     }
-    if (!this.beginUserTurn(text)) return;
-    postCommand({ type: "send", text });
+    if (!this.beginUserTurn(text, quotes)) return;
+    if (includeReplyQuotes) this.ui = { ...this.ui, replyQuotes: [] };
+    postCommand({ type: "send", text, ...(quotes.length ? { reply_quotes: quotes } : {}) });
+    this.emit();
+  }
+
+  addReplyQuote(messageId: string, text: string): number | null {
+    const index = this.messages.findIndex((m) => m.id === messageId && m.role === "assistant");
+    if (index < 0 || !text.trim()) return null;
+    const source_turn = this.messages.slice(0, index).filter((m) => m.role === "user").length;
+    const existing = this.ui.replyQuotes.findIndex((q) => q.source_turn === source_turn && q.text === text);
+    if (existing >= 0) return existing;
+    if (text.length > MAX_REPLY_QUOTE_CHARS || this.ui.replyQuotes.length >= MAX_REPLY_QUOTES) {
+      this.dispatch({ type: "notice", text: text.length > MAX_REPLY_QUOTE_CHARS
+        ? "Select a shorter passage (up to 8,000 characters)." : "You can reply to up to 8 selections at once." });
+      return null;
+    }
+    if (!this.ui.replyQuotes.some((q) => q.source_turn === source_turn && q.text === text)) {
+      this.ui = { ...this.ui, replyQuotes: [...this.ui.replyQuotes, { text, source_turn }] };
+      this.emit();
+    }
+    return this.ui.replyQuotes.length - 1;
+  }
+
+  editReplyComment(index: number, comment: string): void {
+    if (comment.length > MAX_REPLY_COMMENT_CHARS) return;
+    this.ui = { ...this.ui, replyQuotes: this.ui.replyQuotes.map((q, i) =>
+      i === index ? { ...q, comment } : q) };
+    this.emit();
+  }
+
+  setReplyEditorOpen(open: boolean): void {
+    if (open === this.ui.replyEditorOpen) return;
+    this.ui = { ...this.ui, replyEditorOpen: open };
+    this.emit();
+  }
+
+  removeReplyQuote(index: number): void {
+    this.ui = { ...this.ui, replyQuotes: this.ui.replyQuotes.filter((_, i) => i !== index) };
+    this.emit();
   }
 
   cancel(): void {
@@ -958,6 +1009,14 @@ export class ChatStore {
     postCommand({ type: "set_setting", key, value });
   }
 
+  private mcpRequestSeq = 0;
+
+  mcpSettings(action: string, data: Record<string, unknown> = {}): string {
+    const requestId = `mcp-${Date.now()}-${++this.mcpRequestSeq}`;
+    postCommand({ type: "mcp_settings", action, ...data, request_id: requestId });
+    return requestId;
+  }
+
   /** Open Anki's add-on config (vim_mappings and other advanced options). */
   openAddonConfig(): void {
     postCommand({ type: "open_addon_config" });
@@ -1214,7 +1273,8 @@ export class ChatStore {
         break;
       }
       case "user_message":
-        this.beginUserTurn(String((event as { text?: string }).text ?? ""));
+        this.beginUserTurn(String((event as { text?: string }).text ?? ""),
+          readReplyQuotes((event as { reply_quotes?: unknown }).reply_quotes));
         break;
       case "learning": {
         const learn = event as {
@@ -1318,6 +1378,11 @@ export class ChatStore {
         // (e.g. Settings) survives the collapse and reappears on re-expand
         // (dogfood 2026-07-14). Fire on the expanded->collapsed edge only.
         if (wasExpanded && !nowExpanded) dismissAllPopovers();
+        break;
+      }
+      case "mcp_settings": {
+        this.ui = { ...this.ui, mcp: event as unknown as McpResponse };
+        this.emit();
         break;
       }
       case "settings": {
@@ -1871,6 +1936,8 @@ export class ChatStore {
     this.ui = {
       ...this.ui,
       ledger: { sessionTag: "", entries: [] },
+      replyQuotes: [],
+      replyEditorOpen: false,
       notice: null,
       activeProposalId: null,
       attachments: [],
@@ -1897,7 +1964,7 @@ export class ChatStore {
   private replayHistory(events: readonly unknown[]): void {
     this.reset();
     for (const raw of events) {
-      const ev = raw as { type?: string; text?: string };
+      const ev = raw as { type?: string; text?: string; reply_quotes?: unknown };
       if (!ev || typeof ev.type !== "string") continue;
       if (ev.type === "user_message") {
         const userMsg: StoreMessage = {
@@ -1905,6 +1972,7 @@ export class ChatStore {
           role: "user",
           content: [{ type: "text", text: String(ev.text ?? "") }],
           createdAt: new Date(),
+          replyQuotes: readReplyQuotes(ev.reply_quotes),
         };
         this.messages = [...this.messages, userMsg];
         this.currentAssistantId = null; // next assistant content opens a fresh bubble

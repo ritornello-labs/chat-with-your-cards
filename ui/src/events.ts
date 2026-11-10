@@ -217,6 +217,7 @@ export interface ContextEvent {
 export interface UserMessageEvent {
   type: "user_message";
   text: string;
+  reply_quotes?: import("./replyQuotes").ReplyQuote[];
 }
 
 /** Learning nudge/background state (#23d). */
