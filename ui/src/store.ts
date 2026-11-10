@@ -49,7 +49,7 @@ import { postCommand } from "./bridge";
 import { dismissAllPopovers } from "./hooks/useDismiss";
 import { openSettingsSection } from "./settingsNavigation";
 import type { McpResponse } from "./mcpSettings";
-import { MAX_REPLY_QUOTES, MAX_REPLY_QUOTE_CHARS, readReplyQuotes, type ReplyQuote } from "./replyQuotes";
+import { MAX_REPLY_QUOTES, MAX_REPLY_QUOTE_CHARS, MAX_REPLY_COMMENT_CHARS, readReplyQuotes, type ReplyQuote } from "./replyQuotes";
 import type {
   BridgeCommand,
   ChatEvent,
@@ -549,7 +549,7 @@ export class ChatStore {
   // ---- outbound: UI -> Python (postCommand mirrors app.js's post()) ----
 
   private beginUserTurn(text: string, replyQuotes: readonly ReplyQuote[] = []): boolean {
-    if (this.isRunning || !text.trim()) return false;
+    if (this.isRunning || (!text.trim() && !replyQuotes.some((q) => q.comment?.trim()))) return false;
     const userMsg: StoreMessage = {
       id: nextId("u"),
       role: "user",
@@ -572,34 +572,43 @@ export class ChatStore {
   }
 
   sendUserMessage(text: string, includeReplyQuotes = false): void {
-    if (this.isRunning || !text.trim()) return;
+    const quotes = includeReplyQuotes ? this.ui.replyQuotes : [];
+    if (this.isRunning || (!text.trim() && !quotes.some((q) => q.comment?.trim()))) return;
     // The message IS the revision request, so the proposal it replaces stops
     // being the live offer exactly now - not when the button was clicked.
     if (this.pendingSupersedeId) {
       postCommand({ type: "proposal_supersede", id: this.pendingSupersedeId });
       this.pendingSupersedeId = null;
     }
-    const quotes = includeReplyQuotes ? this.ui.replyQuotes : [];
     if (!this.beginUserTurn(text, quotes)) return;
     if (includeReplyQuotes) this.ui = { ...this.ui, replyQuotes: [] };
     postCommand({ type: "send", text, ...(quotes.length ? { reply_quotes: quotes } : {}) });
     this.emit();
   }
 
-  addReplyQuote(messageId: string, text: string): boolean {
+  addReplyQuote(messageId: string, text: string): number | null {
     const index = this.messages.findIndex((m) => m.id === messageId && m.role === "assistant");
-    if (index < 0 || !text.trim()) return false;
+    if (index < 0 || !text.trim()) return null;
+    const source_turn = this.messages.slice(0, index).filter((m) => m.role === "user").length;
+    const existing = this.ui.replyQuotes.findIndex((q) => q.source_turn === source_turn && q.text === text);
+    if (existing >= 0) return existing;
     if (text.length > MAX_REPLY_QUOTE_CHARS || this.ui.replyQuotes.length >= MAX_REPLY_QUOTES) {
       this.dispatch({ type: "notice", text: text.length > MAX_REPLY_QUOTE_CHARS
         ? "Select a shorter passage (up to 8,000 characters)." : "You can reply to up to 8 selections at once." });
-      return false;
+      return null;
     }
-    const source_turn = this.messages.slice(0, index).filter((m) => m.role === "user").length;
     if (!this.ui.replyQuotes.some((q) => q.source_turn === source_turn && q.text === text)) {
       this.ui = { ...this.ui, replyQuotes: [...this.ui.replyQuotes, { text, source_turn }] };
       this.emit();
     }
-    return true;
+    return this.ui.replyQuotes.length - 1;
+  }
+
+  editReplyComment(index: number, comment: string): void {
+    if (comment.length > MAX_REPLY_COMMENT_CHARS) return;
+    this.ui = { ...this.ui, replyQuotes: this.ui.replyQuotes.map((q, i) =>
+      i === index ? { ...q, comment } : q) };
+    this.emit();
   }
 
   removeReplyQuote(index: number): void {

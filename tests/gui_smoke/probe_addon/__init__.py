@@ -2190,15 +2190,26 @@ def _run_checks() -> dict[str, Any]:
         if not quote.strip():
             raise AssertionError("selection was empty")
         attach_quote()
-        _send_message(dock.web, "Explain that selected passage more simply")
+        _eval_js(dock.web,
+            "(() => {const e=document.querySelector('[data-testid=reply-comment]');"
+            "Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call("
+            "e,'Explain this in plainer terms');e.dispatchEvent(new Event('input',{bubbles:true}));})()",
+            DOM_TIMEOUT_MS, "edit passage reply")
+        _wait_until(lambda: _eval_js(dock.web,
+            "!document.querySelector('[data-testid=send]').disabled",
+            DOM_TIMEOUT_MS, "comment-only send enabled"), DOM_TIMEOUT_MS, "comment-only send")
+        _eval_js(dock.web, "document.querySelector('[data-testid=send]').click()",
+                 DOM_TIMEOUT_MS, "send passage reply")
         _wait_until(lambda: not controller.streaming, STREAM_TIMEOUT_MS, "quoted reply")
         transcript_id = controller._transcripts.current_id
         controller._transcripts.flush()
         saved = controller._transcripts.load(transcript_id)
         users = [e for e in saved["events"] if e.get("type") == "user_message"]
-        if users[-1].get("reply_quotes") != [{"text": quote, "source_turn": 1}]:
+        if users[-1].get("reply_quotes") != [{
+            "text": quote, "source_turn": 1, "comment": "Explain this in plainer terms"
+        }]:
             raise AssertionError("quote did not survive native send/transcript boundary")
-        if users[-1]["text"] != "Explain that selected passage more simply":
+        if users[-1]["text"] != "":
             raise AssertionError("quote polluted the user's visible reply")
         controller.load_history(transcript_id)
         _wait_until(lambda: quote_count("[data-testid=sent-reply-quotes] blockquote") == 1,

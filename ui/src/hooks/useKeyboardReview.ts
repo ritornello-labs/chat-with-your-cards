@@ -72,6 +72,9 @@ export function useKeyboardReview(store: ChatStore): void {
 
       const chord = event.metaKey || event.ctrlKey;
       if (!chord || event.altKey) return;
+      // A selection reply is conversation text, not a proposal field. Never
+      // turn its editing shortcuts into an unrelated collection write.
+      if ((event.target as HTMLElement | null)?.closest(".cwyc-reply-comment")) return;
 
       const pending = store.pendingProposalIds();
       if (!pending.length) return;

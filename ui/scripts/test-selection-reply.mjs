@@ -56,8 +56,8 @@ async function click(selector) {
   await rpc('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point });
   await rpc('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point });
 }
-async function type(text) {
-  await js(`(() => { const el=document.querySelector('[data-testid=composer-input]');
+async function type(text, selector = '[data-testid=composer-input]', index = 0) {
+  await js(`(() => { const el=document.querySelectorAll(${JSON.stringify(selector)})[${index}];
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(el,${JSON.stringify(text)});
     el.dispatchEvent(new Event('input',{bubbles:true})); })()`);
 }
@@ -96,10 +96,11 @@ try {
   await screenshot('01-selection-action');
   await click('[data-testid=reply-to-selection]');
   await until(`${draftCount}===1`);
-  assert.equal(await js('document.activeElement.dataset.testid'), 'composer-input');
+  await until("document.activeElement.dataset.testid === 'reply-comment'");
   assert.equal(await js('document.querySelector("[data-testid=composer-input]").value'), 'Can you explain this more simply?');
   assert.equal(await js('document.querySelector("[data-testid=reply-draft-quotes] blockquote").textContent'), quote);
-  // Duplicate selections do not accumulate.
+  await type('Use an example.', '[data-testid=reply-comment]');
+  // Duplicate selections return to the existing editable reply.
   await select('[data-reply-message] [data-reply-text] p');
   await until(`!!${action}`);
   await click('[data-testid=reply-to-selection]');
@@ -110,6 +111,9 @@ try {
   await rpc('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', modifiers: 1 });
   await rpc('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', modifiers: 1 });
   await until(`${draftCount}===2`);
+  await type('Why is this a prerequisite?', '[data-testid=reply-comment]', 1);
+  await type('Use one concrete example.', '[data-testid=reply-comment]', 0);
+  assert.equal(await js('document.querySelector("[data-testid=reply-draft-quotes] blockquote").textContent'), quote);
   await screenshot('02-quoted-draft');
   await screenshot('04-composer-detail', '.cwyc-composer');
   // Remove one without losing the draft, then add it back and send both.
@@ -118,17 +122,20 @@ try {
   assert.equal(await js('document.querySelector("[data-testid=reply-draft-quotes] blockquote").textContent'), other);
   await select('[data-reply-message] [data-reply-text] p');
   await until(`!!${action}`); await click('[data-testid=reply-to-selection]');
+  await type('Use one concrete example.', '[data-testid=reply-comment]', 1);
   await click('[data-testid=send]');
   await until('window.cwycSent.length===1');
   const sent = await js('window.cwycSent[0]');
   assert.equal(sent.text, 'Can you explain this more simply?');
-  assert.deepEqual(sent.reply_quotes, [{text:other,source_turn:2},{text:quote,source_turn:1}]);
+  assert.deepEqual(sent.reply_quotes, [{text:other,source_turn:2,comment:'Why is this a prerequisite?'},{text:quote,source_turn:1,comment:'Use one concrete example.'}]);
   await until(`${draftCount}===0`);
   await until('document.querySelectorAll("[data-testid=sent-reply-quotes] .cwyc-reply-quote").length===2');
   await js("window.chatUI.dispatch({type:'done'})");
   // Saved user events reconstruct the quote UI; raw context tags are never shown.
   await history([...events,{type:'user_message',text:sent.text,reply_quotes:sent.reply_quotes},{type:'assistant_text',text:'Here is a simpler explanation.'}]);
   await until('document.querySelectorAll("[data-testid=sent-reply-quotes] .cwyc-reply-quote").length===2');
+  assert.equal(await js('document.querySelectorAll("[data-testid=sent-reply-comment]").length'), 2);
+  assert.equal(await js('document.querySelectorAll("[data-testid=reply-comment]").length'), 0);
   // User bubbles and reasoning/control surfaces do not offer the action.
   await select('[data-testid=user-message]');
   await until(`!${action}`);
@@ -136,12 +143,35 @@ try {
   await select('[data-reply-message] [data-reply-text] p'); await until(`!!${action}`);
   await rpc('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape'});
   await until(`!${action}`);
-  // Vim focus uses the same quote flow; text remains in the editor.
+  // Per-selection comments can be sent without an additional main message.
+  await select('[data-reply-message] [data-reply-text] p'); await until(`!!${action}`);
+  await click('[data-testid=reply-to-selection]');
+  await type('Can you expand this?', '[data-testid=reply-comment]');
+  await type('');
+  await until("!document.querySelector('[data-testid=send]').disabled");
+  await js("document.querySelector('[data-testid=composer-input]').focus()");
+  await rpc('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter'});
+  await rpc('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter'});
+  await until('window.cwycSent.length===2');
+  const commentOnly = await js('window.cwycSent[1]');
+  assert.equal(commentOnly.text, '');
+  assert.equal(commentOnly.reply_quotes[0].comment, 'Can you expand this?');
+  await js("window.chatUI.dispatch({type:'done'})");
+  // Vim's empty composer can send staged comments as well.
   await js("window.chatUI.dispatch({type:'settings',vim_mode:true})");
   await until("!!document.querySelector('.cwyc-vim-editor .cm-content')");
   await select('[data-reply-message] [data-reply-text] p'); await until(`!!${action}`);
   await click('[data-testid=reply-to-selection]');
-  assert.equal(await js("document.activeElement.classList.contains('cm-content')"), true);
+  await until("document.activeElement.dataset.testid === 'reply-comment'");
+  await type('This is my editable reply.', '[data-testid=reply-comment]');
+  await js("document.querySelector('.cwyc-vim-editor .cm-content').focus()");
+  await rpc('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter'});
+  await rpc('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter'});
+  await until('window.cwycSent.length===3');
+  await js("window.chatUI.dispatch({type:'done'})");
+  await select('[data-reply-message] [data-reply-text] p'); await until(`!!${action}`);
+  await click('[data-testid=reply-to-selection]');
+  await type('Still editable before sending.', '[data-testid=reply-comment]');
   await js("window.chatUI.dispatch({type:'settings',vim_mode:false})");
   await until("!!document.querySelector('[data-testid=composer-input]')");
   await rpc('Emulation.setDeviceMetricsOverride',{width:360,height:760,deviceScaleFactor:1,mobile:false});

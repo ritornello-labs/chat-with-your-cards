@@ -5,6 +5,7 @@ import {
   MessagePrimitive,
   ThreadPrimitive,
   useComposerRuntime,
+  useComposer,
 } from "@assistant-ui/react";
 import { useChatState } from "./ChatRuntimeProvider";
 import type { ChatStore, GradingCardData, ProposalCardData } from "./store";
@@ -258,6 +259,11 @@ function LearningNudgeBar({ store }: { store: ChatStore }) {
 function Composer({ store }: { store: ChatStore }) {
   const { isRunning, ui } = useChatState(store);
   const composer = useComposerRuntime();
+  const composerText = useComposer((state) => state.text);
+  const hasComments = ui.replyQuotes.some((quote) => quote.comment?.trim());
+  const sendCommentsOnly = () => {
+    if (!isRunning && hasComments) store.sendUserMessage("", true);
+  };
 
   // Rotating suggestion for the placeholder (#23b). Pool follows the live
   // context; rotation is time-based and cheap (one state tick).
@@ -281,7 +287,11 @@ function Composer({ store }: { store: ChatStore }) {
   // Make the tooltips true: Esc stops generation while streaming; Shift+Tab
   // cycles permission modes (both classic-UI behaviors, DESIGN.md section 9).
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Escape" && isRunning) {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing &&
+        !composerText.trim() && hasComments && !isRunning) {
+      e.preventDefault();
+      sendCommentsOnly();
+    } else if (e.key === "Escape" && isRunning) {
       e.preventDefault();
       store.cancel();
     } else if (e.key === "Tab" && e.shiftKey) {
@@ -333,13 +343,14 @@ function Composer({ store }: { store: ChatStore }) {
       <BulkProposalBar store={store} />
       <DeferredUndoChip store={store} />
       <LearningNudgeBar store={store} />
-      <ReplyQuotes quotes={ui.replyQuotes} onRemove={(index) => store.removeReplyQuote(index)} />
+      <ReplyQuotes quotes={ui.replyQuotes} onRemove={(index) => store.removeReplyQuote(index)}
+        onCommentChange={(index, comment) => store.editReplyComment(index, comment)} />
       {ui.settings?.vimMode ? (
         <VimComposer store={store} />
       ) : (
         <ComposerPrimitive.Input
           className="cwyc-composer-input"
-          placeholder={placeholder}
+          placeholder={hasComments ? "Add a message (optional)…" : placeholder}
           rows={1}
           data-testid="composer-input"
           onKeyDown={onKeyDown}
@@ -361,6 +372,12 @@ function Composer({ store }: { store: ChatStore }) {
         <div className="cwyc-composer-right">
           <ModelPicker store={store} />
           <ThreadPrimitive.If running={false}>
+            {hasComments && !composerText.trim() ? (
+              <button type="button" className="cwyc-send" aria-label="Send replies"
+                title="Send replies" data-testid="send" onClick={sendCommentsOnly}>
+                <SendIcon />
+              </button>
+            ) : (
             <ComposerPrimitive.Send
               className="cwyc-send"
               aria-label="Send"
@@ -369,6 +386,7 @@ function Composer({ store }: { store: ChatStore }) {
             >
               <SendIcon />
             </ComposerPrimitive.Send>
+            )}
           </ThreadPrimitive.If>
           <ThreadPrimitive.If running>
             <ComposerPrimitive.Cancel

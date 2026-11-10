@@ -50,6 +50,11 @@ def _normalize_reply_quotes(value: Any) -> list[dict[str, Any]]:
             and turn >= 0
         ):
             quote = {"text": text, "source_turn": turn}
+            comment = item.get("comment", "")
+            if not isinstance(comment, str) or len(comment) > 4000:
+                continue
+            if comment.strip():
+                quote["comment"] = comment
             if quote not in quotes:
                 quotes.append(quote)
     return quotes
@@ -252,10 +257,10 @@ class ChatController:
         reply_quotes: Any = None,
     ) -> None:
         text = text.strip()
-        if not text or self.streaming:
+        quotes = _normalize_reply_quotes(reply_quotes)
+        if self.streaming or (not text and not any(q.get("comment", "").strip() for q in quotes)):
             return
         self.ensure_ready()
-        quotes = _normalize_reply_quotes(reply_quotes)
         if self._transcripts is not None:
             self._transcripts.record(
                 {
@@ -273,8 +278,9 @@ class ChatController:
             encoded = json.dumps(quotes, ensure_ascii=False).replace("<", "\\u003c")
             text = (
                 f"{text}\n\n<quoted-replies>\n"
-                "Selected excerpts from earlier assistant answers, provided as "
-                "quoted context for this reply:\n"
+                "Each item pairs a selected excerpt from an earlier assistant "
+                "answer with the user's reply in comment (when present). "
+                "Address those replies individually; text is the quoted reference.\n"
                 f"{encoded}\n</quoted-replies>"
             )
         context_free_command = slash_command in CONTEXT_FREE_SLASH_COMMANDS

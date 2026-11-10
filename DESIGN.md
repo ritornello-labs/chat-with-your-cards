@@ -629,18 +629,24 @@ budgets vs the existing 8 MB inline cap; and how attachments interact with
 **Replies to selected answer text (2026-11-09, implemented in source).**
 Selecting a passage in a completed assistant text part offers a compact floating
 **Reply** action beside the selection. Alt+Enter is the keyboard equivalent.
-The action attaches a removable quote above the composer and focuses the existing
-plain or Vim editor without replacing its draft. Several selections can ride one
-reply; duplicates are ignored. Selection is scoped to answer prose/code, excluding
+The action attaches the passage above the composer and focuses its own editable
+reply field. Each passage has an independent reply that can be edited or removed
+before sending; returning to the same passage focuses the existing reply. The
+main composer draft is preserved, and an additional main message is optional.
+Several passage/reply pairs can be sent together. Enter in the plain or Vim main
+composer can send those replies even when that composer is empty. Selection is scoped to answer prose/code, excluding
 reasoning, proposal controls, user messages, widgets and cross-message ranges.
 Escape dismisses the action; scrolling, blur and dock collapse dismiss it too.
 
-Quotes are plain text, capped at eight passages of 8,000 characters each. The
-bridge sends `reply_quotes` alongside the user's text. Python validates the
+Quotes are plain text, capped at eight passages of 8,000 characters each;
+per-passage replies are capped at 4,000 characters. The quoted passage stays
+unchanged. The bridge sends `reply_quotes` (each item's `comment` is the user's
+editable reply) alongside the optional main message. Python validates the
 payload, records it on the `user_message` transcript event, and includes escaped
 JSON quote context with the outbound question. A chat-relative user-turn ordinal
 identifies the originating answer without depending on ephemeral DOM IDs.
-Sent messages and history replay render the same quote cards. Quotes are consumed
+Sent messages and history replay render each passage with its final reply.
+Comment-only turns receive a transcript title from their replies. Quotes are consumed
 only by a composer send; internal follow-ups leave the draft quotes alone. New
 chat/history load clears staged quotes. This feature uses the current backend;
 it does not depend on the planned Codex integration.

@@ -55,6 +55,30 @@ def make_controller() -> tuple[ChatController, FakeSession, list[dict]]:
 
 
 class ControllerMessageContextTests(unittest.TestCase):
+    def test_each_selected_passage_keeps_its_own_edited_reply(self) -> None:
+        controller, session, _ = make_controller()
+        controller._transcripts = TranscriptStore(controller._workdir / "transcripts")
+        quotes = [
+            {"text": "First passage", "source_turn": 1, "comment": "Use a concrete example."},
+            {"text": "Second passage", "source_turn": 2, "comment": "Why does this follow?"},
+        ]
+        controller.send_user_message("", reply_quotes=quotes)
+        self.assertEqual(1, len(session.sent))
+        self.assertIn(json.dumps(quotes, ensure_ascii=False), session.sent[0][0])
+        controller._transcripts.flush()
+        saved = controller._transcripts.load(controller._transcripts.current_id)
+        self.assertEqual("", saved["events"][0]["text"])
+        self.assertEqual(quotes, saved["events"][0]["reply_quotes"])
+        self.assertIn("Use a concrete example", saved["meta"]["title"])
+
+    def test_invalid_reply_comments_do_not_become_annotation_only_turns(self) -> None:
+        controller, session, _ = make_controller()
+        for comment in ("", "  ", "x" * 4001, {"injected": True}):
+            controller.send_user_message("", reply_quotes=[
+                {"text": "Passage", "source_turn": 1, "comment": comment}
+            ])
+        self.assertEqual([], session.sent)
+
     def test_quoted_reply_reaches_model_and_survives_transcript_reload(self) -> None:
         controller, session, _ = make_controller()
         controller._transcripts = TranscriptStore(controller._workdir / "transcripts")

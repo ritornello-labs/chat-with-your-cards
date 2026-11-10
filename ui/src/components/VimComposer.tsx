@@ -80,7 +80,10 @@ export function VimComposer({ store }: { store: ChatStore }) {
           run: (view) => {
             if (runningRef.current) return true; // parity: send disabled while streaming
             const text = view.state.doc.toString();
-            if (!text.trim()) return true;
+            if (!text.trim()) {
+              storeRef.current.sendUserMessage("", true);
+              return true;
+            }
             const c = composerRef.current;
             c.setText(text);
             c.send(); // the post-send clear flows back via the value-sync effect

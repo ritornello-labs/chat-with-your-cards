@@ -2819,7 +2819,7 @@ body {
   flex-direction: column;
   gap: 7px;
   min-width: 0;
-  max-height: min(180px, 24vh);
+  max-height: min(320px, 42vh);
   overflow-y: auto;
   padding: 2px;
 }
@@ -2866,6 +2866,30 @@ body {
 }
 #cwyc-root .cwyc-app .cwyc-reply-remove:hover { background: var(--cwyc-surface-raised); color: var(--cwyc-fg); }
 .cwyc-msg-user .cwyc-reply-quotes { margin: 1px 0 6px; }
+.cwyc-reply-comment {
+  display: block;
+  width: 100%;
+  min-height: 46px;
+  max-height: 120px;
+  margin: 7px 0 0;
+  padding: 7px 8px;
+  resize: vertical;
+  border: 1px solid var(--cwyc-border);
+  border-radius: 7px;
+  background: var(--cwyc-surface-raised);
+  color: var(--cwyc-fg);
+  font: 13px/1.45 var(--cwyc-font);
+}
+.cwyc-reply-comment:focus { border-color: var(--cwyc-accent); }
+.cwyc-reply-comment::placeholder { color: var(--cwyc-fg-subtle); }
+.cwyc-reply-sent-comment {
+  margin-top: 7px;
+  padding-top: 6px;
+  border-top: 1px solid var(--cwyc-border-subtle);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
 
 /* The framed writing surface. Both faces of the composer (plain textarea and
    the vim/CodeMirror editor) share it, so focus styling lives in one place.

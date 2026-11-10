@@ -34,9 +34,14 @@ export function SelectionReply({ store }: { store: ChatStore }) {
   const [selection, setSelection] = useState<SelectedReply | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const attach = useCallback((candidate: SelectedReply) => {
-    if (store.addReplyQuote(candidate.messageId, candidate.text)) {
+    const index = store.addReplyQuote(candidate.messageId, candidate.text);
+    if (index !== null) {
       window.getSelection()?.removeAllRanges();
-      window.chatUI?.focusComposer();
+      // Find the selected passage, including an existing one: returning to a
+      // selection edits its reply instead of adding another quote card.
+      requestAnimationFrame(() => document.querySelectorAll<HTMLTextAreaElement>(
+        "[data-testid=reply-comment]"
+      )[index]?.focus());
     }
     setSelection(null);
   }, [store]);

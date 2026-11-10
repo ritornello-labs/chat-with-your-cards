@@ -491,9 +491,10 @@ this test at a personal browser profile. Then run:
 node scripts/test-selection-reply.mjs http://127.0.0.1:5194 http://127.0.0.1:9334 /absolute/temporary/captures
 ```
 
-The synthetic replayer checks floating selection actions, multi-quote send and
-removal, draft preservation, duplicate suppression, history replay, Escape,
-Alt+Enter, Vim focus, and narrow/dark layouts. Screenshots and failure captures
+The synthetic replayer checks floating selection actions, independent editable
+replies, multi-passage send/removal, main-draft preservation, duplicate focus,
+history replay, comment-only sends, Escape, Alt+Enter, plain/Vim Enter, and
+narrow/dark layouts. Screenshots and failure captures
 belong outside Git. Stop the managed preview/browser after testing. The native
 Anki smoke separately exercises quote selection, the real bridge, persisted
 transcripts, history reload and new-chat cleanup. `CWYC_SELECTION_SCREENSHOT`
