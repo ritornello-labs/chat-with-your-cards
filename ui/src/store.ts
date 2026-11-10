@@ -362,6 +362,7 @@ export interface SetAsideEntry {
 
 export interface UiState {
   readonly replyQuotes: readonly ReplyQuote[];
+  readonly replyEditorOpen: boolean;
   readonly agent: AgentState;
   readonly openTarget: "terminal" | "desktop";
   readonly meta: CollectionMeta;
@@ -445,6 +446,7 @@ const EMPTY_PINS: PinsState = { deck: "", note_type: "", tags: [], fields: {} };
 
 const DEFAULT_UI_STATE: UiState = {
   replyQuotes: [],
+  replyEditorOpen: false,
   agent: { backend: "auto", model: "", effort: "", mode: "default", fast: false, tools: "sandbox" },
   openTarget: "terminal",
   meta: { decks: [], noteTypes: [], tags: [] },
@@ -572,6 +574,7 @@ export class ChatStore {
   }
 
   sendUserMessage(text: string, includeReplyQuotes = false): void {
+    if (includeReplyQuotes && this.ui.replyEditorOpen) return;
     const quotes = includeReplyQuotes ? this.ui.replyQuotes : [];
     if (this.isRunning || (!text.trim() && !quotes.some((q) => q.comment?.trim()))) return;
     // The message IS the revision request, so the proposal it replaces stops
@@ -608,6 +611,12 @@ export class ChatStore {
     if (comment.length > MAX_REPLY_COMMENT_CHARS) return;
     this.ui = { ...this.ui, replyQuotes: this.ui.replyQuotes.map((q, i) =>
       i === index ? { ...q, comment } : q) };
+    this.emit();
+  }
+
+  setReplyEditorOpen(open: boolean): void {
+    if (open === this.ui.replyEditorOpen) return;
+    this.ui = { ...this.ui, replyEditorOpen: open };
     this.emit();
   }
 
@@ -1928,6 +1937,7 @@ export class ChatStore {
       ...this.ui,
       ledger: { sessionTag: "", entries: [] },
       replyQuotes: [],
+      replyEditorOpen: false,
       notice: null,
       activeProposalId: null,
       attachments: [],

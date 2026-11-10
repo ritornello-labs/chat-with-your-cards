@@ -2,11 +2,11 @@
 
 ## Unreleased
 
-- Reply to selected answer text with a floating Reply action or Alt+Enter.
-  Give each selected passage its own editable reply, preserve the main draft,
-  and send multiple passage/reply pairs with or without an additional message.
-  Preserve the final replies in agent context and saved history. Supports both
-  the plain and Vim main composers.
+- Add source-anchored annotations: select text, choose Add to chat, and add an
+  optional comment in a popover. Numbered markers reopen comments with explicit
+  Save, Cancel and Delete. A compact annotation chip replaces stacked draft
+  editors. Preserve the main draft and send saved annotations together, with or
+  without an additional message. Keep final comments in agent context/history.
 
 - Add reviewed agent configuration of Anki profile settings: sync server URL,
   automatic/media sync, background media interval and network timeout. Include

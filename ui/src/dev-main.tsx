@@ -14,6 +14,7 @@ import { ChatStore } from "./store";
 import { installChatUI, startReadyHandshake } from "./bridge";
 import { installDevReplayer } from "./dev/replayer";
 import "./styles.css";
+import "./annotations.css";
 import "./dev/dev-harness.css";
 
 installDevReplayer();

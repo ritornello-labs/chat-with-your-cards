@@ -26,6 +26,7 @@ import { ToolApprovalChip } from "./components/ToolApprovalChip";
 import { GradingCard } from "./components/GradingCard";
 import { ReplyQuotes } from "./components/ReplyQuotes";
 import { SelectionReply } from "./components/SelectionReply";
+import { AnnotationSummary } from "./components/AnnotationSummary";
 import { readReplyQuotes, type ReplyQuote } from "./replyQuotes";
 
 function UserMessage({ quotes }: { quotes: readonly ReplyQuote[] }) {
@@ -262,7 +263,7 @@ function Composer({ store }: { store: ChatStore }) {
   const composerText = useComposer((state) => state.text);
   const hasComments = ui.replyQuotes.some((quote) => quote.comment?.trim());
   const sendCommentsOnly = () => {
-    if (!isRunning && hasComments) store.sendUserMessage("", true);
+    if (!isRunning && hasComments && !ui.replyEditorOpen) store.sendUserMessage("", true);
   };
 
   // Rotating suggestion for the placeholder (#23b). Pool follows the live
@@ -287,6 +288,10 @@ function Composer({ store }: { store: ChatStore }) {
   // Make the tooltips true: Esc stops generation while streaming; Shift+Tab
   // cycles permission modes (both classic-UI behaviors, DESIGN.md section 9).
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey && ui.replyEditorOpen) {
+      e.preventDefault();
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing &&
         !composerText.trim() && hasComments && !isRunning) {
       e.preventDefault();
@@ -343,8 +348,7 @@ function Composer({ store }: { store: ChatStore }) {
       <BulkProposalBar store={store} />
       <DeferredUndoChip store={store} />
       <LearningNudgeBar store={store} />
-      <ReplyQuotes quotes={ui.replyQuotes} onRemove={(index) => store.removeReplyQuote(index)}
-        onCommentChange={(index, comment) => store.editReplyComment(index, comment)} />
+      <AnnotationSummary store={store} />
       {ui.settings?.vimMode ? (
         <VimComposer store={store} />
       ) : (
@@ -374,7 +378,7 @@ function Composer({ store }: { store: ChatStore }) {
           <ThreadPrimitive.If running={false}>
             {hasComments && !composerText.trim() ? (
               <button type="button" className="cwyc-send" aria-label="Send replies"
-                title="Send replies" data-testid="send" onClick={sendCommentsOnly}>
+                title="Send replies" data-testid="send" disabled={ui.replyEditorOpen} onClick={sendCommentsOnly}>
                 <SendIcon />
               </button>
             ) : (
@@ -383,6 +387,7 @@ function Composer({ store }: { store: ChatStore }) {
               aria-label="Send"
               title="Send (Enter)"
               data-testid="send"
+              disabled={ui.replyEditorOpen}
             >
               <SendIcon />
             </ComposerPrimitive.Send>
@@ -441,7 +446,7 @@ function InlineImage({ data }: { data: { src: string; caption: string } }) {
 export function Thread({ store }: { store: ChatStore }) {
   const { ui } = useChatState(store);
   return (
-    <ThreadPrimitive.Root className="cwyc-thread">
+    <ThreadPrimitive.Root className={"cwyc-thread" + (ui.replyQuotes.length ? " cwyc-has-annotations" : "")}>
       {/* Announcements come from here, NOT from a live region over the
           transcript: a reply streams token by token, and a live transcript
           re-announces the growing text on every delta (task #22). */}

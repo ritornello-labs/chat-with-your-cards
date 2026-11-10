@@ -79,6 +79,7 @@ export function VimComposer({ store }: { store: ChatStore }) {
           key: "Enter",
           run: (view) => {
             if (runningRef.current) return true; // parity: send disabled while streaming
+            if (storeRef.current.getSnapshot().ui.replyEditorOpen) return true;
             const text = view.state.doc.toString();
             if (!text.trim()) {
               storeRef.current.sendUserMessage("", true);

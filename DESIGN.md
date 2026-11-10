@@ -627,16 +627,28 @@ budgets vs the existing 8 MB inline cap; and how attachments interact with
 ## 9. UI / UX
 
 **Replies to selected answer text (2026-11-09, implemented in source).**
-Selecting a passage in a completed assistant text part offers a compact floating
-**Reply** action beside the selection. Alt+Enter is the keyboard equivalent.
-The action attaches the passage above the composer and focuses its own editable
-reply field. Each passage has an independent reply that can be edited or removed
-before sending; returning to the same passage focuses the existing reply. The
-main composer draft is preserved, and an additional main message is optional.
-Several passage/reply pairs can be sent together. Enter in the plain or Vim main
-composer can send those replies even when that composer is empty. Selection is scoped to answer prose/code, excluding
-reasoning, proposal controls, user messages, widgets and cross-message ranges.
-Escape dismisses the action; scrolling, blur and dock collapse dismiss it too.
+Selecting a passage in a completed assistant text part offers **Add to chat**
+(Alt+Enter also works). A small popover beside the passage collects an optional
+comment. Adding it leaves a blue numbered marker at the source and a compact
+**N annotations** chip above the main composer; there are no stacked draft
+editors. The original composer draft stays intact. Source ranges and CSS
+Highlights preserve selection context without rewriting rendered markdown.
+
+Clicking a marker reopens its comment with **Save**, **Cancel** and **Delete**.
+Edits stay local to that editor until Save. Cancel preserves the saved comment;
+cancelling a new annotation removes its provisional entry. Long comments grow
+and then scroll within the popover. The chip opens a single annotation directly,
+or lists several for navigation back to their sources. An open editor blocks
+sending until it is saved or dismissed, so an unfinished edit cannot be sent as
+though it had been committed. Several saved annotations can be sent together,
+with or without a separate message, from the plain or Vim main composer.
+
+Selection is scoped to answer prose/code, excluding reasoning, proposal
+controls, user messages, widgets and cross-message ranges. Escape or an outside
+click cancels the editor. Dock collapse also dismisses it. Source markers
+reposition on scrolling and resize; window blur only dismisses the selection
+action, preserving an open comment. New chat/history load clears draft anchors
+and the editor. The separate side-chat action is not implemented by this work.
 
 Quotes are plain text, capped at eight passages of 8,000 characters each;
 per-passage replies are capped at 4,000 characters. The quoted passage stays

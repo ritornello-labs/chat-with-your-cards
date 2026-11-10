@@ -1,0 +1,68 @@
+/* Inline annotations: persistent source markers and a transactional editor. */
+::highlight(cwyc-annotations) { background: rgba(59,130,246,.18); }
+::highlight(cwyc-active-annotation) { background: rgba(59,130,246,.34); }
+#cwyc-root .cwyc-app .cwyc-annotation-marker {
+  position: fixed; z-index: 105; display: grid; place-items: center;
+  width: 24px; height: 26px; border-radius: 13px 13px 13px 5px;
+  color: white; background: #2563eb; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+#cwyc-root .cwyc-app .cwyc-annotation-marker:hover { background: #1d4ed8; }
+#cwyc-root .cwyc-app .cwyc-annotation-editor {
+  position: fixed; bottom: auto; right: auto; z-index: 120;
+  min-width: 0; max-width: none; padding: 10px;
+  border: 1px solid var(--cwyc-border-subtle); border-radius: 22px;
+  background: var(--cwyc-surface-raised); color: var(--cwyc-fg);
+  box-shadow: 0 5px 24px #0002; overflow: auto;
+}
+.cwyc-annotation-input-row { display: flex; align-items: flex-end; gap: 8px; }
+.cwyc-annotation-input.cwyc-reply-comment {
+  flex: 1 1 auto; min-width: 0; width: 100%; min-height: 28px; max-height: 190px;
+  margin: 0; padding: 4px 6px; border: 0; border-radius: 0;
+  background: transparent; color: var(--cwyc-fg);
+  font: 13.5px/1.5 var(--cwyc-font); resize: none; overflow-y: auto; overflow-wrap: anywhere;
+}
+#cwyc-root .cwyc-annotation-input:focus-visible { outline: none; }
+.cwyc-annotation-input::placeholder { color: var(--cwyc-fg-faint); }
+#cwyc-root .cwyc-app .cwyc-annotation-add,
+#cwyc-root .cwyc-app .cwyc-annotation-save {
+  flex: 0 0 auto; background: var(--cwyc-fg); color: var(--cwyc-surface-raised);
+  border-radius: 20px; padding: 7px 13px; cursor: pointer;
+}
+#cwyc-root .cwyc-app .cwyc-annotation-add {
+  display: grid; place-items: center; width: 34px; height: 34px; padding: 0; font-size: 22px;
+}
+.cwyc-annotation-actions { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+#cwyc-root .cwyc-app .cwyc-annotation-delete {
+  display: grid; place-items: center; width: 30px; height: 32px; margin-right: auto;
+  border-radius: 8px; cursor: pointer;
+}
+#cwyc-root .cwyc-app .cwyc-annotation-cancel {
+  padding: 6px 12px; border: 1px solid var(--cwyc-border); border-radius: 20px; cursor: pointer;
+}
+#cwyc-root .cwyc-app .cwyc-annotation-delete:hover,
+#cwyc-root .cwyc-app .cwyc-annotation-cancel:hover { background: var(--cwyc-surface); }
+.cwyc-annotation-summary { position: relative; align-self: flex-start; }
+#cwyc-root .cwyc-app .cwyc-annotation-summary-button {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px;
+  border: 1px solid var(--cwyc-border); border-radius: 10px;
+  background: var(--cwyc-surface-raised); font-size: 12px; cursor: pointer;
+}
+#cwyc-root .cwyc-app .cwyc-annotation-summary-button:hover { background: var(--cwyc-surface); }
+.cwyc-annotation-list {
+  position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 115;
+  width: min(330px, calc(100vw - 40px)); max-height: 230px; padding: 5px; overflow-y: auto;
+}
+#cwyc-root .cwyc-app .cwyc-annotation-list button {
+  display: flex; align-items: flex-start; gap: 8px; width: 100%; padding: 8px;
+  text-align: left; border-radius: 7px; cursor: pointer;
+}
+#cwyc-root .cwyc-app .cwyc-annotation-list button:hover { background: var(--cwyc-surface); }
+.cwyc-annotation-list-number { color: #2563eb; font-weight: 600; }
+.cwyc-annotation-excerpt, .cwyc-annotation-comment-preview {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  overflow: hidden; overflow-wrap: anywhere;
+}
+.cwyc-annotation-excerpt { font-size: 11px; color: var(--cwyc-fg-subtle); }
+.cwyc-annotation-comment-preview { margin-top: 3px; font-size: 12px; }
+
+.cwyc-has-annotations .cwyc-row-assistant { padding-right: 22px; }

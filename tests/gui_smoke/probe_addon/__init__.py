@@ -2171,7 +2171,7 @@ def _run_checks() -> dict[str, Any]:
         def select_passage() -> str:
             return _eval_js(dock.web,
                 "(() => {const p=document.querySelector('[data-reply-text] p');"
-                "p.scrollIntoView({block:'nearest'});const r=document.createRange();"
+                "document.activeElement?.blur();p.scrollIntoView({block:'nearest'});const r=document.createRange();"
                 "r.selectNodeContents(p);const s=getSelection();s.removeAllRanges();"
                 "s.addRange(r);document.dispatchEvent(new Event('selectionchange'));"
                 "return s.toString()})()",
@@ -2183,8 +2183,8 @@ def _run_checks() -> dict[str, Any]:
             _eval_js(dock.web,
                 "document.querySelector('[data-testid=reply-to-selection]').click()",
                 DOM_TIMEOUT_MS, "attach quote")
-            _wait_until(lambda: quote_count("[data-testid=reply-draft-quotes] blockquote") == 1,
-                        DOM_TIMEOUT_MS, "draft quote")
+            _wait_until(lambda: quote_count("[data-testid=annotation-editor]") == 1,
+                        DOM_TIMEOUT_MS, "inline annotation editor")
 
         quote = select_passage()
         if not quote.strip():
@@ -2195,6 +2195,25 @@ def _run_checks() -> dict[str, Any]:
             "Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call("
             "e,'Explain this in plainer terms');e.dispatchEvent(new Event('input',{bubbles:true}));})()",
             DOM_TIMEOUT_MS, "edit passage reply")
+        _eval_js(dock.web, "document.querySelector('[data-testid=save-annotation]').click()",
+                 DOM_TIMEOUT_MS, "save annotation")
+        _wait_until(lambda: quote_count("[data-testid=annotation-editor]") == 0,
+                    DOM_TIMEOUT_MS, "saved annotation editor closes")
+        _eval_js(dock.web, "document.querySelector('[data-testid=annotation-summary]').click()",
+                 DOM_TIMEOUT_MS, "reopen saved annotation")
+        _wait_until(lambda: quote_count("[data-testid=annotation-editor]") == 1,
+                    DOM_TIMEOUT_MS, "saved annotation editor")
+        _wait_until(lambda: quote_count("[data-testid=annotation-marker]") == 1,
+                    DOM_TIMEOUT_MS, "numbered source marker")
+        _eval_js(dock.web,
+            "(() => {const e=document.querySelector('[data-testid=reply-comment]');"
+            "Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call("
+            "e,'This edit must be cancelled');e.dispatchEvent(new Event('input',{bubbles:true}));})()",
+            DOM_TIMEOUT_MS, "draft edit before cancel")
+        _eval_js(dock.web, "document.querySelector('[data-testid=cancel-annotation]').click()",
+                 DOM_TIMEOUT_MS, "cancel annotation edit")
+        _wait_until(lambda: quote_count("[data-testid=annotation-editor]") == 0,
+                    DOM_TIMEOUT_MS, "cancelled editor closes")
         _wait_until(lambda: _eval_js(dock.web,
             "!document.querySelector('[data-testid=send]').disabled",
             DOM_TIMEOUT_MS, "comment-only send enabled"), DOM_TIMEOUT_MS, "comment-only send")
